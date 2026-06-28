@@ -187,24 +187,82 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
         <div class="toolbar" id="regChips"></div>
         <table class="tbl"><thead><tr><th>รหัส / ชื่อเอกสาร</th><th>หมวดหมู่</th><th>เวอร์ชัน</th><th>ตำแหน่งกระดาษ</th><th>สแกน</th><th>สถานะ</th></tr></thead><tbody id="regBody"></tbody></table>
       </section>
-      <!-- SCAN -->
+      <!-- SCAN (wizard) -->
       <section class="view" id="v-scan">
-        <div class="scan-grid">
-          <div>
-            <label class="dropzone" for="scanFile"><div class="big">🖨️</div><h3>คลิกเพื่อเลือกรูปเอกสาร แล้วอ่านด้วย OCR</h3><p>รองรับ JPG, PNG · อ่านภาษาไทย+อังกฤษ ในเบราว์เซอร์ (Tesseract.js)</p><div class="btn primary" style="margin-top:16px">📷 เลือกรูปเอกสาร</div></label><input type="file" id="scanFile" accept="image/*" style="display:none" onchange="runOCR(event)"><div style="text-align:center;margin-top:10px"><button class="btn ghost sm" onclick="simScan()">หรือลองตัวอย่างจำลอง (เดโม)</button></div>
-            <div class="panel" style="margin-top:18px"><h3>ขั้นตอนการแปลงกระดาษเป็นดิจิทัล</h3>
-              <div class="body tl" style="padding-left:44px;padding-top:14px">
-                <div class="it done"><div class="t">1. สแกน / ถ่ายภาพเอกสาร</div><div class="d">ได้ไฟล์ภาพหรือ PDF</div></div>
-                <div class="it done"><div class="t">2. OCR อ่านข้อความ</div><div class="d">ดึงรหัส ชื่อ วันที่ อัตโนมัติ</div></div>
-                <div class="it now"><div class="t">3. ตรวจ &amp; จัดหมวดหมู่</div><div class="d">ยืนยันข้อมูล + ระบุตำแหน่งกระดาษ</div></div>
-                <div class="it"><div class="t">4. บันทึกเข้าทะเบียน</div><div class="d">ค้นหาและติดตามสถานะได้ทันที</div></div>
-              </div>
+        <style>
+        .wzwrap{max-width:780px;margin:0 auto}
+        .wz-chip{padding:10px 14px;border-radius:11px;font-size:13px;margin:2px 0 12px;border:1px solid var(--line);background:#EEF2F7;color:#475569}
+        .wz-steps{display:flex;gap:8px;margin-bottom:18px}
+        .wz-stp{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;padding:10px 8px;border:1px solid var(--line);background:#fff;border-radius:11px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;font-family:inherit}
+        .wz-stp b{display:inline-flex;width:21px;height:21px;align-items:center;justify-content:center;border-radius:50%;background:#EEF2F7;color:var(--muted);font-size:12px}
+        .wz-stp.active{color:var(--brand);border-color:var(--brand)}
+        .wz-stp.active b{background:var(--brand);color:#fff}
+        .wz-stp.done b{background:var(--green);color:#fff}
+        .wz-h{font-size:15px;font-weight:700;margin:0 0 14px}
+        .wz-cards{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+        .wz-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:18px 16px;border:1.5px solid var(--line);border-radius:14px;background:#fff;cursor:pointer;font-family:inherit;text-align:left;font-size:24px;transition:.15s}
+        .wz-card b{font-size:14px;color:var(--ink)}
+        .wz-card span{font-size:12px;color:var(--muted);font-weight:400}
+        .wz-card:hover{border-color:var(--brand);box-shadow:0 4px 14px rgba(83,74,183,.12)}
+        .wz-card.sel{border-color:var(--brand);background:var(--brand-50,#EEEDFE)}
+        .wz-cap{display:flex;flex-direction:column;align-items:center;gap:16px;padding:8px 0}
+        .wz-capbtns{display:flex;gap:12px;width:100%;flex-wrap:wrap}
+        .wz-bigbtn{flex:1;min-width:160px;justify-content:center;padding:16px;font-size:15px;border-radius:13px}
+        .wz-back{margin-top:16px;background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;font-family:inherit;padding:6px}
+        .wz-adv{margin-top:24px;border-top:1px solid var(--line);padding-top:12px}
+        .wz-adv summary{cursor:pointer;font-size:12px;color:var(--muted);user-select:none}
+        @media(max-width:720px){
+          .wz-cards{grid-template-columns:1fr}
+          .wz-steps{gap:5px}
+          .wz-stp{flex-direction:column;gap:3px;font-size:11px;padding:8px 4px}
+          .wz-bigbtn{min-width:100%}
+        }
+        </style>
+        <div class="wzwrap">
+          <div id="aiStatus" class="wz-chip">&#9203; กำลังตรวจการเชื่อมต่อ AI...</div>
+          <div class="wz-steps">
+            <button type="button" class="wz-stp active" data-step="1" onclick="wzGo(1)"><b>1</b><span>เลือกฟอร์ม</span></button>
+            <button type="button" class="wz-stp" data-step="2" onclick="wzGo(2)"><b>2</b><span>ถ่าย / อัปโหลด</span></button>
+            <button type="button" class="wz-stp" data-step="3" onclick="wzGo(3)"><b>3</b><span>ตรวจ &amp; บันทึก</span></button>
+          </div>
+
+          <div class="wz-pane" data-pane="1">
+            <h3 class="wz-h">1 &middot; เลือกชนิดฟอร์มที่จะสแกน</h3>
+            <div class="wz-cards" id="formCards">
+              <button type="button" class="wz-card sel" data-t="receive">📄<b>รับงานติดตั้ง &amp; ส่งมอบ</b><span>ลูกค้า · พื้นที่ · เวลา</span></button>
+              <button type="button" class="wz-card" data-t="issue">📦<b>เบิก-ใช้-คืนสินค้า</b><span>เลขบิล · ตารางม้วน</span></button>
+              <button type="button" class="wz-card" data-t="sign">✍️<b>ข้อกำหนด + ลายเซ็น</b><span>ลายเซ็น · วันที่</span></button>
             </div>
           </div>
-          <div class="scan-doc">
-            <div class="scan-prev" id="scanPrev"><div style="font-size:40px">📄</div><div style="margin-top:10px;font-size:13px">ยังไม่มีเอกสาร — กดสแกนเพื่อเริ่ม</div></div>
-            <div style="padding:18px" id="ocrForm"><div class="empty"><div class="big">⌨︎</div>ข้อมูล OCR จะแสดงที่นี่หลังสแกน</div></div>
+
+          <div class="wz-pane" data-pane="2" hidden>
+            <h3 class="wz-h">2 &middot; ถ่ายรูปหรือเลือกไฟล์เอกสาร</h3>
+            <div class="wz-cap">
+              <div class="wz-capbtns">
+                <button type="button" class="btn primary wz-bigbtn" onclick="document.getElementById('scanCam').click()">📷 ถ่ายรูปเอกสาร</button>
+                <button type="button" class="btn wz-bigbtn" onclick="document.getElementById('scanFile').click()">🖼️ เลือกจากเครื่อง</button>
+              </div>
+              <input type="file" id="scanCam" accept="image/*" capture="environment" style="display:none" onchange="handleScan(event)">
+              <input type="file" id="scanFile" accept="image/*" style="display:none" onchange="handleScan(event)">
+              <div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center">
+                <button type="button" class="btn ghost sm" onclick="wzDemo()">ลองตัวอย่างจำลอง (เดโม)</button>
+                <button type="button" class="btn ghost sm" onclick="wzManual()">กรอกเองโดยไม่สแกน →</button>
+              </div>
+            </div>
+            <button type="button" class="wz-back" onclick="wzGo(1)">← เปลี่ยนชนิดฟอร์ม</button>
           </div>
+
+          <div class="wz-pane" data-pane="3" hidden>
+            <h3 class="wz-h">3 &middot; ตรวจ &amp; แก้ข้อมูล แล้วบันทึก</h3>
+            <div class="scan-prev" id="scanPrev" style="min-height:150px;margin-bottom:14px"><div style="font-size:40px">📄</div><div style="margin-top:10px;font-size:13px">ยังไม่มีเอกสาร — กดสแกนเพื่อเริ่ม</div></div>
+            <div id="ocrForm"><div class="empty"><div class="big">⌨︎</div>ข้อมูลจะแสดงที่นี่หลังสแกน</div></div>
+            <button type="button" class="wz-back" onclick="wzGo(2)">← ถ่าย/อัปโหลดใหม่</button>
+          </div>
+
+          <details class="wz-adv">
+            <summary>⚙ ตั้งค่าเซิร์ฟเวอร์ AI (ขั้นสูง)</summary>
+            <div class="ocr-field" style="margin-top:10px"><label style="font-weight:600">🧠 Backend OCR ลายมือ</label><input id="ocrBackend" placeholder="https://floor-ocr.vercel.app — เว้นว่าง = OCR ในเครื่อง" style="padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box"></div>
+          </details>
         </div>
       </section>
       <!-- SEARCH -->
@@ -639,6 +697,25 @@ function runServerOCR(f){
 })();
 
 
+/* ===== Scan wizard controller ===== */
+function wzGo(n){
+  document.querySelectorAll('#v-scan .wz-pane').forEach(function(p){ p.hidden=(p.getAttribute('data-pane')!==String(n)); });
+  document.querySelectorAll('#v-scan .wz-stp').forEach(function(s){ var sn=+s.getAttribute('data-step'); s.classList.toggle('active',sn===n); s.classList.toggle('done',sn<n); });
+}
+function wzPickType(t){ if(!TPL[t])return; curType=t;
+  document.querySelectorAll('#formCards .wz-card').forEach(function(c){ c.classList.toggle('sel',c.getAttribute('data-t')===t); });
+  wzGo(2);
+}
+function handleScan(e){ if(!e.target.files||!e.target.files[0])return; wzGo(3); runOCR(e); }
+function wzDemo(){ wzGo(3); simScan(); }
+function wzManual(){ wzGo(3); var sp=document.getElementById('scanPrev'); if(sp)sp.innerHTML='<div style="font-size:36px">✍️</div><div style="margin-top:8px;font-size:13px;color:var(--muted)">กรอกข้อมูลเองโดยไม่สแกน</div>'; renderTplForm(); }
+(function(){
+  var cards=document.getElementById('formCards');
+  if(cards) cards.addEventListener('click',function(ev){ var b=ev.target.closest('.wz-card'); if(b)wzPickType(b.getAttribute('data-t')); });
+  var sNav=document.querySelector('#nav a[data-view="scan"]');
+  if(sNav) sNav.addEventListener('click',function(){ setTimeout(function(){ wzGo(1); },0); });
+})();
+
 /* ===== Install Pipeline module (merged) — real Supabase install_jobs ===== */
 const IP_STAGES=[["รับออร์เดอร์","#534AB7","#EEEDFE"],["รอใส่ข้อมูล (ขาย)","#185FA5","#E6F1FB"],["โทรนัด (แอดมิน)","#854F0B","#FAEEDA"],["ทีมรับงาน","#0F6E56","#E1F5EE"],["กำลังเดินทาง","#0F6E56","#E1F5EE"],["ถึงหน้างาน","#0F6E56","#E1F5EE"],["เสร็จงาน","#15935E","#E5F4EC"]];
 const IP_PRODUCTS={"LDSSF001":[1.4,2.0],"LDSSF002":[1.4,2.0],"LDSSF003":[1.1,1.4],"LDSSF004":[1.1,1.4]};
@@ -744,3 +821,4 @@ function ipRenderQueue(){var nbq=$('#nbQ');if(nbq)nbq.textContent=IP_QUEUE.lengt
 })();
 
 </script>
+</body></html>
