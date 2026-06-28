@@ -585,7 +585,7 @@ function runOCR(e){var f=e.target.files[0];if(!f)return;var url=URL.createObject
 
 
 /* ===== UX: default backend URL + live AI status chip + auto-fallback ===== */
-try{ var _sv=localStorage.getItem('mpd_ocr_backend'); OCR_BACKEND=(_sv!==null?_sv:'http://localhost:8000'); }catch(e){ OCR_BACKEND='http://localhost:8000'; }
+try{ var _sv=localStorage.getItem('mpd_ocr_backend'); OCR_BACKEND=(_sv!==null?_sv:'https://floor-ocr.vercel.app'); }catch(e){ OCR_BACKEND='https://floor-ocr.vercel.app'; }
 function _aiChip(state,extra){
   var el=document.getElementById('aiStatus'); if(!el)return;
   var map={
@@ -744,4 +744,3 @@ function ipRenderQueue(){var nbq=$('#nbQ');if(nbq)nbq.textContent=IP_QUEUE.lengt
 })();
 
 </script>
-</body></html>
