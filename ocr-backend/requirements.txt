@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+python-dotenv>=1.0
+
+# ติดตั้งตามผู้ให้บริการที่ใช้:
+google-genai>=1.0
+# openai>=1.30
+# anthropic>=0.40
