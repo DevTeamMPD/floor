@@ -248,6 +248,11 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
               </div>
               <input type="file" id="scanCam" accept="image/*" capture="environment" style="display:none" onchange="handleScan(event)">
               <input type="file" id="scanFile" accept="image/*" style="display:none" onchange="handleScan(event)">
+              <input type="file" id="scanPdf" accept=".pdf" style="display:none" onchange="handlePdfScan(event)">
+              <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px;text-align:center">
+                <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">หรืออัปโหลด PDF (รวมทุกฟอร์มในไฟล์เดียว)</div>
+                <button type="button" class="btn wz-bigbtn" onclick="document.getElementById('scanPdf').click()">📄 อัปโหลด PDF (ทุกฟอร์มพร้อมกัน)</button>
+              </div>
               <div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center">
                 <button type="button" class="btn ghost sm" onclick="wzDemo()">ลองตัวอย่างจำลอง (เดโม)</button>
                 <button type="button" class="btn ghost sm" onclick="wzManual()">กรอกเองโดยไม่สแกน →</button>
@@ -620,6 +625,55 @@ function renderTplForm(pf){pf=pf||{};var t=TPL[curType];if(!t)return;var h='';
   h+='<button class="btn primary" style="width:100%;margin-top:12px" onclick="saveTpl()">💾 บันทึกเข้าทะเบียน</button>';
   if(pf.__rawtext)h+='<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">ดูข้อความดิบ OCR</summary><pre style="white-space:pre-wrap;font-size:11px;background:var(--bg);padding:10px;border-radius:8px;max-height:160px;overflow:auto;margin-top:6px">'+esc(pf.__rawtext)+'</pre></details>';
   $('#ocrForm').innerHTML=h;}
+function renderPdfForms(forms){
+  forms=forms||{};
+  var LABELS={receive:'📋 ฟอร์มรับงานติดตั้ง',issue:'📦 ฟอร์มเบิก-ใช้-คืน',sign:'✍️ ลายเซ็นยืนยัน'};
+  var h='<div class="ocr-badge" style="margin-bottom:12px">✔ AI อ่าน PDF เสร็จ — ตรวจ/แก้ข้อมูลแต่ละฟอร์มก่อนบันทึก</div>';
+  ['receive','issue','sign'].forEach(function(ft){
+    var t=TPL[ft];var pf=forms[ft]||{};
+    var inner='';
+    t.groups.forEach(function(g){inner+='<div style="font-size:11.5px;font-weight:700;color:var(--brand);margin:10px 0 5px">'+g.h+'</div>';g.f.forEach(function(fd){inner+=ctrlHtml(fd[0],fd[1],fd[2],pf);});});
+    if(t.table)inner+='<div style="font-size:11.5px;font-weight:700;color:var(--brand);margin:10px 0 5px">ตารางเบิก-ใช้-คืนสินค้า</div>'+tableHtml(pf);
+    h+='<details open style="border:1px solid var(--line);border-radius:12px;margin-bottom:10px;padding:12px 14px">'+
+      '<summary style="cursor:pointer;font-weight:700;font-size:13.5px;margin-bottom:6px">'+LABELS[ft]+'</summary>'+
+      '<div data-ft="'+ft+'">'+inner+'</div></details>';
+  });
+  h+='<button class="btn primary" style="width:100%;margin-top:14px" onclick="savePdfAllForms()">💾 บันทึกทุกฟอร์มเข้าทะเบียน</button>';
+  $('#ocrForm').innerHTML=h;
+}
+function savePdfAllForms(){
+  var saved=0;
+  ['receive','issue','sign'].forEach(function(ft){
+    var sec=document.querySelector('#ocrForm [data-ft="'+ft+'"]');if(!sec)return;
+    var vals={},labels={},order=[];
+    sec.querySelectorAll('[data-label]').forEach(function(el){
+      var k=el.getAttribute('data-k'),lb=el.getAttribute('data-label');
+      if(!(k in labels)){labels[k]=lb;order.push(k);}
+      if(el.type==='checkbox'){if(el.checked){vals[k]=vals[k]||[];vals[k].push(el.value);}}
+      else if(el.type==='radio'){if(el.checked)vals[k]=el.value;}
+      else{if(el.value.trim())vals[k]=el.value.trim();}
+    });
+    var rows=[];sec.querySelectorAll('.tpl-row').forEach(function(tr){
+      var sz=(tr.querySelector('[data-col="size"]:checked')||{}).value||'';
+      var cl=(tr.querySelector('[data-col="color"]:checked')||{}).value||'';
+      var w=(tr.querySelector('[data-col="w"]')||{}).value||'';var l=(tr.querySelector('[data-col="l"]')||{}).value||'';var q=(tr.querySelector('[data-col="qty"]')||{}).value||'';
+      if(sz||cl||w||l||q)rows.push({typ:tr.getAttribute('data-rowtype'),size:sz,color:cl,w:w,l:l,qty:q});
+    });
+    var caps=[];order.forEach(function(k){var v=vals[k];if(v&&v.length)caps.push({l:labels[k],v:Array.isArray(v)?v.join(', '):v});});
+    rows.forEach(function(r,i){caps.push({l:'ม้วนที่ '+(i+1)+' ('+r.typ+')',v:[r.size,r.color,r.w&&('กว้าง '+r.w),r.l&&('ยาว '+r.l),r.qty&&('จำนวน '+r.qty)].filter(Boolean).join(' · ')});});
+    if(!caps.length)return;
+    var t=TPL[ft];var bill=vals.bill||vals.docNo||'';
+    var code=bill||('FORM-'+Date.now().toString().slice(-6));
+    var title=t.label+(vals.custName?' — '+vals.custName:(bill?' — เลข '+bill:''));
+    var doc={id:nextId++,code:code,title:title,cat:t.cat,ver:'1.0',status:'pending',owner:'(สแกน PDF OCR)',dept:'บริการติดตั้ง',loc:{cab:'-',shelf:'-',folder:'-'},paper:true,scanned:true,created:today(),updated:today(),review:'-',approver:'-',captured:caps,bill:bill,formType:ft,hist:[['สแกน PDF OCR: '+t.label,today(),'OCR'],['รออนุมัติ',today(),'ระบบ']]};
+    DOCS.unshift(doc);saved++;
+  });
+  if(!saved){toast('⚠ ยังไม่มีข้อมูลในฟอร์มใดเลย');return;}
+  refreshAll();
+  $('#scanPrev').innerHTML='<div style="font-size:40px">✅</div><div style="margin-top:10px;font-size:13px;color:var(--green)"><b>บันทึก '+saved+' ฟอร์มเข้าทะเบียนแล้ว</b></div>';
+  $('#ocrForm').innerHTML='<div class="empty"><div class="big">🎉</div>บันทึก PDF ครบ '+saved+' ฟอร์ม<br><div style="margin-top:14px;display:flex;gap:8px;justify-content:center"><button class="btn ghost sm" onclick="go(\'register\')">ดูในทะเบียน →</button><button class="btn ghost sm" onclick="wzGo(1)">สแกนใหม่</button></div></div>';
+  toast('💾 บันทึก PDF ทั้งหมด '+saved+' ฟอร์มเข้าทะเบียนแล้ว');
+}
 function runTesseractOCR(f){
   $('#ocrForm').innerHTML='<div class="empty"><div class="big">⏳</div><div id="ocrProg">กำลังเตรียม OCR ในเครื่อง...</div></div>';
   if(typeof Tesseract==='undefined'){toast('⚠ ออฟไลน์ — แสดงฟอร์มให้กรอกเอง');renderTplForm();return;}
@@ -712,6 +766,29 @@ function wzPickType(t){ if(!TPL[t])return; curType=t;
   wzGo(2);
 }
 function handleScan(e){ if(!e.target.files||!e.target.files[0])return; wzGo(3); runOCR(e); }
+function handlePdfScan(e){
+  if(!e.target.files||!e.target.files[0])return;
+  var f=e.target.files[0];
+  if(!OCR_BACKEND){toast('⚠ ต้องตั้งค่า Backend OCR ก่อน (เปิด ⚙ ด้านล่าง)');return;}
+  wzGo(3);
+  $('#scanPrev').innerHTML='<div style="font-size:40px">📄</div><div style="margin-top:10px;font-size:13px;color:var(--brand)"><b>'+esc(f.name)+'</b></div><div class="scanline"></div>';
+  $('#ocrForm').innerHTML='<div class="empty"><div class="big">🧠</div><div>AI กำลังอ่าน PDF ทุกหน้า...</div></div>';
+  var fd=new FormData();fd.append('file',f);
+  fetch(OCR_BACKEND.replace(/\/+$/,'')+'/ocr/pdf',{method:'POST',body:fd})
+    .then(function(r){return r.json();})
+    .then(function(res){
+      var sl=$('#scanPrev').querySelector('.scanline');if(sl)sl.remove();
+      if(!res||res.ok===false){
+        toast('⚠ อ่าน PDF ไม่สำเร็จ: '+((res&&res.error)||'unknown'));
+        $('#ocrForm').innerHTML='<div class="empty"><div class="big">⚠</div>อ่านไม่สำเร็จ — ลองอัปโหลดทีละรูปแทน</div>';
+        return;}
+      renderPdfForms(res.forms||{});
+      toast('✔ AI อ่าน PDF เสร็จ — ตรวจ/แก้ก่อนบันทึก');})
+    .catch(function(err){
+      var sl=$('#scanPrev').querySelector('.scanline');if(sl)sl.remove();
+      toast('⚠ ต่อเซิร์ฟเวอร์ไม่ได้: '+err.message);
+      $('#ocrForm').innerHTML='<div class="empty"><div class="big">⚠</div>เชื่อมต่อไม่ได้</div>';});
+}
 function wzDemo(){ wzGo(3); simScan(); }
 function wzManual(){ wzGo(3); var sp=document.getElementById('scanPrev'); if(sp)sp.innerHTML='<div style="font-size:36px">✍️</div><div style="margin-top:8px;font-size:13px;color:var(--muted)">กรอกข้อมูลเองโดยไม่สแกน</div>'; renderTplForm(); }
 (function(){
