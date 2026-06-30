@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 ตัวเรียก Vision-AI เพื่ออ่านลายมือจากรูปฟอร์ม แล้วคืน dict ตามสคีมา
-รองรับ 3 ผู้ให้บริการ เลือกผ่าน env OCR_PROVIDER:
-  - gemini    (ฟรี — Google AI Studio)      [ค่าเริ่มต้น]
-  - openai    (เสียเงิน)
-  - anthropic (เสียเงิน)
+รองรับ 4 ผู้ให้บริการ เลือกผ่าน env OCR_PROVIDER:
+  - gemini     (ฟรี — Google AI Studio)      [ค่าเริ่มต้น]
+  - openai     (เสียเงิน)
+  - anthropic  (เสียเงิน)
+  - openrouter (ผ่าน OpenRouter — fallback อัตโนมัติเมื่อ Gemini ติด quota)
 API key อ่านจาก environment variable เท่านั้น (ไม่เก็บในโค้ด/หน้าเว็บ)
 """
 import os, json, base64
@@ -87,6 +88,31 @@ def _extract_anthropic(image_bytes, form_type):
     return _loads(msg.content[0].text)
 
 
+def _extract_openrouter(image_bytes, form_type):
+    from openai import OpenAI
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=os.getenv("OPENROUTER_API_KEY"),
+    )
+    b64 = base64.b64encode(image_bytes).decode()
+    data_url = "data:image/jpeg;base64," + b64
+    content = [
+        {"type": "text", "text": build_prompt(form_type)},
+        {"type": "image_url", "image_url": {"url": data_url}},
+    ]
+    resp = client.chat.completions.create(
+        model=os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free"),
+        temperature=0,
+        messages=[{"role": "user", "content": content}],
+    )
+    return _loads(resp.choices[0].message.content)
+
+
+def _is_rate_limit(exc):
+    msg = str(exc).lower()
+    return "429" in msg or "quota" in msg or "rate" in msg or "resourceexhausted" in type(exc).__name__.lower()
+
+
 def extract_fields(image_bytes, form_type):
     if form_type not in SCHEMAS:
         form_type = "receive"
@@ -94,6 +120,16 @@ def extract_fields(image_bytes, form_type):
         raw = _extract_openai(image_bytes, form_type)
     elif PROVIDER == "anthropic":
         raw = _extract_anthropic(image_bytes, form_type)
+    elif PROVIDER == "openrouter":
+        raw = _extract_openrouter(image_bytes, form_type)
     else:
-        raw = _extract_gemini(image_bytes, form_type)
+        # gemini — fallback to OpenRouter อัตโนมัติเมื่อติด quota/rate-limit
+        try:
+            raw = _extract_gemini(image_bytes, form_type)
+        except Exception as e:
+            if os.getenv("OPENROUTER_API_KEY") and _is_rate_limit(e):
+                print(f"[OCR] Gemini rate-limit → fallback OpenRouter ({e})")
+                raw = _extract_openrouter(image_bytes, form_type)
+            else:
+                raise
     return _coerce(form_type, raw)
