@@ -899,7 +899,7 @@ function ipRenderQueue(){var nbq=$('#nbQ');if(nbq)nbq.textContent=IP_QUEUE.lengt
 function renderOverview(){
   var host=document.getElementById('ovBody'); if(!host)return;
   var tasks=(typeof TASKS!=='undefined')?TASKS:[];
-  var jobs=(typeof IP_T!=='undefined')?IP_T:[];
+  var jobs=[];try{if(IP_T&&IP_T.length)jobs=IP_T;}catch(e){}
   var evals=(typeof EVAL!=='undefined')?EVAL:[];
 
   /* KPIs */
