@@ -108,6 +108,80 @@ def _extract_openrouter(image_bytes, form_type):
     return _loads(resp.choices[0].message.content)
 
 
+_PDF_FORM_ORDER = ["receive", "issue", "sign"]
+
+
+def _build_pdf_combined_prompt():
+    def flds(sc):
+        return "\n".join(f'  - "{k}": {v}' for k, v in sc["fields"].items())
+    r, iss, s = SCHEMAS["receive"], SCHEMAS["issue"], SCHEMAS["sign"]
+    return f"""คุณเป็นผู้ช่วยอ่านเอกสาร PDF ฟอร์มงานติดตั้ง MPD ที่เขียนด้วยลายมือ
+PDF นี้มีหลายหน้า แต่ละหน้าเป็นฟอร์มต่างชนิด
+
+ดึงข้อมูลออกมาเป็น JSON object เดียวที่มี 3 key เท่านั้น:
+
+"receive" — {r['title']}:
+{flds(r)}
+
+"issue" — {iss['title']}:
+{flds(iss)}
+
+"sign" — {s['title']}:
+{flds(s)}
+
+กฎ: ช่องว่าง/อ่านไม่ออก → "" (หรือ [] สำหรับ room/rows) · ห้ามแต่งข้อมูล · ตอบ JSON ล้วน ไม่มีคำอธิบาย"""
+
+
+def _extract_pdf_gemini(pdf_bytes):
+    from google import genai
+    from google.genai import types
+    client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY"))
+    resp = client.models.generate_content(
+        model=os.getenv("OCR_MODEL", "gemini-2.5-flash"),
+        contents=[
+            types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+            _build_pdf_combined_prompt(),
+        ],
+        config=types.GenerateContentConfig(temperature=0, response_mime_type="application/json"),
+    )
+    return _loads(resp.text)
+
+
+def _pdf_to_images(pdf_bytes):
+    import fitz  # pymupdf
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    images = [page.get_pixmap(matrix=fitz.Matrix(2, 2)).tobytes("jpeg") for page in doc]
+    doc.close()
+    return images
+
+
+def extract_pdf_fields(pdf_bytes):
+    """คืน dict {"receive": {...}, "issue": {...}, "sign": {...}}"""
+    def from_images(extractor_fn):
+        images = _pdf_to_images(pdf_bytes)
+        result = {ft: _coerce(ft, extractor_fn(img, ft))
+                  for ft, img in zip(_PDF_FORM_ORDER, images[:3])}
+        for ft in _PDF_FORM_ORDER:
+            result.setdefault(ft, _coerce(ft, {}))
+        return result
+
+    if PROVIDER == "openai":
+        return from_images(_extract_openai)
+    elif PROVIDER == "anthropic":
+        return from_images(_extract_anthropic)
+    elif PROVIDER == "openrouter":
+        return from_images(_extract_openrouter)
+    else:
+        try:
+            raw = _extract_pdf_gemini(pdf_bytes)
+            return {ft: _coerce(ft, raw.get(ft, {})) for ft in _PDF_FORM_ORDER}
+        except Exception as e:
+            if os.getenv("OPENROUTER_API_KEY") and _is_rate_limit(e):
+                print(f"[OCR PDF] Gemini rate-limit → OpenRouter image fallback ({e})")
+                return from_images(_extract_openrouter)
+            raise
+
+
 def _is_rate_limit(exc):
     msg = str(exc).lower()
     return "429" in msg or "quota" in msg or "rate" in msg or "resourceexhausted" in type(exc).__name__.lower()

@@ -18,7 +18,7 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from extractor import extract_fields
+from extractor import extract_fields, extract_pdf_fields
 from prompts import SCHEMAS
 
 app = FastAPI(title="MPD OCR Backend", version="1.1")
@@ -44,6 +44,17 @@ async def ocr(file: UploadFile = File(...), form_type: str = Form("receive")):
         image_bytes = await file.read()
         fields = extract_fields(image_bytes, form_type)
         return {"ok": True, "form_type": form_type, "fields": fields}
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
+
+@app.post("/ocr/pdf")
+async def ocr_pdf(file: UploadFile = File(...)):
+    try:
+        pdf_bytes = await file.read()
+        forms = extract_pdf_fields(pdf_bytes)
+        return {"ok": True, "forms": forms}
     except Exception as e:
         traceback.print_exc()
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
