@@ -34,7 +34,8 @@ def health():
     return {"status": "ok", "forms": list(SCHEMAS.keys()),
             "provider": os.getenv("OCR_PROVIDER", "gemini"),
             "key_loaded": bool(os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-                               or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY"))}
+                               or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")),
+            "openrouter_fallback": bool(os.getenv("OPENROUTER_API_KEY"))}
 
 
 @app.post("/ocr")
