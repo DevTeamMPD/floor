@@ -632,8 +632,20 @@ function saveTpl(){
   var t=TPL[curType];var bill=vals.bill||vals.docNo||'';
   var code=bill||('FORM-'+Date.now().toString().slice(-6));
   var title=t.label+(vals.custName?' — '+vals.custName:(bill?' — เลข '+bill:''));
-  var doc={id:nextId++,code:code,title:title,cat:t.cat,ver:'1.0',status:'pending',owner:'(สแกน OCR)',dept:'บริการติดตั้ง',loc:{cab:'-',shelf:'-',folder:'-'},paper:true,scanned:true,created:today(),updated:today(),review:'-',approver:'-',captured:caps,bill:bill,formType:curType,hist:[['สแกน+กรอกจากฟอร์ม: '+t.label,today(),'OCR'],['รออนุมัติ',today(),'ระบบ']]};
+  var imgSrc=($('#scanPrev').querySelector('img')||{}).src||'';
+  var doc={id:nextId++,code:code,title:title,cat:t.cat,ver:'1.0',status:'pending',owner:'(สแกน OCR)',dept:'บริการติดตั้ง',loc:{cab:'-',shelf:'-',folder:'-'},paper:true,scanned:true,created:today(),updated:today(),review:'-',approver:'-',captured:caps,bill:bill,formType:curType,imgSrc:imgSrc,hist:[['สแกน+กรอกจากฟอร์ม: '+t.label,today(),'OCR'],['รออนุมัติ',today(),'ระบบ']]};
   DOCS.unshift(doc);refreshAll();
+  if(SB&&bill){(function(){
+    var allJobs=(typeof OH_DATA!=='undefined'?OH_DATA:[]).concat(typeof IP_T!=='undefined'?IP_T:[]);
+    var job=allJobs.find(function(x){return x.bill===bill;});
+    if(!job)return;
+    var ds=JSON.parse(JSON.stringify(job.docs||[]));
+    var idx=ds.findIndex(function(x){return x.form_type===curType;});
+    var entry={form_type:curType,ts:today(),caps:caps};
+    if(idx>=0)ds[idx]=entry;else ds.push(entry);
+    SB.from('install_jobs').update({docs:ds}).eq('order_no',job.order).then(function(){});
+    job.docs=ds;
+  })();}
   $('#scanPrev').innerHTML='<div style="font-size:40px">✅</div><div style="margin-top:10px;font-size:13px;color:var(--green)"><b>บันทึกเข้าทะเบียนแล้ว</b></div>';
   $('#ocrForm').innerHTML='<div class="empty"><div class="big">🎉</div>บันทึก <b>'+esc(code)+'</b> ('+caps.length+' ช่อง) แล้ว'+(bill?'<br><span style="font-size:12px;color:var(--muted)">เลขบิล '+esc(bill)+' — เชื่อมกับงานบริการได้</span>':'')+'<br><div style="margin-top:14px;display:flex;gap:8px;justify-content:center"><button class="btn ghost sm" onclick="go(\'register\')">ดูในทะเบียน →</button><button class="btn ghost sm" onclick="renderTplForm()">สแกนใบใหม่</button></div></div>';
   toast('💾 บันทึกฟอร์มเข้าทะเบียนแล้ว ('+caps.length+' ช่อง)');
@@ -1380,14 +1392,38 @@ function ohOpenDetail(orderNo){
   var FM={receive:{lbl:'รับงานติดตั้ง & ส่งมอบ',ic:'📋'},issue:{lbl:'เบิก-ใช้-คืนสินค้า',ic:'📦'},sign:{lbl:'ข้อกำหนด + ลายเซ็น',ic:'✍️'}};
   var pane3='<div class="dr-pane" id="ohP-docs" style="padding:18px 26px 24px">';
   ['receive','issue','sign'].forEach(function(ft){
-    var d=(t.docs||[]).find(function(x){return x.form_type===ft||x.type===ft;});
-    var ok=!!d,m=FM[ft];
-    pane3+='<div class="oh-doc-row'+(ok?' done':'')+'">'
+    var localDoc=(typeof DOCS!=='undefined'?DOCS:[]).find(function(x){return x.bill===t.bill&&x.formType===ft;});
+    var supaDoc=(t.docs||[]).find(function(x){return x.form_type===ft||x.type===ft;});
+    var ok=!!(localDoc||supaDoc),m=FM[ft];
+    var ts=(localDoc&&localDoc.created)||(supaDoc&&supaDoc.ts)||'';
+    pane3+='<div class="oh-doc-row'+(ok?' done':'')+'" style="flex-direction:column;align-items:stretch;gap:0;padding:'+(ok?'0':'11px 13px')+'">';
+    pane3+='<div style="display:flex;align-items:center;gap:12px;padding:'+(ok?'11px 13px':'0')+'">'
       +'<span style="font-size:22px">'+(ok?'✅':m.ic)+'</span>'
       +'<div style="flex:1"><div style="font-weight:600;font-size:13px">'+m.lbl+'</div>'
       +'<div style="font-size:11.5px;color:'+(ok?'var(--green)':'var(--muted)')+'">'+(ok?'สแกนแล้ว':'ยังไม่ได้สแกน')+'</div>'
-      +(ok&&d.ts?'<div style="font-size:10.5px;color:var(--muted)">'+esc(d.ts||'')+'</div>':'')
+      +(ts?'<div style="font-size:10.5px;color:var(--muted)">'+esc(ts)+'</div>':'')
       +'</div></div>';
+    if(ok){
+      var caps=(localDoc&&localDoc.captured)||(supaDoc&&supaDoc.caps)||[];
+      var imgSrc=(localDoc&&localDoc.imgSrc)||'';
+      pane3+='<div style="border-top:1px solid var(--line);padding:12px 13px 14px;background:#FAFBFC">';
+      if(imgSrc){
+        pane3+='<img src="'+imgSrc+'" style="width:100%;max-height:240px;object-fit:contain;border-radius:8px;margin-bottom:10px;background:#fff;border:1px solid var(--line)">';
+      }
+      if(caps.length){
+        pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--muted);letter-spacing:.4px;margin-bottom:6px;text-transform:uppercase">ข้อมูลที่อ่านได้ ('+caps.length+' ช่อง)</div>';
+        pane3+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px 12px">';
+        caps.forEach(function(c){
+          pane3+='<div style="min-width:0"><div style="font-size:10px;color:var(--muted);font-weight:600">'+esc(c.l)+'</div>'
+            +'<div style="font-size:12.5px;font-weight:700;color:var(--ink);white-space:pre-wrap;word-break:break-word">'+esc(c.v||'—')+'</div></div>';
+        });
+        pane3+='</div>';
+      } else {
+        pane3+='<div style="font-size:12px;color:var(--muted);text-align:center;padding:6px 0">ไม่พบข้อมูล field</div>';
+      }
+      pane3+='</div>';
+    }
+    pane3+='</div>';
   });
   pane3+='<div style="margin-top:14px"><button class="btn primary" style="width:100%" onclick="closeDrawer();go(\'scan\')">📸 สแกนเอกสารใหม่</button></div></div>';
   // TAB 4: ประเมิน
