@@ -1232,8 +1232,24 @@ function ohLoad(){
       m.addr=x.address||'';
       m.docs=Array.isArray(x.docs)?x.docs:[];
       m.callLogs=Array.isArray(x.call_logs)?x.call_logs:[];
+      m.jobNo=x.job_no||'';
       return m;
     });
+    // auto-complete: มี eval score แล้วแต่ stage ยังไม่ถึง 7
+    var toComplete=OH_DATA.filter(function(t){
+      if(t.stage>=7)return false;
+      try{return !!evalBill(t.bill);}catch(e){return false;}
+    });
+    if(toComplete.length){
+      var ids=toComplete.map(function(t){return t.order;});
+      SB.from('install_jobs').update({stage:7,status:'done'}).in('order_no',ids).then(function(upd){
+        if(!upd.error){
+          toComplete.forEach(function(t){t.stage=7;});
+          ohRenderKpis();
+          ohRender();
+        }
+      });
+    }
     $('#ohMsg').textContent='';
     ohRenderKpis();
     ohRender();
