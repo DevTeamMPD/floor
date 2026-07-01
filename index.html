@@ -1506,6 +1506,7 @@ function ohLoad(){
       m.docs=Array.isArray(x.docs)?x.docs:[];
       m.callLogs=Array.isArray(x.call_logs)?x.call_logs:[];
       m.jobNo=x.job_no||'';
+      m.price=(x.price!=null)?Number(x.price):null;
       return m;
     });
     // auto-complete: มี eval score แล้วแต่ stage ยังไม่ถึง 7
@@ -1622,6 +1623,7 @@ function ohOpenDetail(orderNo){
     +(t.bill?field('เลขบิล','<span class="bill-chip">'+esc(t.bill)+'</span>'):'')
     +field('SKU',esc(t.sku||'—'))
     +field('สินค้า','<b>'+esc(t.product)+'</b>')
+    +field('มูลค่าสินค้า',t.price!=null?'<b style="color:var(--green)">฿'+t.price.toLocaleString('th-TH')+'</b>':'<span style="color:var(--muted)">—</span>')
     +field('ลูกค้า',esc(t.customer||'—'))
     +(t.phone?field('เบอร์โทร','<a href="tel:'+esc(t.phone)+'" style="color:var(--brand)">'+esc(t.phone)+'</a>'):'')
     +field('วันสั่ง',t.date||'—')
