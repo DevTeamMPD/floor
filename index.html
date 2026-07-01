@@ -1441,6 +1441,21 @@ function ohOpenDetail(orderNo){
         caps.forEach(function(c){pane3+='<div><div style="font-size:9.5px;color:var(--muted);font-weight:700;text-transform:uppercase">'+esc(c.l)+'</div><div style="font-size:12.5px;font-weight:700;color:var(--ink)">'+esc(c.v||'—')+'</div></div>';});
         pane3+='</div>';
       }else{pane3+='<div style="font-size:12px;color:var(--muted)">ไม่พบรายละเอียด fields</div>';}
+      // Attachments display
+      var atts=(localDoc&&localDoc.attachments)||(supaDoc&&supaDoc.attachments)||[];
+      if(atts.length){
+        pane3+='<div style="margin-top:10px"><div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:5px">📎 เอกสารแนบ</div>'
+          +'<div style="display:flex;flex-wrap:wrap;gap:7px">';
+        atts.forEach(function(a){
+          var src=a.url||a.src||'';
+          if(a.mime&&a.mime.startsWith('image/')){
+            pane3+='<img src="'+esc(src)+'" style="height:80px;width:80px;object-fit:cover;border-radius:8px;border:1.5px solid var(--line);cursor:pointer" onclick="window.open(\''+esc(src)+'\')">';
+          } else {
+            pane3+='<a href="'+esc(src)+'" target="_blank" style="display:flex;align-items:center;gap:5px;padding:6px 10px;background:#F1F5F9;border:1px solid var(--line);border-radius:8px;font-size:11.5px;color:var(--ink);text-decoration:none">📄 '+esc(a.name||'ไฟล์')+'</a>';
+          }
+        });
+        pane3+='</div></div>';
+      }
       pane3+='</div>';
     }
     // Editable form
@@ -1504,6 +1519,15 @@ function ohOpenDetail(orderNo){
         pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--green);margin:10px 0 5px">🔁 จำนวนที่เหลือ / คืนกลับ</div>';
         pane3+=iRow(3,'ม้วนที่ 1','var(--green)')+iRow(4,'ม้วนที่ 2','var(--green)')+iRow(5,'ม้วนที่ 3','var(--green)');
       }
+      // File attach zone
+      pane3+='<div style="margin-top:10px">'
+        +'<div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:5px">📎 แนบเอกสาร / รูปถ่าย</div>'
+        +'<label style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:1.5px dashed var(--brand);border-radius:10px;cursor:pointer;background:var(--brand-l);color:var(--brand);font-size:12.5px;font-weight:600">'
+        +'<span style="font-size:20px">📁</span> เลือกไฟล์ (รูปภาพ / PDF)'
+        +'<input type="file" id="drDoc_'+ft+'_files" accept="image/*,application/pdf" multiple style="display:none" onchange="ohPreviewAttach(this,\''+ft+'\')">'
+        +'</label>'
+        +'<div id="drDoc_'+ft+'_prevs" style="display:flex;flex-wrap:wrap;gap:7px;margin-top:8px"></div>'
+        +'</div>';
       pane3+='<button class="btn primary" style="width:100%;margin-top:10px;font-size:13px" onclick="ohSaveDoc(\''+esc(String(t.order))+'\',\''+ft+'\')">💾 บันทึกเอกสาร</button>';
       pane3+='</div>';
     }
@@ -1528,6 +1552,36 @@ function ohTab(btn,pane){
   ['info','appt','docs','eval'].forEach(function(p){
     var el=document.getElementById('ohP-'+p);
     if(el)el.classList.toggle('act',p===pane);
+  });
+}
+
+var OH_ATTACH={};
+
+function ohPreviewAttach(input,ft){
+  OH_ATTACH[ft]=OH_ATTACH[ft]||[];
+  var pv=document.getElementById('drDoc_'+ft+'_prevs');
+  if(pv)pv.innerHTML='<div style="font-size:11px;color:var(--muted)">⏳ กำลังโหลด...</div>';
+  var files=Array.from(input.files);
+  var pending=files.length;
+  if(!pending){if(pv)pv.innerHTML='';return;}
+  OH_ATTACH[ft]=[];
+  var html='';
+  files.forEach(function(f,i){
+    var entry={name:f.name,mime:f.type,src:'',url:'',_file:f};
+    OH_ATTACH[ft].push(entry);
+    if(f.type.startsWith('image/')){
+      var reader=new FileReader();
+      reader.onload=function(e){
+        entry.src=e.target.result;
+        html+='<div style="position:relative"><img src="'+e.target.result+'" style="height:80px;width:80px;object-fit:cover;border-radius:8px;border:1.5px solid var(--line)"><div style="position:absolute;top:2px;right:2px;font-size:9px;background:rgba(0,0,0,.55);color:#fff;border-radius:4px;padding:1px 4px">'+esc(f.name.slice(-8))+'</div></div>';
+        pending--;if(!pending&&pv)pv.innerHTML=html;
+      };
+      reader.readAsDataURL(f);
+    } else {
+      entry.src='';
+      html+='<div style="display:flex;align-items:center;gap:5px;padding:6px 10px;background:#F1F5F9;border:1px solid var(--line);border-radius:8px;font-size:11px">📄 '+esc(f.name)+'</div>';
+      pending--;if(!pending&&pv)pv.innerHTML=html;
+    }
   });
 }
 
@@ -1563,9 +1617,14 @@ function ohSaveDoc(orderNo,ft){
     }
   }
   if(!caps.length){toast('⚠ กรอกอย่างน้อย 1 ช่อง');return;}
+  // Collect attachments (stored in OH_ATTACH during preview)
+  var pendingAttach=(OH_ATTACH&&OH_ATTACH[ft])||[];
+  var attachments=pendingAttach.map(function(a){return {name:a.name,mime:a.mime,src:a.src,url:a.url||a.src};});
   var ds=JSON.parse(JSON.stringify(t.docs||[]));
   var idx=ds.findIndex(function(x){return x.form_type===ft;});
-  var entry={form_type:ft,ts:today(),caps:caps};
+  // Don't store large base64 src in Supabase — keep url only
+  var sbAttach=attachments.map(function(a){return {name:a.name,mime:a.mime,url:a.url&&!a.url.startsWith('data:')?a.url:''};});
+  var entry={form_type:ft,ts:today(),caps:caps,attachments:sbAttach.filter(function(a){return a.url;})};
   if(idx>=0)ds[idx]=entry;else ds.push(entry);
   if(SB)SB.from('install_jobs').update({docs:ds}).eq('order_no',t.order).then(function(){});
   t.docs=ds;
@@ -1575,10 +1634,12 @@ function ohSaveDoc(orderNo,ft){
       owner:'กรอกจาก Job',dept:'บริการติดตั้ง',loc:{cab:'-',shelf:'-',folder:'-'},
       paper:false,scanned:false,created:today(),updated:today(),review:'-',approver:'-',
       captured:caps,bill:t.bill,formType:ft,imgSrc:'',
+      attachments:attachments,
       hist:[['กรอกจาก Job Drawer: '+tpl.label,today(),'ระบบ']]};
     if(ei>=0)DOCS[ei]=doc;else DOCS.unshift(doc);
     if(typeof refreshAll==='function')refreshAll();
   }
+  if(OH_ATTACH)OH_ATTACH[ft]=[];
   toast('💾 บันทึก '+tpl.label+' แล้ว');
   ohOpenDetail(orderNo);
 }
