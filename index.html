@@ -1390,42 +1390,62 @@ function ohOpenDetail(orderNo){
   pane2+='</div>';
   // TAB 3: เอกสาร
   var FM={receive:{lbl:'รับงานติดตั้ง & ส่งมอบ',ic:'📋'},issue:{lbl:'เบิก-ใช้-คืนสินค้า',ic:'📦'},sign:{lbl:'ข้อกำหนด + ลายเซ็น',ic:'✍️'}};
-  var pane3='<div class="dr-pane" id="ohP-docs" style="padding:18px 26px 24px">';
+  var pane3='<div class="dr-pane" id="ohP-docs" style="padding:14px 20px 24px">';
+  var dflt={docNo:t.bill||'',bill:t.bill||'',custName:t.customer||'',phone:t.phone||'',
+    addr:t.addr||'',svcDate:t.due||'',date:t.due||'',
+    installer:t.assignees&&t.assignees[0]?t.assignees[0]:'',
+    team:t.assignees?String(t.assignees.length):''};
   ['receive','issue','sign'].forEach(function(ft){
     var localDoc=(typeof DOCS!=='undefined'?DOCS:[]).find(function(x){return x.bill===t.bill&&x.formType===ft;});
     var supaDoc=(t.docs||[]).find(function(x){return x.form_type===ft||x.type===ft;});
     var ok=!!(localDoc||supaDoc),m=FM[ft];
+    var caps=(localDoc&&localDoc.captured)||(supaDoc&&supaDoc.caps)||[];
+    var imgSrc=(localDoc&&localDoc.imgSrc)||'';
     var ts=(localDoc&&localDoc.created)||(supaDoc&&supaDoc.ts)||'';
-    pane3+='<div class="oh-doc-row'+(ok?' done':'')+'" style="flex-direction:column;align-items:stretch;gap:0;padding:'+(ok?'0':'11px 13px')+'">';
-    pane3+='<div style="display:flex;align-items:center;gap:12px;padding:'+(ok?'11px 13px':'0')+'">'
-      +'<span style="font-size:22px">'+(ok?'✅':m.ic)+'</span>'
-      +'<div style="flex:1"><div style="font-weight:600;font-size:13px">'+m.lbl+'</div>'
-      +'<div style="font-size:11.5px;color:'+(ok?'var(--green)':'var(--muted)')+'">'+(ok?'สแกนแล้ว':'ยังไม่ได้สแกน')+'</div>'
-      +(ts?'<div style="font-size:10.5px;color:var(--muted)">'+esc(ts)+'</div>':'')
-      +'</div></div>';
+    pane3+='<div style="background:#fff;border:1.5px solid '+(ok?'var(--green)':'var(--line)')+';border-radius:12px;margin-bottom:12px;overflow:hidden">';
+    // Header
+    pane3+='<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:'+(ok?'var(--green-l)':'#F8FAFC')+'">'
+      +'<span style="font-size:20px">'+(ok?'✅':m.ic)+'</span>'
+      +'<div style="font-weight:700;font-size:13px;color:var(--ink)">'+m.lbl+'</div>'
+      +'<span style="margin-left:auto;font-size:11px;font-weight:700;color:'+(ok?'var(--green)':'var(--muted)')+'">'+(ok?'มีข้อมูล'+(ts?' · '+esc(ts):''):'ยังไม่มี')+'</span>'
+      +'</div>';
+    // Captured data (if available)
     if(ok){
-      var caps=(localDoc&&localDoc.captured)||(supaDoc&&supaDoc.caps)||[];
-      var imgSrc=(localDoc&&localDoc.imgSrc)||'';
-      pane3+='<div style="border-top:1px solid var(--line);padding:12px 13px 14px;background:#FAFBFC">';
-      if(imgSrc){
-        pane3+='<img src="'+imgSrc+'" style="width:100%;max-height:240px;object-fit:contain;border-radius:8px;margin-bottom:10px;background:#fff;border:1px solid var(--line)">';
-      }
+      pane3+='<div style="padding:10px 14px;border-top:1px solid var(--line)">';
+      if(imgSrc)pane3+='<img src="'+imgSrc+'" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;margin-bottom:10px;border:1px solid var(--line)">';
       if(caps.length){
-        pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--muted);letter-spacing:.4px;margin-bottom:6px;text-transform:uppercase">ข้อมูลที่อ่านได้ ('+caps.length+' ช่อง)</div>';
-        pane3+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px 12px">';
-        caps.forEach(function(c){
-          pane3+='<div style="min-width:0"><div style="font-size:10px;color:var(--muted);font-weight:600">'+esc(c.l)+'</div>'
-            +'<div style="font-size:12.5px;font-weight:700;color:var(--ink);white-space:pre-wrap;word-break:break-word">'+esc(c.v||'—')+'</div></div>';
-        });
+        pane3+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px 14px">';
+        caps.forEach(function(c){pane3+='<div><div style="font-size:9.5px;color:var(--muted);font-weight:700;text-transform:uppercase">'+esc(c.l)+'</div><div style="font-size:12.5px;font-weight:700;color:var(--ink)">'+esc(c.v||'—')+'</div></div>';});
         pane3+='</div>';
-      } else {
-        pane3+='<div style="font-size:12px;color:var(--muted);text-align:center;padding:6px 0">ไม่พบข้อมูล field</div>';
+      }else{pane3+='<div style="font-size:12px;color:var(--muted)">ไม่พบรายละเอียด fields</div>';}
+      pane3+='</div>';
+    }
+    // Editable form
+    var tpl=(typeof TPL!=='undefined'&&TPL[ft])||null;
+    if(tpl){
+      pane3+='<div style="padding:10px 14px 14px;border-top:1px solid var(--line2)'+(ok?';background:#FAFBFC':'')+'">';
+      pane3+='<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">'+(ok?'✏️ แก้ไข':'📝 กรอกข้อมูล')+'</div>';
+      tpl.groups.forEach(function(g){
+        pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--brand);margin:7px 0 5px">'+g.h+'</div>';
+        g.f.forEach(function(fd){
+          var k=fd[0];var val=dflt[k]||'';
+          pane3+='<div style="margin-bottom:6px"><div style="font-size:10px;color:var(--muted);font-weight:600;margin-bottom:2px">'+esc(fd[1])+'</div>'
+            +'<input id="drDoc_'+ft+'_'+k+'" value="'+esc(val)+'" placeholder="'+esc(fd[1])+'" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;box-sizing:border-box"></div>';
+        });
+      });
+      if(ft==='issue'){
+        pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--brand);margin:7px 0 5px">รายการสินค้า</div>';
+        ['เบิก ม้วนที่ 1','เบิก ม้วนที่ 2','เบิก ม้วนที่ 3','คืน ม้วนที่ 1','คืน ม้วนที่ 2','คืน ม้วนที่ 3'].forEach(function(lb,i){
+          pane3+='<div style="margin-bottom:5px"><div style="font-size:10px;color:var(--muted);font-weight:600;margin-bottom:2px">'+lb+'</div>'
+            +'<input id="drDoc_issue_row'+i+'" placeholder="ขนาด · สี · กว้าง · ยาว · จำนวน" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12px;box-sizing:border-box"></div>';
+        });
       }
+      pane3+='<button class="btn primary" style="width:100%;margin-top:10px;font-size:13px" onclick="ohSaveDoc(\''+esc(String(t.order))+'\',\''+ft+'\')">💾 บันทึกเอกสาร</button>';
       pane3+='</div>';
     }
     pane3+='</div>';
   });
-  pane3+='<div style="margin-top:14px"><button class="btn primary" style="width:100%" onclick="closeDrawer();go(\'scan\')">📸 สแกนเอกสารใหม่</button></div></div>';
+  pane3+='</div>';
   // TAB 4: ประเมิน
   var pane4='<div class="dr-pane" id="ohP-eval" style="padding:18px 26px 24px">';
   try{
@@ -1445,6 +1465,45 @@ function ohTab(btn,pane){
     var el=document.getElementById('ohP-'+p);
     if(el)el.classList.toggle('act',p===pane);
   });
+}
+
+function ohSaveDoc(orderNo,ft){
+  var t=OH_DATA.find(function(x){return String(x.order)===String(orderNo);});
+  if(!t||typeof TPL==='undefined'||!TPL[ft]){toast('⚠ ไม่พบข้อมูล');return;}
+  var tpl=TPL[ft];var caps=[];
+  tpl.groups.forEach(function(g){
+    g.f.forEach(function(fd){
+      var el=document.getElementById('drDoc_'+ft+'_'+fd[0]);
+      var v=el?el.value.trim():'';
+      if(v)caps.push({l:fd[1],v:v});
+    });
+  });
+  if(ft==='issue'){
+    ['เบิก ม้วนที่ 1','เบิก ม้วนที่ 2','เบิก ม้วนที่ 3','คืน ม้วนที่ 1','คืน ม้วนที่ 2','คืน ม้วนที่ 3'].forEach(function(lb,i){
+      var el=document.getElementById('drDoc_issue_row'+i);
+      var v=el?el.value.trim():'';
+      if(v)caps.push({l:lb,v:v});
+    });
+  }
+  if(!caps.length){toast('⚠ กรอกอย่างน้อย 1 ช่อง');return;}
+  var ds=JSON.parse(JSON.stringify(t.docs||[]));
+  var idx=ds.findIndex(function(x){return x.form_type===ft;});
+  var entry={form_type:ft,ts:today(),caps:caps};
+  if(idx>=0)ds[idx]=entry;else ds.push(entry);
+  if(SB)SB.from('install_jobs').update({docs:ds}).eq('order_no',t.order).then(function(){});
+  t.docs=ds;
+  if(typeof DOCS!=='undefined'&&typeof nextId!=='undefined'){
+    var ei=DOCS.findIndex(function(d){return d.bill===t.bill&&d.formType===ft;});
+    var doc={id:nextId++,code:t.bill||('DOC-'+ft),title:tpl.label,cat:tpl.cat,ver:'1.0',status:'pending',
+      owner:'กรอกจาก Job',dept:'บริการติดตั้ง',loc:{cab:'-',shelf:'-',folder:'-'},
+      paper:false,scanned:false,created:today(),updated:today(),review:'-',approver:'-',
+      captured:caps,bill:t.bill,formType:ft,imgSrc:'',
+      hist:[['กรอกจาก Job Drawer: '+tpl.label,today(),'ระบบ']]};
+    if(ei>=0)DOCS[ei]=doc;else DOCS.unshift(doc);
+    if(typeof refreshAll==='function')refreshAll();
+  }
+  toast('💾 บันทึก '+tpl.label+' แล้ว');
+  ohOpenDetail(orderNo);
 }
 
 </script>
