@@ -1149,7 +1149,7 @@ var SB=null; try{ if(window.supabase&&window.supabase.createClient) SB=window.su
 function ipShiftLabel(s){return s===3||s==='3'?'ทั้งวัน':(s===2||s==='2'?'13:30':'09:00');}
 function ipMap(r,i){return {id:i+1,ticket:'INST-'+r.order_no,order:r.order_no,sku:(r.product_skus&&r.product_skus.join?r.product_skus.join(', '):''),product:r.product_name||'(ไม่ระบุ)',customer:(r.customer_name||r.customer_code||'-'),stage:r.stage||2,via:(r.source==='planner'?'planner':(r.created_via==='manual'?'manual':'auto')),linked:r.linked!==false,date:(r.order_date||''),status:(r.status||''),due:(r.due_date||''),shift:(r.shift?String(r.shift):''),assignees:(r.assignees||[])};}
 function ipSetLive(on,msg){var el=$('#ipLive');if(!el)return;el.textContent=on?'🟢 เชื่อม Supabase (สด)':(msg||'🔴 โหมด snapshot (ออฟไลน์)');el.style.color=on?'var(--green)':'var(--muted)';}
-function ipLoad(){if(!SB){ipSetLive(false);return;}SB.from('install_jobs').select('*').order('stage',{ascending:false}).order('due_date',{ascending:true,nullsFirst:false}).then(function(r){if(r.error){ipSetLive(false,'🔴 โหลดสดไม่ได้ ใช้ snapshot');return;}IP_T=(r.data||[]).map(ipMap);ipSetLive(true);ipRenderBoard();});}
+function ipLoad(){if(!SB){ipSetLive(false);return;}SB.from('install_jobs').select('*').order('stage',{ascending:false}).order('due_date',{ascending:true,nullsFirst:false}).then(function(r){if(r.error){ipSetLive(false,'🔴 โหลดสดไม่ได้ ใช้ snapshot');return;}IP_T=(r.data||[]).map(ipMap);ipSetLive(true);ipRenderBoard();ohApplyAccept();});}
 function ipLoadQueue(){if(!SB)return;SB.from('tech_queue').select('*').order('appointment_date',{ascending:true}).then(function(r){if(r.error)return;IP_QUEUE=(r.data||[]).map(function(x){return {job:x.job_no,order:x.order_no,product:x.product_name||'',date:x.appointment_date||'',shift:String(x.shift||'1'),label:ipShiftLabel(x.shift),team:(x.team||[]),note:x.call_note||''};});ipRenderQueue();});}
 function ipSaveStage(order,stage,status){if(!SB||!order)return;SB.from('install_jobs').update({stage:stage,status:status||null,updated_at:new Date().toISOString()}).eq('order_no',order).then(function(r){if(r.error)toast('⚠ บันทึกสถานะไม่สำเร็จ');});}
 function ipSaveBooking(t){if(!SB||!t.order)return;var sh=parseInt(t.shift,10)||1;
@@ -1171,7 +1171,7 @@ function ipOpen(id){var t=IP_T.find(function(x){return x.id===id;});if(!t)return
   +'<div class="field"><span class="fk">SKU</span><span class="fv">'+t.sku+'</span></div>'
   +'<div class="field"><span class="fk">สินค้า</span><span class="fv">'+t.product+'</span></div>'
   +'<div class="field"><span class="fk">ลูกค้า</span><span class="fv">'+t.customer+'</span></div>'
-  +'<div class="field"><span class="fk">ที่มา</span><span class="fv">'+(t.via==='planner'?'Planner':(t.via==='auto'?'จากออเดอร์ (อัตโนมัติ)':'สร้างเอง'))+'</span></div>'+'<div class="field"><span class="fk">วันนัดติดตั้ง</span><span class="fv">'+(t.due||'—')+'</span></div>'+'<div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv" style="max-width:60%">'+((t.assignees&&t.assignees.length)?t.assignees.join(', '):'—')+'</span></div></div>';
+  +'<div class="field"><span class="fk">ที่มา</span><span class="fv">'+(t.via==='planner'?'Planner':(t.via==='auto'?'จากออเดอร์ (อัตโนมัติ)':'สร้างเอง'))+'</span></div>'+'<div class="field"><span class="fk">วันนัดติดตั้ง</span><span class="fv">'+(t.due||'—')+'</span></div>'+'<div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv" style="max-width:60%">'+((t.assignees&&t.assignees.length)?t.assignees.join(', '):'—')+'</span></div>'+(t.tech?'<div class="field"><span class="fk">ช่างติดตั้ง</span><span class="fv">👷 '+t.tech+'</span></div>':'')+(t.accept?'<div class="field"><span class="fk">ตรวจรับงาน</span><span class="fv">'+(t.accept==='ok'?'✅ ตรวจสอบแล้ว':'⚠ มีรายการแก้ไข')+'</span></div>':'')+'</div>';
  if(t.stage===2){b+='<div class="dr-card"><h4>📋 ฝ่ายขายกรอกข้อมูล</h4><div class="fi"><label>ที่อยู่ลูกค้า</label><input id="ipf_addr" value="'+(t.addr||'')+'"></div><div class="fi"><label>Location/พิกัด</label><input id="ipf_loc" value="'+(t.loc||'')+'"></div><div class="grid3" style="margin-top:4px"><div class="ph" onclick="this.classList.add(\'set\');this.textContent=\'✔ มุมสูง\'">＋ มุมสูง</div><div class="ph" onclick="this.classList.add(\'set\');this.textContent=\'✔ มุมกว้าง\'">＋ มุมกว้าง</div><div class="ph" onclick="this.classList.add(\'set\');this.textContent=\'✔ แปลน\'">＋ แปลน</div></div></div>'
   +'<div class="dr-card"><h4>🤖 AI แปลน → ขนาดแผ่น (เศษน้อยสุด)</h4><div style="display:flex;gap:8px"><div class="fi" style="flex:1"><label>กว้าง (ม.)</label><input id="ipp_w" value="'+((t.area&&t.area.w)||'')+'"></div><div class="fi" style="flex:1"><label>ยาว (ม.)</label><input id="ipp_l" value="'+((t.area&&t.area.l)||'')+'"></div></div><button class="btn primary sm" style="width:100%" onclick="ipRunPlan('+t.id+')">ให้ AI คำนวณ</button><div id="ipPlanOut"></div></div>';}
  if(t.stage===3){b+='<div class="dr-card"><h4>📞 โทรนัด + บันทึกการโทร</h4>'+'<a class="btn ok sm" href="tel:" onclick="ipLogCall('+t.id+',\'แอดมิน\');return false;">📞 โทรลูกค้า (บันทึกเวลา)</a>'+ipCallLog(t)+'<div class="fi" style="margin-top:10px"><label>ผลการโทร / โน้ต</label><input id="ip_note" placeholder="เช่น รับสาย นัดติดตั้งได้"></div>'+'<div class="fi"><label>วันที่นัดติดตั้ง</label><input id="ip_due" type="date" value="'+(t.due||'')+'"></div>'+'<div class="fi"><label>เลือกกะช่าง</label><div style="display:flex;gap:8px;flex-wrap:wrap">'+'<label style="flex:1 1 30%;display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:8px 10px;border-radius:9px;font-size:12.5px;cursor:pointer"><input type="radio" name="ip_shift" value="1" checked> กะ 1 · 09:00</label>'+'<label style="flex:1 1 30%;display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:8px 10px;border-radius:9px;font-size:12.5px;cursor:pointer"><input type="radio" name="ip_shift" value="2"> กะ 2 · 13:30</label>'+'<label style="flex:1 1 100%;display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:8px 10px;border-radius:9px;font-size:12.5px;cursor:pointer"><input type="radio" name="ip_shift" value="3"> ☀️ ปูทั้งวัน (09:00–17:00)</label>'+'</div></div>'+'<button class="btn primary sm" style="width:100%" onclick="ipBook('+t.id+')">✅ ยืนยันนัด + เข้าคิวช่าง → ถัดไป</button></div>';}
@@ -1489,6 +1489,68 @@ function evalFetchLive(){ try{ if(typeof fetch==='undefined')return;
 })();
 
 /* ===== ORDER HISTORY module ===== */
+/* ข้อมูลตรวจรับงานจากใบเซ็นรับงานติดตั้ง Hosttail (43 รายการ) */
+var HOSTTAIL_ACCEPT=[
+  {bill:'253106',date:'2026-04-04',cust:'K.อ๊อฟ',addr:'เฟส5 ซ.9 261/954 ม.4 มบ.ชื่อตรงโคซี่คลอง6 ต.รังสิต อ.ธัญบุรี จ.ปทุมธานี 12110',ph:'0964146651',tech:'การ/อั้ม',items:'Bebeplay เตียงนอนไม้พับได้ รุ่น Eden สี Natural x1, ชั้นเปลี่ยนผ้าอ้อมมีล้อ สีขาว x1, เบาะรองนอน ลายทะเล x1, แผ่นรองเปลี่ยนผ้าอ้อม PU Snuggle สีเทา x1, Twinkle Star Crib Bumper Box Set สีขาว x1',ok:true},
+  {bill:'258697',date:'2026-01-12',cust:'คุณจิตศดา อ่องนุช',addr:'พื้นที่ติดตั้ง: ห้องนั่งเล่น',ph:'0890039773',tech:'เป็นด์ สไปซ์ จำกัด',items:'แผ่นรองกันลื่นสำหรับสัตว์เลี้ยง ห้องนั่งเล่น 6 ตร.ม.',ok:true},
+  {bill:'260218',date:'2026-01-16',cust:'น้ำทอง',addr:'ม.เมืองบอง รีวิซ่า ม.4 กิ่งแขวงจีน ต.บัลกา อ.เมือง จ.ปทุมธานี 12000',ph:'0994989929',tech:'เส้นดี สไปซ์ จำกัด',items:'แผ่นรองกันลื่นสำหรับสัตว์เลี้ยง ห้องอื่นๆ (ระเบียง) พื้นที่สั่ง 9.69 ตร.ม. ติดตั้งจริง 8.5 ตร.ม.',ok:false},
+  {bill:'260462',date:'2026-03-26',cust:'คุณโอ',addr:'456/19 ม.ทอ แขวง/เขต พระโขนง กทม. 10160',ph:'0988293924',tech:'เหล้าสไปซ์ จำกัด',items:'แผ่นรองกันลื่นสำหรับสัตว์เลี้ยง ห้องนั่งเล่น พื้นที่สั่ง 25-30 ตร.ม. ติดตั้งจริง 21.4 ตร.ม.',ok:false},
+  {bill:'260615-',date:'2026-03-31',cust:'คุณนก',addr:'154 ม.3 ต.ต้นกฤษณา อ.เมืองนนทบุรี จ.นนทบุรี',ph:'0552932454',tech:'เหล้าสไปซ์ จำกัด',items:'แผ่นรองกันลื่นสำหรับสัตว์เลี้ยง ห้องนั่งเล่น พื้นที่สั่ง 46 ตร.ม. ติดตั้งจริง 43 ตร.ม.',ok:false},
+  {bill:'260615',date:'2026-05-19',tech:'กำนล จอมบริซ / มีอุดมวิ / วรวุฒิ สำรัญ / เหน่งศรี',items:'แผ่นรองกันลื่น 0.4cm สี Barky Beige (110x400=13ชิ้น), 1.6cm สี Organic Beige (140x900=9ชิ้น)',ok:true},
+  {bill:'260813',date:'2026-03-25',cust:'GUKGIG',addr:'578/91 แขวง/เขตแมนย์',ph:'0814994424',tech:'เหล้าสไปซ์ จำกัด',items:'Bebeplay แผ่นรองคลานปูพื้นสำหรับเด็ก ห้องเด็กเล็ก พื้นที่ 14 ตร.ม.',ok:true},
+  {bill:'261057',date:'2026-04-21',cust:'คุณพิรร์',addr:'898/29 โครงการวินสโตน โชฟา ถ.นครสวรรค์ แขวงนวลจันทร์ เขตมีนบุรี กทม. 10220',ph:'0815593265',items:'แผ่นรองกันลื่นสำหรับสัตว์เลี้ยง ห้องนั่งเล่น 31 ตร.ม.',ok:true},
+  {bill:'261559',date:'2026-04-09',cust:'ก. กันตรีนี ลดุล่ำ',addr:'50/40 ซ.สุขุมวิท 107/3 ถ.39 แขวงสาคร กทม. 10170',ph:'0953954951',items:'แผ่นรองกันลื่นสำหรับสัตว์เลี้ยง ห้องนั่งเล่น+โถงทางเดิน 38 ตร.ม.',ok:false},
+  {bill:'261911',date:'2026-04-07',cust:'ศิรณัฐ แอวอมุด',addr:'108/3 ม.แอดธรน์ บางลอน ถ.ราชพฤกษ์ แขวงบางระมาด ตลิ่งชัน กทม. 10170',ph:'0890565959',items:'แผ่นรองกันลื่นสำหรับสัตว์เลี้ยง ห้องนั่งเล่น 16 ตร.ม. (ใช้จริง 19 ตร.ม.)',ok:false},
+  {bill:'262106',date:'2026-04-21',items:'แผ่นรองกันลื่น 0.4cm สี Barky Beige x2 ชิ้น, ใช้งาน 110cm=400เมตร',ok:true},
+  {bill:'263024',date:'2026-04-30',cust:'ก. บอด กอด กองศิษย์',addr:'818/146 สุกรสวัสดิ์ ต.ปริ้ว อ.ระมุง ชลบุรี',ph:'0841945619',items:'แผ่นรองคลานปูพื้นสำหรับเด็ก (bebeplay) ห้องนั่งเล่น 28 ตร.ม.',ok:true},
+  {bill:'263194',date:'2026-04-28',cust:'ก. นลัก',addr:'499 ถ.ประชาชื่น แขวงลาดจาก กรุงเทพฯ',ph:'0966426664',items:'แผ่นรองกันลื่นสำหรับสัตว์เลี้ยง ห้องนั่งเล่น 30 ตร.ม. (ใช้จริง 29.1 ตร.ม.)',ok:false},
+  {bill:'263287',date:'2026-04-23',cust:'สุรัตน์ สินจริญ',addr:'66/332 ม.Anya บางนา-ร่มเกล้า ถ.รามคำแหง 2 แขวงออกโซ เขตลาดกระบัง กทม.',ph:'0886553332',items:'แผ่นรองกันลื่นสำหรับสัตว์เลี้ยง ห้องนอน+ห้องนั่งเล่น+โถง 48 ตร.ม. (ใช้จริง 49 ตร.ม.)',ok:false},
+  {bill:'263329',date:'2026-01-23',items:'แผ่นรองกันลื่นสำหรับสัตว์เลี้ยง ห้องเลี้ยงสัตว์ 6 ตร.ม. (ใช้จริง 14 ตร.ม.)',ok:true},
+  {bill:'263451',date:'2026-01-17',cust:'แมว',addr:'Grand Bangkok Boulevard 889/49 ห้อง 20 ถ.สุขุมวิท แขวงบางนาเหนือ เขตคลองเตย กทม.',ph:'0999966044',items:'แผ่นรองคลานปูพื้นสำหรับเด็ก ห้องนอน+ห้องนั่งเล่น 30 ตร.ม. (ใช้จริง 39 ตร.ม.)',ok:true},
+  {bill:'264177',date:'2026-05-09',tech:'ทิกษณ์ อภิบาล',items:'แผ่นรองกันลื่น Hosttail สี Organic Beige 1.6cm 140x700=8 ผืน (เบิก), ใช้ 2 ผืน, คืน 1 ผืน',ok:true},
+  {bill:'264192',date:'2026-05-14',tech:'ไผ่สน อภิบาล',items:'แผ่นรองกันลื่น Hosttail สี Organic Beige 1.6cm เบิก 110x400=1, 140x700=3 / ใช้ 140x700=2 / คืน 110x600=1',ok:true},
+  {bill:'264354',date:'2026-05-05',cust:'คุณพรอ๊บ ไพริน',addr:'168/150 ซอย Indy Westgate Bang Rak Pattana นนทบุรี 11110',ph:'0803343889',tech:'วรวุฒิ หวังสด / ศิรุต ช่างพลอย',items:'แผ่นรองคลานปูพื้นสำหรับเด็ก ห้องนั่งเล่น 10 ตร.ม. (ใช้จริง 11 ตร.ม.)',ok:true},
+  {bill:'265762',date:'2025-05-02',cust:'ข. ณัฐิมา',addr:'ชอง 049 VIARA Sukhumvit 36 Condominium 118 ถ.สุขุมวิท 36 แขวงคลองโตน เขตคลองเตย กทม.',ph:'0904990993',items:'แผ่นรองกันลื่นสำหรับสัตว์เลี้ยง ห้องนั่งเล่น+โถง 15 ตร.ม. (ใช้จริง 49 ตร.ม.)',ok:false},
+  {bill:'266020',date:'2026-04-29',tech:'ทิกษณ์ อภิบาล / เก่าน้อย เมืองรัตน์ / ลิน',items:'แผ่นรองกันลื่น Hosttail 0.4cm Barky Beige 140x700=4 แผ่น (เบิก), คืน 140x200+140x80',ok:true},
+  {bill:'266275',date:'',tech:'ไกสพ. งามุุต',items:'แผ่นรองกันลื่น 1.6cm Organic Beige: 110x400=2ผืน, 140x900=1ผืน, 140x190=1แผ่น (คืน)',ok:true},
+  {bill:'266669',date:'2026-05-12',tech:'ไกสพ. งามุุต',items:'แผ่นรองกันลื่น 1.6cm Organic Beige เบิก 110x400=1+140x900=4 / ใช้ 140x900=3 / คืน 110x400=1+140x900=1+140x200=1',ok:true},
+  {bill:'267274',date:'2026-05-18',tech:'ไกสพ. งามุุต',items:'แผ่นรองกันลื่น 1.6cm Organic Beige เบิก 140x900=3 / ใช้ 140x900=2 / คืน 140x900=1',ok:true},
+  {bill:'268281',date:'2026-05-20',cust:'K. Akasit',addr:'888/54 ม.2 ม.สถาณีสิริ คลีวารี 2 ต.สลึงจระเพ็น อ.บางเสาธง จ.สมุทรปราการ 10640',ph:'0969292824',tech:'ไกสพ. งามุุต / กิตุจรี ช่างนอก',items:'แผ่นรองคลาน/ปูพื้น 140x700=3ผืน สี White Buzz ห้องเด็กเล็ก พื้นที่ใช้จริง 15 ตร.ม. (สั่ง 14 ตร.ม.)',ok:true},
+  {bill:'268463',date:'2026-05-21',tech:'ไกสพ. งามุุต / ดิจุลิ / วอสุม สตาค / ไกรเกิด',items:'แผ่นรองกันลื่น 0.4cm Barky Beige 110x400=7 (เบิก/ใช้), 1.6cm Organic Beige 140x900=8 (เบิก)',ok:true},
+  {bill:'269255',date:'',tech:'',items:'แผ่นรองกันลื่น 1.6cm Organic Beige 110x400=3 ชิ้น (เบิก)',ok:true},
+  {bill:'269355',date:'2026-06-04',tech:'ไกสพ. งามุุต / วอสุม สตาค',items:'แผ่นรองกันลื่น 1.6cm White Buzz 140x400=2 (เบิก), 140x600=1 (ใช้), 140x400=1+140x100=1 (คืน)',ok:true},
+  {bill:'269852',date:'',tech:'ไกสิทธ์ เลือมสัก / เติมสกล',items:'แผ่นรองกันลื่น 1.6cm Organic Beige 110x600+140x900 (เบิก), 140x900=3 (ใช้), คืน 110x600+140x900+140x180',ok:true},
+  {bill:'270084',date:'2026-06-23',tech:'ไกสิทธ์',items:'แผ่นรองกันลื่น 1.6cm Beige 140x1000=7 ม้วน (เบิก), เหลือ 140x1000=3 ม้วน+140x200=1 แผ่น',ok:true},
+  {bill:'270316',date:'2026-05-25',tech:'ไกสิทธ์ / พิสิฐ ช่างพลอย',items:'แผ่นรองกันลื่น 1.6cm Organic Beige 140x700=4 ผืน (เบิก/ใช้)',ok:false},
+  {bill:'270514',date:'2026-05-23',tech:'ไกสิทธ์ / กรรสิ สาริน / สินเจริญ เสียมพิน',items:'แผ่นรองกันลื่น 1.6cm Organic Beige 140x700=9 ม้วน (เบิก), ใช้ 6 ม้วน, คืน 1+140x200=2',ok:true},
+  {bill:'271251',date:'2026-06-04',tech:'ไกสิทธ์ / วรรณี สิริ',items:'แผ่นรองกันลื่น 1.6cm White Buzz 140x400=2 (เบิก), 140x400=3 (ใช้), 140x400=2 (คืน)',ok:true},
+  {bill:'271351',date:'2026-06-02',tech:'ไกสิทธ์ / พิสิฐ ช่างพลอย',items:'แผ่นรองกันลื่น 1.6cm Organic Beige 140x700=7 (เบิก), 140x400=4 (ใช้), คืน 3 ม้วน',ok:true},
+  {bill:'271519',date:'2026-05-29',tech:'ไกสิทธ์ / วรรณ ลิ้นจี่',items:'แผ่นรองกันลื่น 1.6cm Organic Beige 140x1000 (เบิก), คืน 110x400=2+140x150=2',ok:true},
+  {bill:'271569',date:'2026-06-06',tech:'ทิพพ์ / อาภิรัก',items:'แผ่นรองกันลื่น 1.6cm Organic Beige 140x400=4 (เบิก), 140x600=3 (ใช้), คืน 140x600+140x180',ok:true},
+  {bill:'272103',date:'2026-06-05',tech:'ไกสิทธ์ / อาภิรัก',items:'แผ่นรองกันลื่น 1.6cm Organic Beige 140x400=9 (เบิก), 140x400=6 (ใช้), คืน 140x400=3+140x120=1',ok:true},
+  {bill:'272577',date:'2026-06-09',tech:'พิธวัส / สราวุธ',items:'แผ่นรองกันลื่น 1.6cm Beige 140x400=4 ม้วน (เบิก), ใช้ 2 ม้วน+140x104=1',ok:true},
+  {bill:'272816',date:'2026-06-11',tech:'ทยนชย / สราวุธ',items:'แผ่นรองกันลื่น 1.6cm Beige 140x400=1 ม้วน x3 รายการ (เบิก), เหลือ 140x190=1',ok:true},
+  {bill:'273569',date:'2026-06-10',cust:'คุณหญิง',addr:'222/118 แกรนด์ 10 ราษฎร์บูรณะ แขวงท่าแร้ง บางเขน กทม. 10220',ph:'0173507382',items:'แผ่นรองคลานปูพื้นสำหรับเด็ก ห้องเด็กเล็ก พื้นที่ 10 ตร.ม.',ok:true},
+  {bill:'274420',date:'2026-06-15',tech:'ทิพพ์ / เต็มหล่อ',items:'แผ่นรองกันลื่น 1.6cm Beige 140x400=3+140x60=3 (เบิก), 140x300=1+140x60=3 (เหลือ) พื้นที่ 12 ตร.ม.',ok:true},
+  {bill:'274770',date:'2026-05-19',addr:'กาญจนบุรี',tech:'ทิพพ์ / อาภิรัก / นิชิวนัย / วอสุวี / คล้ายนิล',items:'แผ่นรองกันลื่น 0.4cm Barky Beige 110x400=13 ชิ้น, 1.6cm Organic Beige 140x700=7 ชิ้น',ok:true},
+  {bill:'275230',date:'2026-06-25',tech:'ทิพพ์ / สิงหวิ',items:'แผ่นรองกันลื่น 1.6cm Beige 140x1000=3 ม้วน (เบิก), 140x300+140x270 (เหลือ) พื้นที่ 22 ตร.ม.',ok:true}
+];
+function ohApplyAccept(){
+  HOSTTAIL_ACCEPT.forEach(function(row){
+    var bc=String(row.bill).replace(/-$/,'');
+    var job=(typeof OH_DATA!=='undefined'?OH_DATA:[]).find(function(t){var b=String(t.bill||'');return b===bc||b===row.bill;});
+    if(!job)(typeof IP_T!=='undefined'?IP_T:[]).find(function(t){var o=String(t.order||'');if(o===bc||o===row.bill){job=t;return true;}});
+    if(!job)return;
+    if(row.date)job.due=row.date;
+    if(row.cust)job.customer=row.cust;
+    if(row.addr)job.addr=row.addr;
+    if(row.ph)job.phone=row.ph;
+    if(row.tech)job.tech=row.tech;
+    job.items=row.items||'';
+    job.accept=row.ok?'ok':'fix';
+    if(row.ok&&job.stage<7)job.stage=7;
+  });
+}
 var OH_DATA=[];
 var OH_FILTER={q:'',stage:''};
 
@@ -1506,6 +1568,7 @@ function ohLoad(){
       m.docs=Array.isArray(x.docs)?x.docs:[];
       m.callLogs=Array.isArray(x.call_logs)?x.call_logs:[];
       m.jobNo=x.job_no||'';
+      m.price=(x.price!=null)?Number(x.price):null;
       return m;
     });
     // auto-complete: มี eval score แล้วแต่ stage ยังไม่ถึง 7
@@ -1526,6 +1589,7 @@ function ohLoad(){
     $('#ohMsg').textContent='';
     ohRenderKpis();
     ohRender();
+    ohApplyAccept();
     var nb=$('#nbInst');if(nb)nb.textContent=OH_DATA.length;
   });
 }
@@ -1622,6 +1686,7 @@ function ohOpenDetail(orderNo){
     +(t.bill?field('เลขบิล','<span class="bill-chip">'+esc(t.bill)+'</span>'):'')
     +field('SKU',esc(t.sku||'—'))
     +field('สินค้า','<b>'+esc(t.product)+'</b>')
+    +field('มูลค่าสินค้า',t.price!=null?'<b style="color:var(--green)">฿'+t.price.toLocaleString('th-TH')+'</b>':'<span style="color:var(--muted)">—</span>')
     +field('ลูกค้า',esc(t.customer||'—'))
     +(t.phone?field('เบอร์โทร','<a href="tel:'+esc(t.phone)+'" style="color:var(--brand)">'+esc(t.phone)+'</a>'):'')
     +field('วันสั่ง',t.date||'—')
@@ -1630,6 +1695,9 @@ function ohOpenDetail(orderNo){
     +field('ผู้รับผิดชอบ',t.assignees&&t.assignees.length?esc(t.assignees.join(', ')):'—')
     +(t.addr?field('ที่อยู่',esc(t.addr)):'')
     +field('ช่องทาง',t.via==='auto'?'🔗 จากออเดอร์ (Auto)':t.via==='planner'?'📋 Planner':'✍ สร้างเอง')
+    +(t.tech?field('ช่างติดตั้ง','👷 '+esc(t.tech)):'')
+    +(t.accept?field('ตรวจรับงาน',t.accept==='ok'?'<span style="background:var(--green-l);color:var(--green);padding:2px 10px;border-radius:20px;font-size:11.5px;font-weight:600">✅ ตรวจสอบแล้ว</span>':'<span style="background:var(--amber-l);color:var(--amber);padding:2px 10px;border-radius:20px;font-size:11.5px;font-weight:600">⚠ มีรายการแก้ไข</span>'):'')
+    +(t.items?field('รายการติดตั้ง',esc(t.items)):'')
     +callSec+'</div>';
   // TAB 2: นัดหมาย
   var qItem=null;try{qItem=IP_QUEUE.find(function(x){return String(x.order)===String(t.order);});}catch(e){}
