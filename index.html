@@ -449,9 +449,12 @@ function docRetryOcr(id){
   var d=DOCS.find(function(x){return x.id===id;});
   if(!d){toast('ไม่พบเอกสาร');return;}
   if(!d.imgSrc){
-    var inp=document.createElement('input');inp.type='file';inp.accept='.pdf,application/pdf';
-    inp.onchange=function(){if(!inp.files||!inp.files[0])return;var fr=new FileReader();fr.onload=function(e){d.imgSrc=e.target.result;docRetryOcr(id);};fr.readAsDataURL(inp.files[0]);};
-    inp.click();return;
+    idbGet(id,function(blob){
+      if(blob){d.imgSrc=URL.createObjectURL(blob);docRetryOcr(id);return;}
+      var inp=document.createElement('input');inp.type='file';inp.accept='.pdf,image/*';
+      inp.onchange=function(){if(!inp.files||!inp.files[0])return;var f=inp.files[0];idbSave(id,f);d.imgSrc=URL.createObjectURL(f);docRetryOcr(id);};
+      inp.click();
+    });return;
   }
   if(!OCR_BACKEND){toast('ต้องตั้งค่า Backend OCR ก่อน');return;}
   var cont=document.getElementById('docInfoPane')||document.getElementById('drawer');
@@ -538,9 +541,12 @@ function docOpenFile(id){
   var d=DOCS.find(function(x){return x.id===id;});
   if(!d){toast('ไม่พบเอกสาร');return;}
   if(!d.imgSrc){
-    var _inp=document.createElement('input');_inp.type='file';_inp.accept='.pdf,image/*';
-    _inp.onchange=function(){if(!_inp.files||!_inp.files[0])return;d.imgSrc=URL.createObjectURL(_inp.files[0]);docOpenFile(id);};
-    _inp.click();return;
+    idbGet(id,function(blob){
+      if(blob){d.imgSrc=URL.createObjectURL(blob);docOpenFile(id);return;}
+      var _inp=document.createElement('input');_inp.type='file';_inp.accept='.pdf,image/*';
+      _inp.onchange=function(){if(!_inp.files||!_inp.files[0])return;var f=_inp.files[0];idbSave(id,f);d.imgSrc=URL.createObjectURL(f);docOpenFile(id);};
+      _inp.click();
+    });return;
   }
   if(document.getElementById('filePreviewPane')){docClosePreview();return;}
   var drw=document.getElementById('drawer');
@@ -989,6 +995,12 @@ function wzPickType(t){ if(!TPL[t])return; curType=t;
   wzGo(2);
 }
 function handleScan(e){ if(!e.target.files||!e.target.files[0])return; wzGo(3); runOCR(e); }
+/* ── IndexedDB file store ── */
+var _idb=null;
+function _getIDB(cb){if(_idb){cb(_idb);return;}var r=indexedDB.open('mpd_files',1);r.onupgradeneeded=function(e){e.target.result.createObjectStore('blobs');};r.onsuccess=function(e){_idb=e.target.result;cb(_idb);};r.onerror=function(){cb(null);};}
+function idbSave(id,blob){if(!blob)return;_getIDB(function(db){if(!db)return;try{db.transaction('blobs','readwrite').objectStore('blobs').put(blob,id);}catch(e){}});}
+function idbGet(id,cb){_getIDB(function(db){if(!db){cb(null);return;}var r=db.transaction('blobs','readonly').objectStore('blobs').get(id);r.onsuccess=function(){cb(r.result||null);};r.onerror=function(){cb(null);};});}
+function idbDelete(id){_getIDB(function(db){if(!db)return;try{db.transaction('blobs','readwrite').objectStore('blobs').delete(id);}catch(e){}});}
 var OCR_QUEUE=[],OCR_QIDX=0,OCR_QDONE=0,OCR_QSKIP=0,OCR_BATCH=false;
 function handleFolderScan(e){
   var files=Array.from(e.target.files).filter(function(f){return f.type.startsWith('image/')||f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf');}).sort(function(a,b){return a.name.localeCompare(b.name);});
@@ -1078,7 +1090,7 @@ function autoSaveFromOcr(pf,ft){
     paper:true,scanned:true,created:today(),updated:today(),review:'-',approver:'-',
     captured:caps,bill:bill,formType:ft,imgSrc:imgSrc,
     hist:[['Batch OCR: '+t.label,today(),'OCR'],['รออนุมัติ',today(),'ระบบ']]};
-  DOCS.unshift(doc);
+  DOCS.unshift(doc);if(OCR_BATCH&&OCR_QUEUE[OCR_QIDX])idbSave(doc.id,OCR_QUEUE[OCR_QIDX]);
   if(SB&&bill){(function(){var allJobs=(typeof OH_DATA!=='undefined'?OH_DATA:[]).concat(typeof IP_T!=='undefined'?IP_T:[]);var job=allJobs.find(function(x){return x.bill===bill;});if(!job)return;var ds=JSON.parse(JSON.stringify(job.docs||[]));var idx=ds.findIndex(function(x){return x.form_type===ft;});var entry={form_type:ft,ts:today(),caps:caps};if(idx>=0)ds[idx]=entry;else ds.push(entry);SB.from('install_jobs').update({docs:ds}).eq('order_no',job.order).then(function(){});job.docs=ds;})();}
   return 1;
 }
@@ -1090,7 +1102,7 @@ function autoSaveFailed(f){
     paper:true,scanned:false,created:today(),updated:today(),review:'-',approver:'-',
     captured:[],bill:'',formType:curType,imgSrc:fileUrl,
     hist:[['Batch OCR ล้มเหลว: '+fname,today(),'ระบบ'],['รออนุมัติ — กรอกด้วยตนเอง',today(),'ระบบ']]};
-  DOCS.unshift(doc);
+  DOCS.unshift(doc);if(f)idbSave(doc.id,f);
 }
 function handlePdfScan(e){
   if(!e.target.files||!e.target.files[0])return;
