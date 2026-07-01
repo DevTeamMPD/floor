@@ -442,9 +442,81 @@ function renderRegBody(){const rows=regList();$('#regBody').innerHTML=rows.map(d
 function renderRegister(){renderRegChips();renderRegBody();}
 function openDoc(id){const d=DOCS.find(x=>x.id===id);if(!d)return;const tl=d.hist.map((h,i)=>'<div class="it '+(i<d.hist.length-1?'done':'now')+'"><div class="t">'+h[0]+'</div><div class="d">'+h[1]+' · '+h[2]+'</div></div>').join('');
   const locBlock=d.loc.cab==='-'?'<div style="color:var(--muted);font-size:13px">เอกสารนี้เป็นดิจิทัลเท่านั้น ไม่มีต้นฉบับกระดาษ</div>':'<div class="loc-big"><div class="loc-cell"><div class="lc-l">ตู้</div><div class="lc-v">'+d.loc.cab+'</div></div><div class="loc-cell"><div class="lc-l">ชั้น</div><div class="lc-v">'+d.loc.shelf+'</div></div><div class="loc-cell"><div class="lc-l">แฟ้ม</div><div class="lc-v" style="font-size:14px">'+d.loc.folder+'</div></div></div>';
-  $('#drawer').innerHTML='<div class="dr-head"><button class="x" onclick="closeDrawer()">×</button><span class="code">'+d.code+'</span><h2>'+d.title+'</h2>'+catTag(d.cat)+' '+statusTag(d.status)+'</div><div class="dr-body"><div class="dr-card"><h4>📍 ตำแหน่งจัดเก็บกระดาษ</h4>'+locBlock+(d.paper?'<div style="margin-top:12px;font-size:12.5px;color:var(--ink2)">สถานะสแกน: '+(d.scanned?'<b style="color:var(--green)">✔ แปลงเป็นดิจิทัลแล้ว</b>':'<b style="color:var(--red)">✖ ยังไม่ได้สแกน</b>')+'</div>':'')+(d.paper&&!d.scanned?'<button class="btn primary sm" style="margin-top:12px" onclick="markScanned('+d.id+')">🖨️ ทำเครื่องหมายว่าสแกนแล้ว</button>':'')+'</div><div class="dr-card"><h4>รายละเอียดเอกสาร</h4><div class="field"><span class="fk">เวอร์ชัน</span><span class="fv">v'+d.ver+'</span></div><div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv">'+d.owner+'</span></div><div class="field"><span class="fk">หน่วยงาน</span><span class="fv">'+d.dept+'</span></div><div class="field"><span class="fk">ผู้อนุมัติ</span><span class="fv">'+d.approver+'</span></div><div class="field"><span class="fk">สร้างเมื่อ</span><span class="fv">'+d.created+'</span></div><div class="field"><span class="fk">แก้ไขล่าสุด</span><span class="fv">'+d.updated+'</span></div><div class="field"><span class="fk">รอบทบทวนถัดไป</span><span class="fv">'+d.review+'</span></div></div><div class="dr-card"><h4>ประวัติเอกสาร</h4><div class="tl">'+tl+'</div></div><div style="display:flex;gap:10px">'+(d.status==='pending'?'<button class="btn ok" onclick="approveDoc('+d.id+')">✓ อนุมัติ</button><button class="btn no" onclick="rejectDoc('+d.id+')">✕ ตีกลับ</button>':'')+'<button class="btn ghost" onclick="docOpenFile('+d.id+')">📂 เปิดไฟล์</button></div></div>';
+  $('#drawer').innerHTML='<div class="dr-head"><button class="x" onclick="closeDrawer()">×</button><span class="code">'+d.code+'</span><h2>'+d.title+'</h2>'+catTag(d.cat)+' '+statusTag(d.status)+'</div><div class="dr-body"><div class="dr-card"><h4>📍 ตำแหน่งจัดเก็บกระดาษ</h4>'+locBlock+(d.paper?'<div style="margin-top:12px;font-size:12.5px;color:var(--ink2)">สถานะสแกน: '+(d.scanned?'<b style="color:var(--green)">✔ แปลงเป็นดิจิทัลแล้ว</b>':'<b style="color:var(--red)">✖ ยังไม่ได้สแกน</b>')+'</div>':'')+(d.paper&&!d.scanned?'<button class="btn primary sm" style="margin-top:12px" onclick="markScanned('+d.id+')">🖨️ ทำเครื่องหมายว่าสแกนแล้ว</button>':'')+'</div><div class="dr-card"><h4>รายละเอียดเอกสาร</h4><div class="field"><span class="fk">เวอร์ชัน</span><span class="fv">v'+d.ver+'</span></div><div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv">'+d.owner+'</span></div><div class="field"><span class="fk">หน่วยงาน</span><span class="fv">'+d.dept+'</span></div><div class="field"><span class="fk">ผู้อนุมัติ</span><span class="fv">'+d.approver+'</span></div><div class="field"><span class="fk">สร้างเมื่อ</span><span class="fv">'+d.created+'</span></div><div class="field"><span class="fk">แก้ไขล่าสุด</span><span class="fv">'+d.updated+'</span></div><div class="field"><span class="fk">รอบทบทวนถัดไป</span><span class="fv">'+d.review+'</span></div></div><div class="dr-card"><h4>ประวัติเอกสาร</h4><div class="tl">'+tl+'</div></div><div style="display:flex;gap:10px">'+(d.status==='pending'?'<button class="btn ok" onclick="approveDoc('+d.id+')">✓ อนุมัติ</button><button class="btn no" onclick="rejectDoc('+d.id+')">✕ ตีกลับ</button>':'')+'<button class="btn ghost" onclick="docOpenFile('+d.id+')">📂 เปิดไฟล์</button>'+(!d.captured||!d.captured.length?'<button class="btn primary" style="font-size:12px" onclick="docRetryOcr('+d.id+')">🔄 สแกนอีกครั้ง</button><button class="btn" style="font-size:12px" onclick="docManualFill('+d.id+')">✍️ กรอกเอง</button>':'')+'</div></div>';
   $('#scrim').classList.add('show');$('#drawer').classList.add('show');}
-function markScanned(id){const d=DOCS.find(x=>x.id===id);d.scanned=true;d.hist.push(['สแกนเข้าระบบดิจิทัล',today(),'MPD']);toast('✔ ทำเครื่องหมายสแกนแล้ว');refreshAll();openDoc(id);}
+function docRetryOcr(id){
+  var d=DOCS.find(function(x){return x.id===id;});
+  if(!d||!d.imgSrc){toast('ไม่มีไฟล์ต้นฉบับ');return;}
+  if(!OCR_BACKEND){toast('ต้องตั้งค่า Backend OCR ก่อน');return;}
+  var cont=document.getElementById('docInfoPane')||document.getElementById('drawer');
+  var body=cont.querySelector('.dr-body');if(!body)return;
+  body.innerHTML='<div style="padding:20px;text-align:center"><div style="font-size:32px">&#9203;</div><div style="margin-top:8px;color:var(--brand);font-weight:700">กำลังส่งให้ AI สแกนใหม่...</div></div>';
+  fetch(d.imgSrc).then(function(r){return r.blob();})
+    .then(function(blob){
+      var fname=(d.title||'doc').replace(/^\[OCR ไม่สำเร็จ\] /,'');
+      var file=new File([blob],fname,{type:'application/pdf'});
+      var fd=new FormData();fd.append('file',file);
+      return fetch(OCR_BACKEND.replace(/\/+$/,'')+'/ocr/pdf',{method:'POST',body:fd});
+    }).then(function(r){return r.json();})
+    .then(function(res){
+      if(!res||res.ok===false){body.innerHTML='<div style="padding:16px;color:var(--red)">สแกนไม่สำเร็จ &mdash; <a href="#" onclick="docManualFill('+id+');return false">กรอกเอง</a></div>';return;}
+      docRenderUpdateForms(id,res.forms||{},body);
+    }).catch(function(){body.innerHTML='<div style="padding:16px;color:var(--red)">เชื่อมต่อไม่ได้ &mdash; <a href="#" onclick="docManualFill('+id+');return false">กรอกเอง</a></div>';});
+}
+function docManualFill(id){
+  var cont=document.getElementById('docInfoPane')||document.getElementById('drawer');
+  var body=cont.querySelector('.dr-body');if(!body)return;
+  docRenderUpdateForms(id,{},body);
+}
+function docRenderUpdateForms(id,forms,bodyEl){
+  var LABELS={receive:'ฟอร์มรับงานติดตั้ง',issue:'ฟอร์มเบิก-ใช้-คืน',sign:'ลายเซ็นยืนยัน'};
+  var h='<div style="padding:12px">';
+  var hasOcr=Object.keys(forms).some(function(k){return forms[k]&&Object.values(forms[k]).some(function(v){return v&&String(v).trim();});});
+  if(hasOcr)h+='<div class="ocr-badge" style="margin-bottom:10px">AI อ่านได้บางส่วน — ตรวจสอบแล้วกดบันทึก</div>';
+  else h+='<div style="margin-bottom:10px;font-size:12.5px;color:var(--muted)">กรอกข้อมูลในช่องที่ต้องการแล้วกดบันทึก</div>';
+  ['receive','issue','sign'].forEach(function(ft){
+    var t=TPL[ft];if(!t)return;var pf=forms[ft]||{};var inner='';
+    t.groups.forEach(function(g){inner+='<div style="font-size:11.5px;font-weight:700;color:var(--brand);margin:10px 0 5px">'+g.h+'</div>';g.f.forEach(function(fd){inner+=ctrlHtml(fd[0],fd[1],fd[2],pf);});});
+    if(t.table)inner+='<div style="font-size:11.5px;font-weight:700;color:var(--brand);margin:10px 0 5px">ตารางเบิก-ใช้-คืนสินค้า</div>'+tableHtml(pf);
+    h+='<details open style="border:1px solid var(--line);border-radius:10px;margin-bottom:8px;padding:10px 12px"><summary style="cursor:pointer;font-weight:700;font-size:13px;margin-bottom:4px">'+LABELS[ft]+'</summary><div data-ft="'+ft+'">'+inner+'</div></details>';
+  });
+  h+='<button class="btn primary" style="width:100%;margin-top:8px" onclick="docSaveUpdated('+id+')">บันทึกและอัปเดตในระบบ</button></div>';
+  bodyEl.innerHTML=h;
+}
+function docSaveUpdated(id){
+  var d=DOCS.find(function(x){return x.id===id;});if(!d)return;
+  var cont=document.getElementById('docInfoPane')||document.getElementById('drawer');
+  var allCaps=[];
+  ['receive','issue','sign'].forEach(function(ft){
+    var sec=cont.querySelector('[data-ft="'+ft+'"]');if(!sec)return;
+    var vals={},labels={},order=[];
+    sec.querySelectorAll('[data-label]').forEach(function(el){
+      var k=el.getAttribute('data-k'),lb=el.getAttribute('data-label');
+      if(!(k in labels)){labels[k]=lb;order.push(k);}
+      if(el.type==='checkbox'){if(el.checked){vals[k]=vals[k]||[];vals[k].push(el.value);}}
+      else if(el.type==='radio'){if(el.checked)vals[k]=el.value;}
+      else{if(el.value.trim())vals[k]=el.value.trim();}
+    });
+    order.forEach(function(k){var v=vals[k];if(v&&v.length)allCaps.push({l:labels[k],v:Array.isArray(v)?v.join(', '):v});});
+  });
+  if(!allCaps.length){toast('ยังไม่มีข้อมูล กรอกอย่างน้อย 1 ช่อง');return;}
+  d.captured=allCaps;d.scanned=true;d.updated=today();
+  d.title=d.title.replace(/^\[OCR ไม่สำเร็จ\] /,'');
+  d.hist.push(['แก้ไข/กรอกข้อมูลโดยแอดมิน',today(),'แอดมิน']);
+  if(typeof SB!=='undefined'&&SB&&d.bill){(function(){
+    var allJobs=[];
+    if(typeof OH_DATA!=='undefined')allJobs=allJobs.concat(OH_DATA);
+    if(typeof IP_T!=='undefined')allJobs=allJobs.concat(IP_T);
+    var job=allJobs.find(function(x){return x.bill===d.bill;});if(!job)return;
+    var ds=JSON.parse(JSON.stringify(job.docs||[]));
+    var idx2=ds.findIndex(function(x){return x.form_type===d.formType;});
+    var entry={form_type:d.formType,ts:today(),caps:allCaps};
+    if(idx2>=0)ds[idx2]=entry;else ds.push(entry);
+    SB.from('install_jobs').update({docs:ds}).eq('order_no',job.order).then(function(){});
+    job.docs=ds;
+  })();}
+  refreshAll();toast('อัปเดตเอกสาร '+esc(d.code)+' เรียบร้อย');closeDrawer();
+}function markScanned(id){const d=DOCS.find(x=>x.id===id);d.scanned=true;d.hist.push(['สแกนเข้าระบบดิจิทัล',today(),'MPD']);toast('✔ ทำเครื่องหมายสแกนแล้ว');refreshAll();openDoc(id);}
 function docOpenFile(id){
   var d=DOCS.find(function(x){return x.id===id;});
   if(!d||!d.imgSrc){toast('ยังไม่มีไฟล์ดิจิทัลที่เก็บไว้');return;}
@@ -707,7 +779,7 @@ function openDoc(id){var d=DOCS.find(function(x){return x.id===id;});if(!d)retur
   var tl=d.hist.map(function(h,i){return '<div class="it '+(i<d.hist.length-1?'done':'now')+'"><div class="t">'+h[0]+'</div><div class="d">'+h[1]+' · '+h[2]+'</div></div>';}).join('');
   var locBlock=d.loc.cab==='-'?'<div style="color:var(--muted);font-size:13px">เอกสารนี้ยังไม่ได้ระบุตำแหน่งกระดาษ</div>':'<div class="loc-big"><div class="loc-cell"><div class="lc-l">ตู้</div><div class="lc-v">'+d.loc.cab+'</div></div><div class="loc-cell"><div class="lc-l">ชั้น</div><div class="lc-v">'+d.loc.shelf+'</div></div><div class="loc-cell"><div class="lc-l">แฟ้ม</div><div class="lc-v" style="font-size:14px">'+d.loc.folder+'</div></div></div>';
   var capCard=(d.captured&&d.captured.length)?'<div class="dr-card"><h4>📋 ข้อมูลที่ดึง/กรอกจากฟอร์ม ('+d.captured.length+' ช่อง)</h4>'+d.captured.map(function(c){return '<div class="field"><span class="fk">'+esc(c.l)+'</span><span class="fv">'+esc(c.v)+'</span></div>';}).join('')+(d.bill?'<div style="margin-top:10px;font-size:12px;color:var(--brand)">🔗 เลขบิล/เอกสาร '+esc(d.bill)+'</div>':'')+'</div>':'';
-  $('#drawer').innerHTML='<div class="dr-head"><button class="x" onclick="closeDrawer()">×</button><span class="code">'+d.code+'</span><h2>'+d.title+'</h2>'+catTag(d.cat)+' '+statusTag(d.status)+'</div><div class="dr-body">'+capCard+'<div class="dr-card"><h4>📍 ตำแหน่งจัดเก็บกระดาษ</h4>'+locBlock+(d.paper?'<div style="margin-top:12px;font-size:12.5px;color:var(--ink2)">สถานะสแกน: '+(d.scanned?'<b style="color:var(--green)">✔ มีไฟล์ดิจิทัล</b>':'<b style="color:var(--red)">✖ ยังไม่สแกน</b>')+'</div>':'')+'</div><div class="dr-card"><h4>รายละเอียดเอกสาร</h4><div class="field"><span class="fk">เวอร์ชัน</span><span class="fv">v'+d.ver+'</span></div><div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv">'+d.owner+'</span></div><div class="field"><span class="fk">หน่วยงาน</span><span class="fv">'+d.dept+'</span></div><div class="field"><span class="fk">สร้างเมื่อ</span><span class="fv">'+d.created+'</span></div></div><div class="dr-card"><h4>ประวัติเอกสาร</h4><div class="tl">'+tl+'</div></div><div style="display:flex;gap:10px">'+(d.status==='pending'?'<button class="btn ok" onclick="approveDoc('+d.id+')">✓ อนุมัติ</button><button class="btn no" onclick="rejectDoc('+d.id+')">✕ ตีกลับ</button>':'')+'<button class="btn ghost" onclick="docOpenFile('+d.id+')">📂 เปิดไฟล์</button></div></div>';
+  $('#drawer').innerHTML='<div class="dr-head"><button class="x" onclick="closeDrawer()">×</button><span class="code">'+d.code+'</span><h2>'+d.title+'</h2>'+catTag(d.cat)+' '+statusTag(d.status)+'</div><div class="dr-body">'+capCard+'<div class="dr-card"><h4>📍 ตำแหน่งจัดเก็บกระดาษ</h4>'+locBlock+(d.paper?'<div style="margin-top:12px;font-size:12.5px;color:var(--ink2)">สถานะสแกน: '+(d.scanned?'<b style="color:var(--green)">✔ มีไฟล์ดิจิทัล</b>':'<b style="color:var(--red)">✖ ยังไม่สแกน</b>')+'</div>':'')+'</div><div class="dr-card"><h4>รายละเอียดเอกสาร</h4><div class="field"><span class="fk">เวอร์ชัน</span><span class="fv">v'+d.ver+'</span></div><div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv">'+d.owner+'</span></div><div class="field"><span class="fk">หน่วยงาน</span><span class="fv">'+d.dept+'</span></div><div class="field"><span class="fk">สร้างเมื่อ</span><span class="fv">'+d.created+'</span></div></div><div class="dr-card"><h4>ประวัติเอกสาร</h4><div class="tl">'+tl+'</div></div><div style="display:flex;gap:10px">'+(d.status==='pending'?'<button class="btn ok" onclick="approveDoc('+d.id+')">✓ อนุมัติ</button><button class="btn no" onclick="rejectDoc('+d.id+')">✕ ตีกลับ</button>':'')+'<button class="btn ghost" onclick="docOpenFile('+d.id+')">📂 เปิดไฟล์</button>'+(!d.captured||!d.captured.length?'<button class="btn primary" style="font-size:12px" onclick="docRetryOcr('+d.id+')">🔄 สแกนอีกครั้ง</button><button class="btn" style="font-size:12px" onclick="docManualFill('+d.id+')">✍️ กรอกเอง</button>':'')+'</div></div>';
   $('#scrim').classList.add('show');$('#drawer').classList.add('show');}
 /* setup: inject form-type selector + bind */
 (function(){
