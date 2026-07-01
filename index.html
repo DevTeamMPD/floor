@@ -259,7 +259,7 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
               <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px;text-align:center">
                 <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">หรือเลือกทั้งโฟลเดอร์ — ระบบจะสแกนทีละไฟล์ให้อัตโนมัติ</div>
                 <button type="button" class="btn wz-bigbtn" onclick="document.getElementById('scanFolder').click()">📁 เลือกโฟลเดอร์ (Batch OCR)</button>
-                <input type="file" id="scanFolder" webkitdirectory accept="image/*" style="display:none" onchange="handleFolderScan(event)">
+                <input type="file" id="scanFolder" webkitdirectory accept="image/*,.pdf" style="display:none" onchange="handleFolderScan(event)">
               </div>
               <div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center">
                 <button type="button" class="btn ghost sm" onclick="wzDemo()">ลองตัวอย่างจำลอง (เดโม)</button>
@@ -742,7 +742,7 @@ function renderPdfForms(forms){
       '<summary style="cursor:pointer;font-weight:700;font-size:13.5px;margin-bottom:6px">'+LABELS[ft]+'</summary>'+
       '<div data-ft="'+ft+'">'+inner+'</div></details>';
   });
-  h+='<button class="btn primary" style="width:100%;margin-top:14px" onclick="savePdfAllForms()">💾 บันทึกทุกฟอร์มเข้าทะเบียน</button>';
+  if(OCR_BATCH){h+='<div style="display:flex;gap:8px;margin-top:14px"><button class="btn primary" style="flex:2" onclick="savePdfAllForms()">&#128190; บันทึกทุกฟอร์ม &amp; ต่อไป ('+(OCR_QIDX+1)+'/'+OCR_QUEUE.length+')</button><button class="btn" style="flex:1" onclick="batchSkip()">&#9205; ข้าม</button></div>';}else{h+='<button class="btn primary" style="width:100%;margin-top:14px" onclick="savePdfAllForms()">&#128190; บันทึกทุกฟอร์มเข้าทะเบียน</button>';}
   $('#ocrForm').innerHTML=h;
 }
 function savePdfAllForms(){
@@ -772,11 +772,10 @@ function savePdfAllForms(){
     var doc={id:nextId++,code:code,title:title,cat:t.cat,ver:'1.0',status:'pending',owner:'(สแกน PDF OCR)',dept:'บริการติดตั้ง',loc:{cab:'-',shelf:'-',folder:'-'},paper:true,scanned:true,created:today(),updated:today(),review:'-',approver:'-',captured:caps,bill:bill,formType:ft,hist:[['สแกน PDF OCR: '+t.label,today(),'OCR'],['รออนุมัติ',today(),'ระบบ']]};
     DOCS.unshift(doc);saved++;
   });
-  if(!saved){toast('⚠ ยังไม่มีข้อมูลในฟอร์มใดเลย');return;}
+  if(!saved){toast('&#9888; ยังไม่มีข้อมูลในฟอร์มใดเลย');return;}
   refreshAll();
-  $('#scanPrev').innerHTML='<div style="font-size:40px">✅</div><div style="margin-top:10px;font-size:13px;color:var(--green)"><b>บันทึก '+saved+' ฟอร์มเข้าทะเบียนแล้ว</b></div>';
-  $('#ocrForm').innerHTML='<div class="empty"><div class="big">🎉</div>บันทึก PDF ครบ '+saved+' ฟอร์ม<br><div style="margin-top:14px;display:flex;gap:8px;justify-content:center"><button class="btn ghost sm" onclick="go(\'register\')">ดูในทะเบียน →</button><button class="btn ghost sm" onclick="wzGo(1)">สแกนใหม่</button></div></div>';
-  toast('💾 บันทึก PDF ทั้งหมด '+saved+' ฟอร์มเข้าทะเบียนแล้ว');
+  if(OCR_BATCH){OCR_QDONE++;toast('&#128190; บันทึก PDF '+(OCR_QIDX+1)+'/'+OCR_QUEUE.length+' ('+saved+' ฟอร์ม) แล้ว');batchNext();}
+  else{$('#scanPrev').innerHTML='<div style="font-size:40px">&#9989;</div><div style="margin-top:10px;font-size:13px;color:var(--green)"><b>บันทึก '+saved+' ฟอร์มเข้าทะเบียนแล้ว</b></div>';$('#ocrForm').innerHTML='<div class="empty"><div class="big">&#127881;</div>บันทึก PDF ครบ '+saved+' ฟอร์ม<br><div style="margin-top:14px;display:flex;gap:8px;justify-content:center"><button class="btn ghost sm" onclick="go(\'register\')">ดูในทะเบียน &#8594;</button><button class="btn ghost sm" onclick="wzGo(1)">สแกนใหม่</button></div></div>';toast('&#128190; บันทึก PDF ทั้งหมด '+saved+' ฟอร์มเข้าทะเบียนแล้ว');}
 }
 function runTesseractOCR(f){
   $('#ocrForm').innerHTML='<div class="empty"><div class="big">⏳</div><div id="ocrProg">กำลังเตรียม OCR ในเครื่อง...</div></div>';
@@ -872,7 +871,7 @@ function wzPickType(t){ if(!TPL[t])return; curType=t;
 function handleScan(e){ if(!e.target.files||!e.target.files[0])return; wzGo(3); runOCR(e); }
 var OCR_QUEUE=[],OCR_QIDX=0,OCR_QDONE=0,OCR_QSKIP=0,OCR_BATCH=false;
 function handleFolderScan(e){
-  var files=Array.from(e.target.files).filter(function(f){return f.type.startsWith('image/');}).sort(function(a,b){return a.name.localeCompare(b.name);});
+  var files=Array.from(e.target.files).filter(function(f){return f.type.startsWith('image/')||f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf');}).sort(function(a,b){return a.name.localeCompare(b.name);});
   e.target.value='';
   if(!files.length){toast('⚠ ไม่พบไฟล์รูปภาพในโฟลเดอร์');return;}
   OCR_QUEUE=files;OCR_QIDX=0;OCR_QDONE=0;OCR_QSKIP=0;OCR_BATCH=true;
@@ -894,10 +893,24 @@ function batchUpdateBar(){
 }
 function batchRunCurrent(){
   var f=OCR_QUEUE[OCR_QIDX];if(!f)return;
-  var url=URL.createObjectURL(f);
-  $('#scanPrev').innerHTML='<img src="'+url+'" style="max-width:100%;max-height:100%;object-fit:contain"/><div class="scanline"></div><div style="font-size:11px;color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(f.name)+'</div>';
+  var isPdf=f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf');
+  if(isPdf){
+    $('#scanPrev').innerHTML='<div style="font-size:40px">&#128196;</div><div style="font-size:13px;margin-top:8px;color:var(--brand);font-weight:700">'+esc(f.name)+'</div><div class="scanline"></div>';
+  } else {
+    var url=URL.createObjectURL(f);
+    $('#scanPrev').innerHTML='<img src="'+url+'" style="max-width:100%;max-height:100%;object-fit:contain"/><div class="scanline"></div><div style="font-size:11px;color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(f.name)+'</div>';
+  }
   $('#ocrForm').innerHTML='<div class="empty"><div class="big">&#9203;</div><div id="ocrProg">กำลังส่งให้ AI อ่าน...</div></div>';
-  if(OCR_BACKEND)runServerOCR(f);else runTesseractOCR(f);
+  if(isPdf){batchRunPdf(f);}else if(OCR_BACKEND)runServerOCR(f);else runTesseractOCR(f);
+}
+function batchRunPdf(f){
+  if(!OCR_BACKEND){toast('&#9888; ต้องตั้งค่า Backend OCR ก่อนสแกน PDF');batchSkip();return;}
+  var fd=new FormData();fd.append('file',f);
+  fetch(OCR_BACKEND.replace(/\/+$/,'')+'/ocr/pdf',{method:'POST',body:fd}).then(function(r){return r.json();})
+    .then(function(res){var sl=$('#scanPrev').querySelector('.scanline');if(sl)sl.remove();
+      if(!res||res.ok===false){toast('&#9888; อ่าน PDF ไม่สำเร็จ — ข้ามไฟล์นี้');batchSkip();return;}
+      renderPdfForms(res.forms||{});})
+    .catch(function(err){toast('&#9888; ต่อเซิร์ฟเวอร์ไม่ได้ — ข้ามไฟล์นี้');batchSkip();});
 }
 function batchNext(){
   OCR_QIDX++;
