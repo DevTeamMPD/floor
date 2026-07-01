@@ -315,18 +315,43 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
         .oh-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
         .oh-stage-sel{padding:8px 12px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:#fff;color:var(--ink2);cursor:pointer}
         .oh-count{font-size:12px;color:var(--muted);margin-left:auto}
-        #ohBody tr{cursor:pointer}
-        #ohBody tr:hover td{background:#f7f6ff}
-        .stg-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:middle}
-        .oh-steps{display:flex;gap:4px;margin:12px 0 18px}
-        .oh-stp{flex:1;height:5px;border-radius:3px}
-        .oh-field{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;align-items:flex-start}
+        /* KPI bar */
+        .oh-kpis{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px}
+        .oh-kpis .kpi{flex:1;min-width:110px;padding:12px 14px}
+        .oh-kpis .kpi .num{font-size:22px}
+        /* Job Cards */
+        .job-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:11px}
+        .job-card{background:#fff;border:1.5px solid var(--line);border-radius:14px;padding:14px 16px;cursor:pointer;transition:.15s;box-shadow:var(--shadow)}
+        .job-card:hover{border-color:var(--brand);transform:translateY(-1px);box-shadow:0 6px 20px rgba(79,70,229,.12)}
+        .bill-chip{font-family:ui-monospace,monospace;font-size:11px;font-weight:700;background:#161E2E;color:#94A3B8;padding:3px 8px;border-radius:6px;letter-spacing:.5px}
+        .jc-head{display:flex;align-items:center;gap:6px;margin-bottom:7px;flex-wrap:wrap}
+        .jc-prog{display:flex;gap:3px;margin:7px 0 5px}
+        .jc-prog-stp{flex:1;height:4px;border-radius:2px}
+        .jc-product{font-size:13.5px;font-weight:700;color:var(--ink);line-height:1.3;margin-bottom:2px}
+        .jc-customer{font-size:12px;color:var(--muted)}
+        .jc-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11.5px;color:var(--ink2);margin-top:8px;border-top:1px solid var(--line2);padding-top:8px}
+        /* Drawer tabs */
+        .dr-tabs{display:flex;overflow-x:auto;margin:10px -26px 0;padding:0 26px;border-top:1px solid var(--line2)}
+        .dr-tab{padding:9px 14px 11px;font-size:12.5px;font-weight:600;color:var(--muted);border:0;background:0;cursor:pointer;border-bottom:2.5px solid transparent;font-family:inherit;white-space:nowrap;transition:.12s}
+        .dr-tab.act{color:var(--brand);border-bottom-color:var(--brand)}
+        .dr-pane{padding:18px 0 24px;display:none}
+        .dr-pane.act{display:block}
+        /* Stage track */
+        .stg-track{display:flex;gap:3px;margin-top:10px}
+        .stg-track-stp{flex:1;text-align:center}
+        .stg-track-bar{height:4px;border-radius:2px;margin-bottom:3px}
+        .stg-track-lbl{font-size:9px}
+        /* Fields */
+        .oh-field{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line2);font-size:13px;align-items:flex-start}
         .oh-fk{color:var(--muted);min-width:100px;font-size:12.5px;flex-shrink:0}
         .oh-fv{flex:1;font-weight:500;word-break:break-all}
         .oh-sec{font-size:11.5px;font-weight:700;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;margin:16px 0 6px}
+        .oh-doc-row{display:flex;align-items:center;gap:12px;padding:11px 13px;border:1.5px solid var(--line);border-radius:10px;margin-bottom:8px}
+        .oh-doc-row.done{border-color:var(--green);background:var(--green-l)}
         </style>
+        <div id="ohKpis" class="oh-kpis"></div>
         <div class="oh-toolbar">
-          <div class="search-top" style="width:300px"><span>⌕</span><input id="ohSearch" placeholder="ค้นหา order, สินค้า, ลูกค้า..." oninput="ohFilter()"></div>
+          <div class="search-top" style="width:300px"><span>⌕</span><input id="ohSearch" placeholder="ค้นหา order, บิล, สินค้า, ลูกค้า..." oninput="ohFilter()"></div>
           <select id="ohStageFilter" class="oh-stage-sel" onchange="ohFilter()">
             <option value="">ทุกสถานะ</option>
             <option value="1">1. รับออร์เดอร์</option>
@@ -341,13 +366,7 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
           <button class="btn ghost sm" onclick="ohLoad()">↺ รีโหลด</button>
         </div>
         <div id="ohMsg" style="font-size:13px;color:var(--muted);margin-bottom:10px"></div>
-        <table class="tbl">
-          <thead><tr>
-            <th>Ticket / Order</th><th>สินค้า</th><th>ลูกค้า</th>
-            <th>สถานะ</th><th>วันนัด</th><th>วันสั่ง</th><th>ผู้รับผิดชอบ</th>
-          </tr></thead>
-          <tbody id="ohBody"></tbody>
-        </table>
+        <div id="ohGrid" class="job-grid"></div>
       </section>
     </div>
   </div>
@@ -1203,18 +1222,39 @@ var OH_FILTER={q:'',stage:''};
 function ohLoad(){
   if(!SB){$('#ohMsg').textContent='🔴 ไม่ได้เชื่อม Supabase';return;}
   $('#ohMsg').textContent='⏳ กำลังโหลด...';
-  $('#ohBody').innerHTML='';
+  var g=$('#ohGrid');if(g)g.innerHTML='';
   SB.from('install_jobs').select('*').order('order_date',{ascending:false}).then(function(r){
     if(r.error){$('#ohMsg').textContent='⚠ โหลดไม่สำเร็จ: '+r.error.message;return;}
     OH_DATA=(r.data||[]).map(function(x,i){
       var m=ipMap(x,i);
-      m.callLogs=(x.call_logs||[]);
-      m.addr=x.address||x.addr||'';
+      m.bill=x.bill_no||'';
+      m.phone=x.customer_phone||'';
+      m.addr=x.address||'';
+      m.docs=Array.isArray(x.docs)?x.docs:[];
+      m.callLogs=Array.isArray(x.call_logs)?x.call_logs:[];
       return m;
     });
     $('#ohMsg').textContent='';
+    ohRenderKpis();
     ohRender();
+    var nb=$('#nbInst');if(nb)nb.textContent=OH_DATA.length;
   });
+}
+
+function ohRenderKpis(){
+  var el=$('#ohKpis');if(!el)return;
+  var total=OH_DATA.length;
+  var done=OH_DATA.filter(function(t){return t.stage===7;}).length;
+  var active=OH_DATA.filter(function(t){return t.stage>=4&&t.stage<=6;}).length;
+  var waiting=OH_DATA.filter(function(t){return t.stage<=3;}).length;
+  var evalN=0,evalS=0;
+  OH_DATA.forEach(function(t){try{var e=evalBill(t.bill);if(e){evalS+=evalAvg(e);evalN++;}}catch(er){}});
+  function kp(ic,lbl,val,cl,bg){return '<div class="kpi"><div class="lbl"><span class="ic" style="background:'+bg+';color:'+cl+'">'+ic+'</span>'+lbl+'</div><div class="num" style="color:'+cl+'">'+val+'</div></div>';}
+  el.innerHTML=kp('📦','ทั้งหมด',total,'var(--brand)','var(--brand-l)')
+    +kp('⏳','รอดำเนินการ',waiting,'var(--amber)','var(--amber-l)')
+    +kp('🔧','กำลังดำเนินการ',active,'var(--blue)','var(--blue-l)')
+    +kp('✅','เสร็จงาน',done,'var(--green)','var(--green-l)')
+    +(evalN?kp('⭐','คะแนนเฉลี่ย',(evalS/evalN).toFixed(1),'var(--purple)','var(--purple-l)'):'');
 }
 
 function ohFilter(){
@@ -1227,63 +1267,132 @@ function ohRender(){
   var q=OH_FILTER.q,st=OH_FILTER.stage;
   var rows=OH_DATA.filter(function(t){
     if(st&&String(t.stage)!==st)return false;
-    if(q&&!(String(t.order)+t.product+t.customer).toLowerCase().includes(q))return false;
+    if(q&&!(String(t.order)+String(t.bill)+t.product+t.customer).toLowerCase().includes(q))return false;
     return true;
   });
   var h=rows.map(function(t){
     var s=IP_STAGES[t.stage-1]||['?','#999','#eee'];
-    var badge='<span style="display:inline-flex;align-items:center;padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600;background:'+s[2]+';color:'+s[1]+'"><span class="stg-dot" style="background:'+s[1]+'"></span>'+s[0]+'</span>';
-    var asg=t.assignees&&t.assignees.length?t.assignees.slice(0,2).join(', ')+(t.assignees.length>2?' +'+(t.assignees.length-2):''):'—';
-    return '<tr onclick="ohOpenDetail(\''+esc(String(t.order))+'\')">'+
-      '<td><span class="tag t-auto" style="font-size:11px">'+esc(t.ticket)+'</span></td>'+
-      '<td>'+esc(t.product)+'</td>'+
-      '<td>'+esc(t.customer)+'</td>'+
-      '<td>'+badge+'</td>'+
-      '<td>'+(t.due||'—')+'</td>'+
-      '<td style="color:var(--muted)">'+(t.date||'—')+'</td>'+
-      '<td style="font-size:11.5px;color:var(--ink2)">'+esc(asg)+'</td>'+
-      '</tr>';
+    var prog=IP_STAGES.map(function(_,i){
+      return '<div class="jc-prog-stp" style="background:'+(i<t.stage?s[1]:'var(--line)')+'"></div>';
+    }).join('');
+    var srcTag=t.via==='auto'?'<span class="tag t-auto" style="font-size:10px;padding:2px 7px">🔗 Auto</span>'
+      :t.via==='planner'?'<span class="tag" style="font-size:10px;padding:2px 7px;background:#FAEEDA;color:#854F0B">📋 Planner</span>'
+      :'<span class="tag t-man" style="font-size:10px;padding:2px 7px">✍ Manual</span>';
+    var stgBadge='<span style="font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:20px;background:'+s[2]+';color:'+s[1]+'">'+t.stage+'/7 · '+s[0]+'</span>';
+    var dueStr=t.due?'📅 '+t.due+(t.shift?' กะ'+t.shift:''):'<span style="color:var(--gray)">ยังไม่นัด</span>';
+    var asgStr=t.assignees&&t.assignees.length?'👷 '+t.assignees.slice(0,2).join(', ')+(t.assignees.length>2?' +'+(t.assignees.length-2):''):'';
+    var evBadge='';try{var ev=evalBill(t.bill);if(ev)evBadge='<span style="font-size:11px;font-weight:700;color:'+evalColor(evalAvg(ev))+'">⭐ '+evalAvg(ev).toFixed(1)+'</span>';}catch(er){}
+    return '<div class="job-card" onclick="ohOpenDetail(\''+esc(String(t.order))+'\')">'
+      +'<div class="jc-head">'+(t.bill?'<span class="bill-chip">'+esc(t.bill)+'</span>':'')
+      +'<span style="font-family:monospace;font-size:11px;color:var(--brand);font-weight:700">'+esc(t.ticket)+'</span>'
+      +'<span style="flex:1"></span>'+srcTag+'</div>'
+      +'<div class="jc-prog">'+prog+'</div>'
+      +'<div class="jc-product">'+esc(t.product)+'</div>'
+      +'<div class="jc-customer">👤 '+esc(t.customer||'—')+(t.phone?' · 📞 '+esc(t.phone):'')+'</div>'
+      +'<div class="jc-foot">'+stgBadge+'<span>'+dueStr+'</span>'+(asgStr?'<span>'+asgStr+'</span>':'')+evBadge+'</div>'
+      +'</div>';
   }).join('');
-  $('#ohBody').innerHTML=h||'<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--muted)">ไม่พบข้อมูล</td></tr>';
-  $('#ohCount').textContent=rows.length+' รายการ'+(OH_DATA.length!==rows.length?' (จาก '+OH_DATA.length+' ทั้งหมด)':'');
+  $('#ohGrid').innerHTML=h||'<div style="text-align:center;padding:50px;color:var(--muted);grid-column:1/-1"><div style="font-size:40px;margin-bottom:12px">📭</div>ไม่พบข้อมูล</div>';
+  $('#ohCount').textContent=rows.length+' job'+(OH_DATA.length!==rows.length?' / '+OH_DATA.length:'');
 }
 
 function ohOpenDetail(orderNo){
   var t=OH_DATA.find(function(x){return String(x.order)===String(orderNo);});
   if(!t)return;
   var s=IP_STAGES[t.stage-1]||['?','#999','#eee'];
-  var steps='<div class="oh-steps">'+IP_STAGES.map(function(_,i){
-    return '<div class="oh-stp" style="background:'+(i<t.stage?s[1]:'var(--line)')+'"></div>';
-  }).join('')+'</div>';
-  var shiftLabel=t.shift==='1'?'กะ 1 (09:00)':t.shift==='2'?'กะ 2 (13:30)':t.shift==='3'?'ทั้งวัน':'—';
-  var fields=[
-    ['เลข Order','#'+esc(String(t.order))],
-    ['Ticket',esc(t.ticket)],
-    ['SKU',esc(t.sku||'—')],
-    ['สินค้า',esc(t.product)],
-    ['ลูกค้า',esc(t.customer)],
-    ['วันที่สั่ง',t.date||'—'],
-    ['วันนัดติดตั้ง',t.due||'—'],
-    ['กะ',t.shift?shiftLabel:'—'],
-    ['ผู้รับผิดชอบ',t.assignees&&t.assignees.length?esc(t.assignees.join(', ')):'—'],
-    ['ที่อยู่',t.addr?esc(t.addr):'—'],
-    ['ช่องทาง',t.via||'—'],
-  ].map(function(f){
-    return '<div class="oh-field"><span class="oh-fk">'+f[0]+'</span><span class="oh-fv">'+f[1]+'</span></div>';
+  function field(k,v){return '<div class="oh-field"><span class="oh-fk">'+k+'</span><span class="oh-fv">'+v+'</span></div>';}
+  // Stage track
+  var track=IP_STAGES.map(function(st,i){
+    var a=i<t.stage,cur=i===t.stage-1;
+    return '<div class="stg-track-stp">'
+      +'<div class="stg-track-bar" style="background:'+(a?s[1]:'var(--line)')+'"></div>'
+      +'<div class="stg-track-lbl" style="color:'+(cur?s[1]:'var(--muted)')+';font-weight:'+(cur?700:400)+'">'+(i+1)+'</div>'
+      +'</div>';
   }).join('');
-  var callSection='';
-  if(t.callLogs&&t.callLogs.length){
-    callSection='<div class="oh-sec">ประวัติการโทร</div>'+
-      t.callLogs.map(function(c){return '<div class="callrow">📞 '+esc(c.by||'')+ ' · '+esc(c.at||'')+'</div>';}).join('');
+  // Header + Tabs (sticky)
+  var head='<div class="dr-head" style="padding-bottom:0"><button class="x" onclick="closeDrawer()">×</button>'
+    +(t.bill?'<div style="margin-bottom:6px"><span class="bill-chip" style="font-size:12px;padding:4px 10px">💳 บิล '+esc(t.bill)+'</span></div>':'')
+    +'<h2 style="margin:4px 0 5px">'+esc(t.product)+'</h2>'
+    +'<div class="cu" style="margin-bottom:6px">👤 '+esc(t.customer||'—')+(t.phone?' · 📞 '+esc(t.phone):'')+'</div>'
+    +'<span class="tag" style="background:'+s[2]+';color:'+s[1]+'">'+t.stage+'/7 · '+s[0]+'</span>'
+    +'<div class="stg-track">'+track+'</div>'
+    +'<div class="dr-tabs">'
+    +'<button class="dr-tab act" onclick="ohTab(this,\'info\')">📋 ข้อมูล</button>'
+    +'<button class="dr-tab" onclick="ohTab(this,\'appt\')">🗓 นัดหมาย</button>'
+    +'<button class="dr-tab" onclick="ohTab(this,\'docs\')">📄 เอกสาร</button>'
+    +'<button class="dr-tab" onclick="ohTab(this,\'eval\')">⭐ ประเมิน</button>'
+    +'</div></div>';
+  // TAB 1: ข้อมูล
+  var shLbl=t.shift==='1'?'กะ 1 · 09:00':t.shift==='2'?'กะ 2 · 13:30':t.shift==='3'?'ทั้งวัน (09:00–17:00)':'—';
+  var callSec=t.callLogs&&t.callLogs.length
+    ?'<div class="oh-sec" style="margin-top:14px">ประวัติการโทร</div>'
+      +t.callLogs.map(function(c){return '<div class="callrow">📞 '+esc(c.by||'')+' · '+esc(c.at||'')+'</div>';}).join(''):'';
+  var pane1='<div class="dr-pane act" id="ohP-info" style="padding:18px 26px 24px">'
+    +field('เลข Order','<span style="font-family:monospace;font-weight:700">#'+esc(String(t.order))+'</span>')
+    +field('Ticket',esc(t.ticket))
+    +(t.bill?field('เลขบิล','<span class="bill-chip">'+esc(t.bill)+'</span>'):'')
+    +field('SKU',esc(t.sku||'—'))
+    +field('สินค้า','<b>'+esc(t.product)+'</b>')
+    +field('ลูกค้า',esc(t.customer||'—'))
+    +(t.phone?field('เบอร์โทร','<a href="tel:'+esc(t.phone)+'" style="color:var(--brand)">'+esc(t.phone)+'</a>'):'')
+    +field('วันสั่ง',t.date||'—')
+    +field('วันนัด',t.due||'—')
+    +(t.shift?field('กะ',shLbl):'')
+    +field('ผู้รับผิดชอบ',t.assignees&&t.assignees.length?esc(t.assignees.join(', ')):'—')
+    +(t.addr?field('ที่อยู่',esc(t.addr)):'')
+    +field('ช่องทาง',t.via==='auto'?'🔗 จากออเดอร์ (Auto)':t.via==='planner'?'📋 Planner':'✍ สร้างเอง')
+    +callSec+'</div>';
+  // TAB 2: นัดหมาย
+  var qItem=null;try{qItem=IP_QUEUE.find(function(x){return String(x.order)===String(t.order);});}catch(e){}
+  var pane2='<div class="dr-pane" id="ohP-appt" style="padding:18px 26px 24px">';
+  if(qItem){
+    var ql=qItem.shift==='1'?'กะ 1 · 09:00':qItem.shift==='2'?'กะ 2 · 13:30':'☀️ ทั้งวัน';
+    pane2+='<div style="background:var(--green-l);border:1px solid var(--green);border-radius:12px;padding:16px;margin-bottom:12px">'
+      +'<div style="font-weight:700;color:var(--green);font-size:14px;margin-bottom:10px">✅ นัดหมายแล้ว</div>'
+      +field('วันนัด','<b>'+esc(qItem.date||'—')+'</b>')+field('กะ',ql)
+      +field('ทีมช่าง',qItem.team&&qItem.team.length?esc(qItem.team.join(', ')):'—')
+      +(qItem.note?field('หมายเหตุ',esc(qItem.note)):'')+'</div>';
+  } else {
+    pane2+='<div style="background:var(--amber-l);border:1px solid var(--amber);border-radius:12px;padding:24px;text-align:center;margin-bottom:14px">'
+      +'<div style="font-size:32px;margin-bottom:8px">🗓</div>'
+      +'<div style="font-weight:700;color:var(--amber);margin-bottom:6px">ยังไม่มีการนัดหมาย</div>'
+      +'<div style="font-size:12px;color:var(--muted)">ไปที่ Pipeline Stage 3 เพื่อโทรนัดและกำหนดกะช่าง</div></div>'
+      +'<button class="btn primary" style="width:100%" onclick="closeDrawer();go(\'install\')">ไปที่ Pipeline ติดตั้ง →</button>';
   }
-  $('#drawer').innerHTML='<div class="dr-head"><button class="x" onclick="closeDrawer()">×</button>'+
-    '<span class="code">'+esc(t.ticket)+'</span>'+
-    '<h2>'+esc(t.product)+'</h2>'+
-    '<div class="cu">👤 '+esc(t.customer)+'</div>'+
-    '<span class="tag" style="background:'+s[2]+';color:'+s[1]+';margin-top:8px">'+t.stage+'. '+s[0]+'</span>'+
-    '</div><div class="dr-body">'+steps+fields+callSection+'</div>';
+  pane2+='</div>';
+  // TAB 3: เอกสาร
+  var FM={receive:{lbl:'รับงานติดตั้ง & ส่งมอบ',ic:'📋'},issue:{lbl:'เบิก-ใช้-คืนสินค้า',ic:'📦'},sign:{lbl:'ข้อกำหนด + ลายเซ็น',ic:'✍️'}};
+  var pane3='<div class="dr-pane" id="ohP-docs" style="padding:18px 26px 24px">';
+  ['receive','issue','sign'].forEach(function(ft){
+    var d=(t.docs||[]).find(function(x){return x.form_type===ft||x.type===ft;});
+    var ok=!!d,m=FM[ft];
+    pane3+='<div class="oh-doc-row'+(ok?' done':'')+'">'
+      +'<span style="font-size:22px">'+(ok?'✅':m.ic)+'</span>'
+      +'<div style="flex:1"><div style="font-weight:600;font-size:13px">'+m.lbl+'</div>'
+      +'<div style="font-size:11.5px;color:'+(ok?'var(--green)':'var(--muted)')+'">'+(ok?'สแกนแล้ว':'ยังไม่ได้สแกน')+'</div>'
+      +(ok&&d.ts?'<div style="font-size:10.5px;color:var(--muted)">'+esc(d.ts||'')+'</div>':'')
+      +'</div></div>';
+  });
+  pane3+='<div style="margin-top:14px"><button class="btn primary" style="width:100%" onclick="closeDrawer();go(\'scan\')">📸 สแกนเอกสารใหม่</button></div></div>';
+  // TAB 4: ประเมิน
+  var pane4='<div class="dr-pane" id="ohP-eval" style="padding:18px 26px 24px">';
+  try{
+    var ev=evalBill(t.bill);
+    pane4+=ev?evalCardHtml(ev):'<div style="text-align:center;padding:30px;color:var(--muted)"><div style="font-size:40px;margin-bottom:10px">⭐</div><b>ยังไม่มีผลประเมิน</b><div style="font-size:12px;margin-top:6px;color:var(--gray)">ผลจะปรากฏหลังลูกค้ากรอกแบบประเมิน</div></div>';
+  }catch(e){pane4+='<div style="padding:20px;color:var(--muted);font-size:12px">โหลดข้อมูลประเมินไม่ได้</div>';}
+  pane4+='</div>';
+  $('#drawer').innerHTML=head+'<div class="dr-body" style="padding:0">'+pane1+pane2+pane3+pane4+'</div>';
   $('#scrim').classList.add('show');
   $('#drawer').classList.add('show');
+}
+
+function ohTab(btn,pane){
+  btn.closest('.dr-tabs').querySelectorAll('.dr-tab').forEach(function(t){t.classList.remove('act');});
+  btn.classList.add('act');
+  ['info','appt','docs','eval'].forEach(function(p){
+    var el=document.getElementById('ohP-'+p);
+    if(el)el.classList.toggle('act',p===pane);
+  });
 }
 
 </script>
