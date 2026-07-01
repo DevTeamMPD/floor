@@ -391,7 +391,7 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
 <script>
 const $=s=>document.querySelector(s);const $$=s=>[...document.querySelectorAll(s)];
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
-function closeDrawer(){$('#scrim').classList.remove('show');$('#drawer').classList.remove('show');}
+function closeDrawer(){$('#scrim').classList.remove('show');var drw=$('#drawer');drw.classList.remove('show');drw.style.cssText='';}
 function today(){return new Date().toISOString().slice(0,10);}
 const VIEWS={overview:['ภาพรวมธุรกิจ','งาน · Pipeline · คะแนนลูกค้า · ระยะเวลา · การคืนสินค้า','',''],
 dash:['แดชบอร์ดเอกสาร','ภาพรวมระบบเอกสารทั้งหมด','＋ เพิ่มเอกสาร',"go('scan')"],
@@ -445,7 +445,31 @@ function openDoc(id){const d=DOCS.find(x=>x.id===id);if(!d)return;const tl=d.his
   $('#drawer').innerHTML='<div class="dr-head"><button class="x" onclick="closeDrawer()">×</button><span class="code">'+d.code+'</span><h2>'+d.title+'</h2>'+catTag(d.cat)+' '+statusTag(d.status)+'</div><div class="dr-body"><div class="dr-card"><h4>📍 ตำแหน่งจัดเก็บกระดาษ</h4>'+locBlock+(d.paper?'<div style="margin-top:12px;font-size:12.5px;color:var(--ink2)">สถานะสแกน: '+(d.scanned?'<b style="color:var(--green)">✔ แปลงเป็นดิจิทัลแล้ว</b>':'<b style="color:var(--red)">✖ ยังไม่ได้สแกน</b>')+'</div>':'')+(d.paper&&!d.scanned?'<button class="btn primary sm" style="margin-top:12px" onclick="markScanned('+d.id+')">🖨️ ทำเครื่องหมายว่าสแกนแล้ว</button>':'')+'</div><div class="dr-card"><h4>รายละเอียดเอกสาร</h4><div class="field"><span class="fk">เวอร์ชัน</span><span class="fv">v'+d.ver+'</span></div><div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv">'+d.owner+'</span></div><div class="field"><span class="fk">หน่วยงาน</span><span class="fv">'+d.dept+'</span></div><div class="field"><span class="fk">ผู้อนุมัติ</span><span class="fv">'+d.approver+'</span></div><div class="field"><span class="fk">สร้างเมื่อ</span><span class="fv">'+d.created+'</span></div><div class="field"><span class="fk">แก้ไขล่าสุด</span><span class="fv">'+d.updated+'</span></div><div class="field"><span class="fk">รอบทบทวนถัดไป</span><span class="fv">'+d.review+'</span></div></div><div class="dr-card"><h4>ประวัติเอกสาร</h4><div class="tl">'+tl+'</div></div><div style="display:flex;gap:10px">'+(d.status==='pending'?'<button class="btn ok" onclick="approveDoc('+d.id+')">✓ อนุมัติ</button><button class="btn no" onclick="rejectDoc('+d.id+')">✕ ตีกลับ</button>':'')+'<button class="btn ghost" onclick="docOpenFile('+d.id+')">📂 เปิดไฟล์</button></div></div>';
   $('#scrim').classList.add('show');$('#drawer').classList.add('show');}
 function markScanned(id){const d=DOCS.find(x=>x.id===id);d.scanned=true;d.hist.push(['สแกนเข้าระบบดิจิทัล',today(),'MPD']);toast('✔ ทำเครื่องหมายสแกนแล้ว');refreshAll();openDoc(id);}
-function docOpenFile(id){var d=DOCS.find(function(x){return x.id===id;});if(!d||!d.imgSrc){toast('ยังไม่มีไฟล์ดิจิทัลที่เก็บไว้');return;}window.open(d.imgSrc);}
+function docOpenFile(id){
+  var d=DOCS.find(function(x){return x.id===id;});
+  if(!d||!d.imgSrc){toast('ยังไม่มีไฟล์ดิจิทัลที่เก็บไว้');return;}
+  if(document.getElementById('filePreviewPane')){docClosePreview();return;}
+  var drw=document.getElementById('drawer');
+  var existing=drw.innerHTML;
+  drw.innerHTML=
+    '<div id="filePreviewPane" style="flex:0 0 62%;border-right:1px solid #334155;background:#0f172a;display:flex;flex-direction:column;min-height:0">'
+    +'<div style="display:flex;align-items:center;padding:8px 12px;background:#1e293b;border-bottom:1px solid #334155;gap:8px">'
+    +'<span style="font-size:11.5px;color:#94a3b8;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(d.code)+'</span>'
+    +'<button onclick="docClosePreview()" style="border:none;background:#334155;color:#cbd5e1;border-radius:6px;padding:2px 10px;cursor:pointer;font-size:12px">&#10005; ปิด</button>'
+    +'</div>'
+    +'<iframe src="'+esc(d.imgSrc)+'" style="flex:1;border:none;width:100%;min-height:0"></iframe>'
+    +'</div>'
+    +'<div id="docInfoPane" style="flex:1;overflow:auto;min-width:300px;min-height:0;display:flex;flex-direction:column">'+existing+'</div>';
+  drw.style.cssText='position:fixed;top:0;right:0;width:90vw;max-width:90vw;bottom:0;z-index:50;box-shadow:-8px 0 30px rgba(15,23,42,.18);display:flex;flex-direction:row;overflow:hidden;background:var(--bg)';
+}
+function docClosePreview(){
+  var info=document.getElementById('docInfoPane');
+  var drw=document.getElementById('drawer');
+  if(!drw)return;
+  if(info)drw.innerHTML=info.innerHTML;
+  drw.style.cssText='';
+  drw.classList.add('show');
+}
 function approveDoc(id){const d=DOCS.find(x=>x.id===id);d.status='active';d.hist.push(['อนุมัติเอกสาร',today(),'MPD']);toast('✓ อนุมัติเอกสารเรียบร้อย');refreshAll();closeDrawer();}
 function rejectDoc(id){const d=DOCS.find(x=>x.id===id);d.status='draft';d.hist.push(['ตีกลับให้แก้ไข',today(),'MPD']);toast('↩ ตีกลับเอกสารแล้ว');refreshAll();closeDrawer();}
 const SCAN_SAMPLES=[{code:'NCR-2026-032',title:'พบรอยขีดข่วนบนแผ่นพื้น ล็อต #4480',cat:'NCR',dept:'QC'},{code:'CLM-2026-119',title:'เคลมลูกค้า — ขอบแผ่นเผยอหลังติดตั้ง',cat:'CLAIM',dept:'บริการลูกค้า'},{code:'CHK-DELV-012',title:'ใบตรวจรับสินค้าเข้าคลัง',cat:'CHECK',dept:'คลังสินค้า'}];
