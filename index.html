@@ -1434,11 +1434,30 @@ function ohOpenDetail(orderNo){
         });
       });
       if(ft==='issue'){
-        pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--brand);margin:7px 0 5px">รายการสินค้า</div>';
-        ['เบิก ม้วนที่ 1','เบิก ม้วนที่ 2','เบิก ม้วนที่ 3','คืน ม้วนที่ 1','คืน ม้วนที่ 2','คืน ม้วนที่ 3'].forEach(function(lb,i){
-          pane3+='<div style="margin-bottom:5px"><div style="font-size:10px;color:var(--muted);font-weight:600;margin-bottom:2px">'+lb+'</div>'
-            +'<input id="drDoc_issue_row'+i+'" placeholder="ขนาด · สี · กว้าง · ยาว · จำนวน" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12px;box-sizing:border-box"></div>';
-        });
+        var iRow=function(ri,label,accentColor){
+          return '<div style="background:#F8FAFC;border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:7px">'
+            +'<div style="font-size:10.5px;font-weight:700;color:'+accentColor+';margin-bottom:7px">'+label+'</div>'
+            +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">'
+            +'<div><div style="font-size:9.5px;color:var(--muted);font-weight:700;margin-bottom:2px">ขนาด</div>'
+            +'<select id="drDoc_issue_r'+ri+'_sz" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12px">'
+            +'<option value="">— เลือก —</option><option>0.6 cm</option><option>1.6 cm</option></select></div>'
+            +'<div><div style="font-size:9.5px;color:var(--muted);font-weight:700;margin-bottom:2px">สี</div>'
+            +'<select id="drDoc_issue_r'+ri+'_cl" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12px">'
+            +'<option value="">— เลือก —</option><option>Beige</option><option>Organic beige</option><option>Barky beige</option><option>Whitebuzz</option></select></div>'
+            +'</div>'
+            +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">'
+            +'<div><div style="font-size:9.5px;color:var(--muted);font-weight:700;margin-bottom:2px">กว้าง (cm)</div>'
+            +'<input id="drDoc_issue_r'+ri+'_w" type="number" min="0" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12px;box-sizing:border-box"></div>'
+            +'<div><div style="font-size:9.5px;color:var(--muted);font-weight:700;margin-bottom:2px">ยาว (cm)</div>'
+            +'<input id="drDoc_issue_r'+ri+'_l" type="number" min="0" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12px;box-sizing:border-box"></div>'
+            +'<div><div style="font-size:9.5px;color:var(--muted);font-weight:700;margin-bottom:2px">จำนวน (ม้วน)</div>'
+            +'<input id="drDoc_issue_r'+ri+'_qty" type="number" min="0" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12px;box-sizing:border-box"></div>'
+            +'</div></div>';
+        };
+        pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--blue);margin:10px 0 5px">📦 เบิกสินค้า (เอาออกไป)</div>';
+        pane3+=iRow(0,'ม้วนที่ 1','var(--blue)')+iRow(1,'ม้วนที่ 2','var(--blue)')+iRow(2,'ม้วนที่ 3','var(--blue)');
+        pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--green);margin:10px 0 5px">🔁 จำนวนที่เหลือ / คืนกลับ</div>';
+        pane3+=iRow(3,'ม้วนที่ 1','var(--green)')+iRow(4,'ม้วนที่ 2','var(--green)')+iRow(5,'ม้วนที่ 3','var(--green)');
       }
       pane3+='<button class="btn primary" style="width:100%;margin-top:10px;font-size:13px" onclick="ohSaveDoc(\''+esc(String(t.order))+'\',\''+ft+'\')">💾 บันทึกเอกสาร</button>';
       pane3+='</div>';
@@ -1479,11 +1498,16 @@ function ohSaveDoc(orderNo,ft){
     });
   });
   if(ft==='issue'){
-    ['เบิก ม้วนที่ 1','เบิก ม้วนที่ 2','เบิก ม้วนที่ 3','คืน ม้วนที่ 1','คืน ม้วนที่ 2','คืน ม้วนที่ 3'].forEach(function(lb,i){
-      var el=document.getElementById('drDoc_issue_row'+i);
-      var v=el?el.value.trim():'';
-      if(v)caps.push({l:lb,v:v});
-    });
+    var rTypes=['เบิก','เบิก','เบิก','คืน','คืน','คืน'];
+    for(var ri=0;ri<6;ri++){
+      var sz=(document.getElementById('drDoc_issue_r'+ri+'_sz')||{}).value||'';
+      var cl=(document.getElementById('drDoc_issue_r'+ri+'_cl')||{}).value||'';
+      var rw=(document.getElementById('drDoc_issue_r'+ri+'_w')||{}).value||'';
+      var rl=(document.getElementById('drDoc_issue_r'+ri+'_l')||{}).value||'';
+      var rq=(document.getElementById('drDoc_issue_r'+ri+'_qty')||{}).value||'';
+      var parts=[sz,cl,rw&&('กว้าง '+rw+' cm'),rl&&('ยาว '+rl+' cm'),rq&&('จำนวน '+rq+' ม้วน')].filter(Boolean);
+      if(parts.length)caps.push({l:rTypes[ri]+' ม้วนที่ '+(ri<3?ri+1:ri-2),v:parts.join(' · ')});
+    }
   }
   if(!caps.length){toast('⚠ กรอกอย่างน้อย 1 ช่อง');return;}
   var ds=JSON.parse(JSON.stringify(t.docs||[]));
