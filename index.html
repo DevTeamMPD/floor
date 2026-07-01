@@ -256,6 +256,11 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
                 <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">หรืออัปโหลด PDF (รวมทุกฟอร์มในไฟล์เดียว)</div>
                 <button type="button" class="btn wz-bigbtn" onclick="document.getElementById('scanPdf').click()">📄 อัปโหลด PDF (ทุกฟอร์มพร้อมกัน)</button>
               </div>
+              <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px;text-align:center">
+                <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">หรือเลือกทั้งโฟลเดอร์ — ระบบจะสแกนทีละไฟล์ให้อัตโนมัติ</div>
+                <button type="button" class="btn wz-bigbtn" onclick="document.getElementById('scanFolder').click()">📁 เลือกโฟลเดอร์ (Batch OCR)</button>
+                <input type="file" id="scanFolder" webkitdirectory accept="image/*" style="display:none" onchange="handleFolderScan(event)">
+              </div>
               <div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center">
                 <button type="button" class="btn ghost sm" onclick="wzDemo()">ลองตัวอย่างจำลอง (เดโม)</button>
                 <button type="button" class="btn ghost sm" onclick="wzManual()">กรอกเองโดยไม่สแกน →</button>
@@ -669,9 +674,8 @@ function saveTpl(){
     SB.from('install_jobs').update({docs:ds}).eq('order_no',job.order).then(function(){});
     job.docs=ds;
   })();}
-  $('#scanPrev').innerHTML='<div style="font-size:40px">✅</div><div style="margin-top:10px;font-size:13px;color:var(--green)"><b>บันทึกเข้าทะเบียนแล้ว</b></div>';
-  $('#ocrForm').innerHTML='<div class="empty"><div class="big">🎉</div>บันทึก <b>'+esc(code)+'</b> ('+caps.length+' ช่อง) แล้ว'+(bill?'<br><span style="font-size:12px;color:var(--muted)">เลขบิล '+esc(bill)+' — เชื่อมกับงานบริการได้</span>':'')+'<br><div style="margin-top:14px;display:flex;gap:8px;justify-content:center"><button class="btn ghost sm" onclick="go(\'register\')">ดูในทะเบียน →</button><button class="btn ghost sm" onclick="renderTplForm()">สแกนใบใหม่</button></div></div>';
-  toast('💾 บันทึกฟอร์มเข้าทะเบียนแล้ว ('+caps.length+' ช่อง)');
+  if(OCR_BATCH){OCR_QDONE++;toast('💾 บันทึก '+(OCR_QIDX+1)+'/'+OCR_QUEUE.length+' แล้ว');batchNext();}
+  else{$('#scanPrev').innerHTML='<div style="font-size:40px">✅</div><div style="margin-top:10px;font-size:13px;color:var(--green)"><b>บันทึกเข้าทะเบียนแล้ว</b></div>';$('#ocrForm').innerHTML='<div class="empty"><div class="big">🎉</div>บันทึก <b>'+esc(code)+'</b> ('+caps.length+' ช่อง) แล้ว'+(bill?'<br><span style="font-size:12px;color:var(--muted)">เลขบิล '+esc(bill)+' — เชื่อมกับงานบริการได้</span>':'')+'<br><div style="margin-top:14px;display:flex;gap:8px;justify-content:center"><button class="btn ghost sm" onclick="go(\'register\')">ดูในทะเบียน →</button><button class="btn ghost sm" onclick="renderTplForm()">สแกนใบใหม่</button></div></div>';toast('💾 บันทึกฟอร์มเข้าทะเบียนแล้ว ('+caps.length+' ช่อง)');}
 }
 /* override openDoc to show captured form fields */
 function openDoc(id){var d=DOCS.find(function(x){return x.id===id;});if(!d)return;
@@ -722,7 +726,7 @@ function renderTplForm(pf){pf=pf||{};var t=TPL[curType];if(!t)return;var h='';
   h+='<div style="font-size:14px;font-weight:700;margin-bottom:6px">'+t.label+'</div>';
   t.groups.forEach(function(g){h+='<div style="font-size:11.5px;font-weight:700;color:var(--brand);margin:13px 0 6px">'+g.h+'</div>';g.f.forEach(function(fd){h+=ctrlHtml(fd[0],fd[1],fd[2],pf);});});
   if(t.table){h+='<div style="font-size:11.5px;font-weight:700;color:var(--brand);margin:13px 0 6px">ตารางเบิก-ใช้-คืนสินค้า</div>'+tableHtml(pf);}
-  h+='<button class="btn primary" style="width:100%;margin-top:12px" onclick="saveTpl()">💾 บันทึกเข้าทะเบียน</button>';
+  if(OCR_BATCH){h+='<div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary" style="flex:2" onclick="saveTpl()">💾 บันทึก &amp; ต่อไป ('+(OCR_QIDX+1)+'/'+OCR_QUEUE.length+')</button><button class="btn" style="flex:1" onclick="batchSkip()">⏭ ข้าม</button></div>';}else{h+='<button class="btn primary" style="width:100%;margin-top:12px" onclick="saveTpl()">💾 บันทึกเข้าทะเบียน</button>';}
   if(pf.__rawtext)h+='<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">ดูข้อความดิบ OCR</summary><pre style="white-space:pre-wrap;font-size:11px;background:var(--bg);padding:10px;border-radius:8px;max-height:160px;overflow:auto;margin-top:6px">'+esc(pf.__rawtext)+'</pre></details>';
   $('#ocrForm').innerHTML=h;}
 function renderPdfForms(forms){
@@ -866,6 +870,53 @@ function wzPickType(t){ if(!TPL[t])return; curType=t;
   wzGo(2);
 }
 function handleScan(e){ if(!e.target.files||!e.target.files[0])return; wzGo(3); runOCR(e); }
+var OCR_QUEUE=[],OCR_QIDX=0,OCR_QDONE=0,OCR_QSKIP=0,OCR_BATCH=false;
+function handleFolderScan(e){
+  var files=Array.from(e.target.files).filter(function(f){return f.type.startsWith('image/');}).sort(function(a,b){return a.name.localeCompare(b.name);});
+  e.target.value='';
+  if(!files.length){toast('⚠ ไม่พบไฟล์รูปภาพในโฟลเดอร์');return;}
+  OCR_QUEUE=files;OCR_QIDX=0;OCR_QDONE=0;OCR_QSKIP=0;OCR_BATCH=true;
+  wzGo(3);
+  var prev=document.getElementById('scanPrev');
+  if(prev&&!document.getElementById('batchBar')){var bar=document.createElement('div');bar.id='batchBar';bar.style.cssText='background:var(--bg);border:1.5px solid var(--brand);border-radius:12px;padding:10px 14px;margin-bottom:12px';prev.parentNode.insertBefore(bar,prev);}
+  batchUpdateBar();batchRunCurrent();
+}
+function batchUpdateBar(){
+  var bar=document.getElementById('batchBar');if(!bar)return;
+  var total=OCR_QUEUE.length,cur=OCR_QIDX,pct=Math.round((cur/total)*100);
+  bar.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'
+    +'<span style="font-size:13px;font-weight:700">📁 Batch OCR</span>'
+    +'<span style="font-size:13px">ไฟล์ที่ '+(cur+1)+' / '+total+'</span>'
+    +'<span style="margin-left:auto;font-size:12px;color:var(--muted)">&#10004; '+OCR_QDONE+' &nbsp;&#9205; '+OCR_QSKIP+'</span>'
+    +'<button onclick="batchStop()" style="border:none;background:#FEE2E2;color:#B91C1C;border-radius:6px;padding:2px 8px;cursor:pointer;font-size:12px">&#10005; หยุด</button>'
+    +'</div>'
+    +'<div style="background:var(--line);border-radius:6px;height:7px"><div style="background:var(--brand);width:'+pct+'%;height:100%;border-radius:6px;transition:width .4s"></div></div>';
+}
+function batchRunCurrent(){
+  var f=OCR_QUEUE[OCR_QIDX];if(!f)return;
+  var url=URL.createObjectURL(f);
+  $('#scanPrev').innerHTML='<img src="'+url+'" style="max-width:100%;max-height:100%;object-fit:contain"/><div class="scanline"></div><div style="font-size:11px;color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(f.name)+'</div>';
+  $('#ocrForm').innerHTML='<div class="empty"><div class="big">&#9203;</div><div id="ocrProg">กำลังส่งให้ AI อ่าน...</div></div>';
+  if(OCR_BACKEND)runServerOCR(f);else runTesseractOCR(f);
+}
+function batchNext(){
+  OCR_QIDX++;
+  if(OCR_QIDX>=OCR_QUEUE.length){batchDone();return;}
+  batchUpdateBar();batchRunCurrent();
+}
+function batchSkip(){OCR_QSKIP++;batchNext();}
+function batchStop(){
+  if(!confirm('หยุด Batch? ไฟล์ที่บันทึกไปแล้ว '+OCR_QDONE+' ไฟล์ จะยังอยู่ในระบบ'))return;
+  OCR_BATCH=false;OCR_QUEUE=[];
+  var bar=document.getElementById('batchBar');if(bar)bar.remove();
+  wzGo(1);toast('หยุด Batch — บันทึกไปแล้ว '+OCR_QDONE+' ไฟล์');
+}
+function batchDone(){
+  OCR_BATCH=false;
+  var bar=document.getElementById('batchBar');if(bar)bar.remove();
+  $('#scanPrev').innerHTML='<div style="font-size:40px">&#127881;</div><div style="margin-top:8px;font-size:13px;color:var(--green);font-weight:700">Batch เสร็จแล้ว</div>';
+  $('#ocrForm').innerHTML='<div class="empty"><div class="big">&#10003;</div>บันทึก <b>'+OCR_QDONE+'</b> ไฟล์ &middot; ข้าม <b>'+OCR_QSKIP+'</b> ไฟล์<br><div style="margin-top:14px;display:flex;gap:8px;justify-content:center"><button class="btn ghost sm" onclick="go(\'register\')">ดูในทะเบียน &#8594;</button><button class="btn ghost sm" onclick="wzGo(1)">สแกนใหม่</button></div></div>';
+}
 function handlePdfScan(e){
   if(!e.target.files||!e.target.files[0])return;
   var f=e.target.files[0];
