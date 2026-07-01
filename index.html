@@ -149,15 +149,17 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
     <nav class="nav" id="nav">
       <div class="sec">ภาพรวม</div>
       <a data-view="overview" class="active"><span class="ic">◈</span> ภาพรวมธุรกิจ</a>
-      <div class="sec">งานติดตั้ง & บริการ</div>
-      <a data-view="install" class="active"><span class="ic">🚧</span> Pipeline ติดตั้ง <span class="badge" id="nbInst">0</span></a>
-      <a data-view="queue"><span class="ic">🗓️</span> คิวช่าง <span class="badge" id="nbQ">0</span></a>
+      <div class="sec">งานติดตั้ง</div>
+      <a data-view="history"><span class="ic">📥</span> Job / ออเดอร์ <span class="badge" id="nbInst">0</span></a>
+      <a data-view="install"><span class="ic">🚧</span> Pipeline (Stage Board)</a>
+      <a data-view="queue"><span class="ic">🗓️</span> นัดหมายช่าง <span class="badge" id="nbQ">0</span></a>
+      <a data-view="scan"><span class="ic">📄</span> เอกสารงาน / OCR</a>
+      <!-- eval injected here by evalModule -->
+      <div class="sec">บริการ & เคลม</div>
       <a data-view="service"><span class="ic">🔧</span> บริการ & เคลม <span class="badge" id="nbSvc">0</span></a>
-      <a data-view="history"><span class="ic">📋</span> ประวัติ Order</a>
       <div class="sec">ระบบเอกสาร (DocFlow)</div>
       <a data-view="dash"><span class="ic">▦</span> แดชบอร์ดเอกสาร</a>
       <a data-view="register"><span class="ic">▤</span> ทะเบียนเอกสาร <span class="badge" id="nbReg">0</span></a>
-      <a data-view="scan"><span class="ic">⊕</span> สแกน / OCR</a>
       <a data-view="search"><span class="ic">⌕</span> ค้นหา</a>
       <a data-view="approve"><span class="ic">✓</span> รออนุมัติ <span class="badge" id="nbAppr">0</span></a>
       <a data-view="cats"><span class="ic">◈</span> หมวดหมู่</a>
@@ -370,12 +372,14 @@ function today(){return new Date().toISOString().slice(0,10);}
 const VIEWS={overview:['ภาพรวมธุรกิจ','งาน · Pipeline · คะแนนลูกค้า · ระยะเวลา · การคืนสินค้า','',''],
 dash:['แดชบอร์ดเอกสาร','ภาพรวมระบบเอกสารทั้งหมด','＋ เพิ่มเอกสาร',"go('scan')"],
 register:['ทะเบียนเอกสาร','เอกสารกระดาษและดิจิทัลทั้งหมด พร้อมตำแหน่งจัดเก็บจริง','＋ เพิ่มเอกสาร',"go('scan')"],
-scan:['สแกน / อัปโหลด','แปลงเอกสารกระดาษเป็นดิจิทัลด้วย OCR','',''],
+queue:['นัดหมายช่าง','ตารางนัดหมาย — เชื่อมจาก install_jobs ด้วย job_no','',''],
+scan:['เอกสารงาน / OCR','สแกนฟอร์มงานติดตั้ง 3 ใบ — receive · issue · sign','',''],
 search:['ค้นหาเอกสาร','ค้นหาจากชื่อ รหัส หมวดหมู่ หรือ ตำแหน่ง','',''],
 approve:['รออนุมัติ','เอกสารที่รอการอนุมัติจากผู้มีอำนาจ','',''],
 cats:['หมวดหมู่','จัดกลุ่มเอกสารตามประเภทงาน','',''],
 service:['บริการติดตั้ง & เคลม','ติดตามงานติดตั้ง 109 รายการ — เชื่อมข้อมูลด้วยเลขบิล','',''],
-history:['ประวัติ Order','รายการ order ทั้งหมดจาก Supabase install_jobs','',''] };
+history:['Job / ออเดอร์','รายการ order ทั้งหมด — จาก sales_transaction และสร้างเอง','',''],
+install:['Pipeline ติดตั้ง','ติดตามสถานะงานแบบ Kanban (Stage 1→7)','',''] };
 function go(view){
   $$('#nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===view));
   $$('.view').forEach(v=>v.classList.remove('show'));$('#v-'+view).classList.add('show');
@@ -1175,9 +1179,9 @@ function evalFetchLive(){ try{ if(typeof fetch==='undefined')return;
   if(typeof VIEWS!=='undefined') VIEWS.eval=['คะแนนประเมินบริการ','ความพึงพอใจหลังการขาย · เชื่อมด้วยเลขบิล','',''];
   var nav=document.getElementById('nav');
   if(nav && !nav.querySelector('a[data-view="eval"]')){
-    var html='<a data-view="eval"><span class="ic">⭐</span> คะแนนประเมิน <span class="badge" id="nbEval">0</span></a>';
-    var svc=nav.querySelector('a[data-view="service"]');
-    if(svc) svc.insertAdjacentHTML('afterend',html); else nav.insertAdjacentHTML('beforeend',html);
+    var html='<a data-view="eval"><span class="ic">⭐</span> ประเมินผล <span class="badge" id="nbEval">0</span></a>';
+    var scanLnk=nav.querySelector('a[data-view="scan"]');
+    if(scanLnk) scanLnk.insertAdjacentHTML('afterend',html); else nav.insertAdjacentHTML('beforeend',html);
     var lnk=nav.querySelector('a[data-view="eval"]');
     if(lnk){ lnk.addEventListener('click',function(){ go('eval'); setTimeout(evalRender,0); var sd=document.querySelector('.side'),sc2=document.getElementById('navscrim'); if(sd)sd.classList.remove('open'); if(sc2)sc2.classList.remove('show'); }); }
   }
