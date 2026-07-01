@@ -721,7 +721,7 @@ function tableHtml(pf){pf=pf||{};var rows=Array.isArray(pf.rows)?pf.rows:[];
       '<td><input data-col="qty" value="'+esc(r.qty||'')+'" style="width:62px;padding:6px;border:1px solid var(--line);border-radius:7px;font-family:inherit"></td>'+
       '</tr>';});
   return h+'</tbody></table></div>';}
-function renderTplForm(pf){pf=pf||{};var t=TPL[curType];if(!t)return;var h='';
+function renderTplForm(pf){pf=pf||{};if(OCR_BATCH){batchAutoSave(pf);return;}var t=TPL[curType];if(!t)return;var h='';
   if(pf.__ocr)h+='<div class="ocr-badge" style="margin-bottom:8px">✔ '+(pf.__src||'OCR')+' เติมค่าที่อ่านได้ — ตรวจ/แก้ก่อนบันทึก</div>';
   h+='<div style="font-size:14px;font-weight:700;margin-bottom:6px">'+t.label+'</div>';
   t.groups.forEach(function(g){h+='<div style="font-size:11.5px;font-weight:700;color:var(--brand);margin:13px 0 6px">'+g.h+'</div>';g.f.forEach(function(fd){h+=ctrlHtml(fd[0],fd[1],fd[2],pf);});});
@@ -731,6 +731,7 @@ function renderTplForm(pf){pf=pf||{};var t=TPL[curType];if(!t)return;var h='';
   $('#ocrForm').innerHTML=h;}
 function renderPdfForms(forms){
   forms=forms||{};
+  if(OCR_BATCH){batchAutoSavePdf(forms);return;}
   var LABELS={receive:'📋 ฟอร์มรับงานติดตั้ง',issue:'📦 ฟอร์มเบิก-ใช้-คืน',sign:'✍️ ลายเซ็นยืนยัน'};
   var h='<div class="ocr-badge" style="margin-bottom:12px">✔ AI อ่าน PDF เสร็จ — ตรวจ/แก้ข้อมูลแต่ละฟอร์มก่อนบันทึก</div>';
   ['receive','issue','sign'].forEach(function(ft){
@@ -904,13 +905,13 @@ function batchRunCurrent(){
   if(isPdf){batchRunPdf(f);}else if(OCR_BACKEND)runServerOCR(f);else runTesseractOCR(f);
 }
 function batchRunPdf(f){
-  if(!OCR_BACKEND){toast('&#9888; ต้องตั้งค่า Backend OCR ก่อนสแกน PDF');batchSkip();return;}
+  if(!OCR_BACKEND){autoSaveFailed(f);refreshAll();OCR_QDONE++;batchUpdateBar();batchNext();return;}
   var fd=new FormData();fd.append('file',f);
   fetch(OCR_BACKEND.replace(/\/+$/,'')+'/ocr/pdf',{method:'POST',body:fd}).then(function(r){return r.json();})
     .then(function(res){var sl=$('#scanPrev').querySelector('.scanline');if(sl)sl.remove();
-      if(!res||res.ok===false){toast('&#9888; อ่าน PDF ไม่สำเร็จ — ข้ามไฟล์นี้');batchSkip();return;}
+      if(!res||res.ok===false){autoSaveFailed(f);refreshAll();OCR_QDONE++;batchUpdateBar();batchNext();return;}
       renderPdfForms(res.forms||{});})
-    .catch(function(err){toast('&#9888; ต่อเซิร์ฟเวอร์ไม่ได้ — ข้ามไฟล์นี้');batchSkip();});
+    .catch(function(){autoSaveFailed(f);refreshAll();OCR_QDONE++;batchUpdateBar();batchNext();});
 }
 function batchNext(){
   OCR_QIDX++;
@@ -927,8 +928,47 @@ function batchStop(){
 function batchDone(){
   OCR_BATCH=false;
   var bar=document.getElementById('batchBar');if(bar)bar.remove();
+  refreshAll();
   $('#scanPrev').innerHTML='<div style="font-size:40px">&#127881;</div><div style="margin-top:8px;font-size:13px;color:var(--green);font-weight:700">Batch เสร็จแล้ว</div>';
-  $('#ocrForm').innerHTML='<div class="empty"><div class="big">&#10003;</div>บันทึก <b>'+OCR_QDONE+'</b> ไฟล์ &middot; ข้าม <b>'+OCR_QSKIP+'</b> ไฟล์<br><div style="margin-top:14px;display:flex;gap:8px;justify-content:center"><button class="btn ghost sm" onclick="go(\'register\')">ดูในทะเบียน &#8594;</button><button class="btn ghost sm" onclick="wzGo(1)">สแกนใหม่</button></div></div>';
+  $('#ocrForm').innerHTML='<div class="empty"><div class="big">&#10003;</div>เข้าระบบแล้ว <b>'+OCR_QDONE+'</b> ไฟล์ — ทั้งหมดอยู่ใน<b>รออนุมัติ</b><br><div style="margin-top:14px;display:flex;gap:8px;justify-content:center"><button class="btn ghost sm" onclick="go(\'approve\')">ไปหน้ารออนุมัติ &#8594;</button><button class="btn ghost sm" onclick="wzGo(1)">สแกนใหม่</button></div></div>';
+}
+function batchAutoSave(pf){
+  var saved=autoSaveFromOcr(pf||{},curType);
+  if(!saved)autoSaveFailed(OCR_QUEUE[OCR_QIDX]);
+  refreshAll();OCR_QDONE++;batchUpdateBar();batchNext();
+}
+function batchAutoSavePdf(forms){
+  var saved=0;
+  ['receive','issue','sign'].forEach(function(ft){saved+=autoSaveFromOcr((forms||{})[ft]||{},ft);});
+  if(!saved)autoSaveFailed(OCR_QUEUE[OCR_QIDX]);
+  refreshAll();OCR_QDONE++;batchUpdateBar();batchNext();
+}
+function autoSaveFromOcr(pf,ft){
+  var t=TPL[ft];if(!t)return 0;
+  var caps=[];
+  t.groups.forEach(function(g){g.f.forEach(function(fd){var v=pf[fd[0]];if(v&&String(v).trim())caps.push({l:fd[1],v:String(v).trim()});});});
+  if(t.table&&pf.rows&&pf.rows.length){pf.rows.forEach(function(r,i){var parts=[r.size,r.color,r.w&&('กว้าง '+r.w),r.l&&('ยาว '+r.l),r.qty&&('จำนวน '+r.qty)].filter(Boolean);if(parts.length)caps.push({l:'ม้วนที่ '+(i+1)+' ('+r.typ+')',v:parts.join(' · ')});});}
+  if(!caps.length)return 0;
+  var bill=pf.bill||pf.docNo||'';
+  var code=bill||('FORM-'+Date.now().toString().slice(-6));
+  var title=t.label+(pf.custName?' — '+pf.custName:(bill?' — เลข '+bill:''));
+  var doc={id:nextId++,code:code,title:title,cat:t.cat,ver:'1.0',status:'pending',
+    owner:'(Batch OCR)',dept:'บริการติดตั้ง',loc:{cab:'-',shelf:'-',folder:'-'},
+    paper:true,scanned:true,created:today(),updated:today(),review:'-',approver:'-',
+    captured:caps,bill:bill,formType:ft,imgSrc:'',
+    hist:[['Batch OCR: '+t.label,today(),'OCR'],['รออนุมัติ',today(),'ระบบ']]};
+  DOCS.unshift(doc);
+  if(SB&&bill){(function(){var allJobs=(typeof OH_DATA!=='undefined'?OH_DATA:[]).concat(typeof IP_T!=='undefined'?IP_T:[]);var job=allJobs.find(function(x){return x.bill===bill;});if(!job)return;var ds=JSON.parse(JSON.stringify(job.docs||[]));var idx=ds.findIndex(function(x){return x.form_type===ft;});var entry={form_type:ft,ts:today(),caps:caps};if(idx>=0)ds[idx]=entry;else ds.push(entry);SB.from('install_jobs').update({docs:ds}).eq('order_no',job.order).then(function(){});job.docs=ds;})();}
+  return 1;
+}
+function autoSaveFailed(f){
+  var fname=(f&&f.name)||('ไฟล์ที่ '+(OCR_QIDX+1));
+  var doc={id:nextId++,code:'BATCH-ERR-'+Date.now().toString().slice(-5),title:'[OCR ไม่สำเร็จ] '+fname,cat:'CLAIM',ver:'1.0',status:'pending',
+    owner:'(Batch OCR)',dept:'บริการติดตั้ง',loc:{cab:'-',shelf:'-',folder:'-'},
+    paper:true,scanned:false,created:today(),updated:today(),review:'-',approver:'-',
+    captured:[],bill:'',formType:curType,imgSrc:'',
+    hist:[['Batch OCR ล้มเหลว: '+fname,today(),'ระบบ'],['รออนุมัติ — กรอกด้วยตนเอง',today(),'ระบบ']]};
+  DOCS.unshift(doc);
 }
 function handlePdfScan(e){
   if(!e.target.files||!e.target.files[0])return;
