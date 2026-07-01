@@ -546,16 +546,39 @@ refreshAll();renderDash();$('#nbSvc').textContent=TASKS.filter(svcIsClaim).lengt
 /* ===== Template-aware OCR scan: 3 real forms ===== */
 const TPL={
  receive:{label:'เอกสารรับงานติดตั้ง & ส่งมอบ',cat:'CLAIM',groups:[
-   {h:'ข้อมูลเอกสาร',f:[['docNo','เลขที่เอกสาร','text'],['docDate','วันที่ออกเอกสาร','text']]},
-   {h:'ข้อมูลลูกค้า',f:[['custName','ชื่อลูกค้า','text'],['contact','ชื่อผู้ติดต่อ','text'],['phone','เบอร์โทรศัพท์','text'],['addr','ที่อยู่สถานที่ติดตั้ง','text']]},
-   {h:'การเข้ารับบริการ',f:[['svcDate','วันที่เข้ารับบริการ','text'],['tStart','เวลาเริ่มงาน','text'],['tEnd','เวลาสิ้นสุดงาน','text'],['room','ประเภทพื้นที่ติดตั้ง','checks:ห้องนอน,ห้องนั่งเล่น,โถงทางเดิน,ห้องเด็กเล็ก,ห้องเลี้ยงสัตว์,อื่นๆ']]},
-   {h:'จำนวนพื้นที่',f:[['qtyOrder','พื้นที่สั่งซื้อ (ตร.ม.)','text'],['qtyReal','พื้นที่ใช้จริง (ตร.ม.)','text'],['diff','ส่วนต่างจากสั่งซื้อ','radio:ไม่มี,มากกว่าเดิม,น้อยกว่าเดิม'],['diffQty','จำนวนส่วนต่าง (ตร.ม.)','text'],['note','หมายเหตุ','text']]}
+  {h:'ข้อมูลเอกสาร',f:[['docNo','เลขที่เอกสาร','text'],['docDate','วันที่ออกเอกสาร','text']]},
+  {h:'1. ข้อมูลลูกค้า',f:[['custName','ชื่อลูกค้า','text'],['contact','ชื่อผู้ติดต่อ','text'],['phone','เบอร์โทรศัพท์','text'],['addr','ที่อยู่สถานที่ติดตั้ง','text']]},
+  {h:'2. การเข้ารับบริการ',f:[['svcDate','วันที่เข้ารับบริการ','text'],['tStart','เวลาเริ่มงาน','text'],['tEnd','เวลาสิ้นสุดงาน','text'],['room','ประเภทพื้นที่ติดตั้ง','checks:ห้องนอน,ห้องนั่งเล่น,โถงทางเดิน,ห้องเด็กเล็ก,ห้องเลี้ยงสัตว์,อื่นๆ']]},
+  {h:'3. จำนวนพื้นที่',f:[['qtyOrder','พื้นที่สั่งซื้อ (ตร.ม.)','text'],['qtyReal','พื้นที่ใช้จริง (ตร.ม.)','text'],['diff','ส่วนต่างจากที่สั่งซื้อ','radio:ไม่มี,มากกว่าเดิม,น้อยกว่าเดิม'],['diffQty','จำนวนส่วนต่าง (ตร.ม.)','text'],['note','หมายเหตุพื้นที่','text']]},
+  {h:'4. ตรวจเช็คก่อนติดตั้ง',f:[
+   ['chk1','จำนวนสินค้า/แผ่นครบถ้วนตามรายการ','radio:ถูกต้อง,ไม่ถูกต้อง'],
+   ['chk2','สี/รุ่น/ลวดลายตรงตามที่ลูกค้าสั่งซื้อ','radio:ถูกต้อง,ไม่ถูกต้อง'],
+   ['chk3','สินค้าไม่มีรอยชำรุด แตกหัก หรือเสียหายก่อนติดตั้ง','radio:ถูกต้อง,ไม่ถูกต้อง'],
+   ['chk4','พื้นที่หน้างานพร้อมสำหรับการติดตั้ง','radio:พร้อม,ไม่พร้อม'],
+   ['chk5','ลูกค้ารับทราบแนวทาง/รูปแบบการติดตั้ง','radio:รับทราบ,ไม่รับทราบ'],
+   ['noteChk','หมายเหตุ (ก่อนติดตั้ง)','text']
+  ]},
+  {h:'5. ส่งมอบงานหลังติดตั้ง',f:[
+   ['del1','ติดตั้งครบตามพื้นที่ที่ตกลง','radio:ถูกต้อง,ไม่ถูกต้อง'],
+   ['del2','งานติดตั้งเรียบร้อย แนบสนิท พร้อมใช้งาน','radio:ถูกต้อง,ไม่ถูกต้อง'],
+   ['del3','พื้นที่หน้างานเก็บความเรียบร้อยหลังติดตั้ง','radio:ถูกต้อง,ไม่ถูกต้อง'],
+   ['del4','ลูกค้าได้รับคำแนะนำการดูแลรักษาเบื้องต้น','radio:ได้รับแล้ว,ยังไม่ได้รับ'],
+   ['del5','ลูกค้าตรวจรับงานเรียบร้อย','radio:เรียบร้อย,มีข้อแก้ไข'],
+   ['noteDel','รายละเอียดข้อแก้ไข / หมายเหตุ','text']
+  ]}
  ]},
  issue:{label:'ฟอร์มเบิก-ใช้-คืนสินค้า',cat:'FORM',table:true,groups:[
-   {h:'หัวเอกสาร',f:[['bill','เลขที่บิล','text'],['installer','ชื่อผู้เข้าติดตั้ง','text'],['team','จำนวนทีมผู้ติดตั้ง','text'],['date','วันที่เข้าติดตั้ง','text'],['area','จำนวนพื้นที่ (ตร.ม.)','text'],['tStart','เวลาเริ่มงาน','text'],['tEnd','เวลาสิ้นสุดงาน','text']]}
+  {h:'หัวเอกสาร',f:[['bill','เลขที่บิล','text'],['installer','ชื่อผู้เข้าติดตั้ง','text'],['team','จำนวนทีมผู้ติดตั้ง','text'],['date','วันที่เข้าติดตั้ง','text'],['area','จำนวนพื้นที่ (ตร.ม.)','text'],['tStart','เวลาเริ่มงาน','text'],['tEnd','เวลาสิ้นสุดงาน','text']]}
  ]},
  sign:{label:'หน้าข้อกำหนด + ลายเซ็น',cat:'FORM',groups:[
-   {h:'ลายเซ็นยืนยันการตรวจรับ/ส่งมอบ',f:[['custSign','ลูกค้า (ชื่อ)','text'],['custDate','วันที่ (ลูกค้า)','text'],['techSign','ทีมช่าง/ผู้ส่งมอบ (ชื่อ)','text'],['techDate','วันที่ (ช่าง)','text'],['inspSign','ผู้ตรวจสอบ (ชื่อ)','text'],['inspDate','วันที่ (ตรวจสอบ)','text']]}
+  {h:'7. ลายเซ็นยืนยันการตรวจรับ/ส่งมอบ',f:[
+   ['custSign','ชื่อลูกค้า (ผู้รับบริการ)','text'],
+   ['custDate','วันที่ (ลูกค้า)','text'],
+   ['techSign','ชื่อทีมช่าง / ผู้ส่งมอบ','text'],
+   ['techDate','วันที่ (ช่าง)','text'],
+   ['inspSign','ผู้ตรวจสอบ (ถ้ามี)','text'],
+   ['inspDate','วันที่ (ตรวจสอบ)','text']
+  ]}
  ]}
 };
 const ISSUE_ROWS=['เบิกสินค้า','เบิกสินค้า','เบิกสินค้า','จำนวนที่เหลือ','จำนวนที่เหลือ','จำนวนที่เหลือ'];
@@ -1390,42 +1413,103 @@ function ohOpenDetail(orderNo){
   pane2+='</div>';
   // TAB 3: เอกสาร
   var FM={receive:{lbl:'รับงานติดตั้ง & ส่งมอบ',ic:'📋'},issue:{lbl:'เบิก-ใช้-คืนสินค้า',ic:'📦'},sign:{lbl:'ข้อกำหนด + ลายเซ็น',ic:'✍️'}};
-  var pane3='<div class="dr-pane" id="ohP-docs" style="padding:18px 26px 24px">';
+  var pane3='<div class="dr-pane" id="ohP-docs" style="padding:14px 20px 24px">';
+  var dflt={docNo:t.bill||'',bill:t.bill||'',custName:t.customer||'',phone:t.phone||'',
+    addr:t.addr||'',svcDate:t.due||'',date:t.due||'',
+    installer:t.assignees&&t.assignees[0]?t.assignees[0]:'',
+    team:t.assignees?String(t.assignees.length):''};
   ['receive','issue','sign'].forEach(function(ft){
     var localDoc=(typeof DOCS!=='undefined'?DOCS:[]).find(function(x){return x.bill===t.bill&&x.formType===ft;});
     var supaDoc=(t.docs||[]).find(function(x){return x.form_type===ft||x.type===ft;});
     var ok=!!(localDoc||supaDoc),m=FM[ft];
+    var caps=(localDoc&&localDoc.captured)||(supaDoc&&supaDoc.caps)||[];
+    var imgSrc=(localDoc&&localDoc.imgSrc)||'';
     var ts=(localDoc&&localDoc.created)||(supaDoc&&supaDoc.ts)||'';
-    pane3+='<div class="oh-doc-row'+(ok?' done':'')+'" style="flex-direction:column;align-items:stretch;gap:0;padding:'+(ok?'0':'11px 13px')+'">';
-    pane3+='<div style="display:flex;align-items:center;gap:12px;padding:'+(ok?'11px 13px':'0')+'">'
-      +'<span style="font-size:22px">'+(ok?'✅':m.ic)+'</span>'
-      +'<div style="flex:1"><div style="font-weight:600;font-size:13px">'+m.lbl+'</div>'
-      +'<div style="font-size:11.5px;color:'+(ok?'var(--green)':'var(--muted)')+'">'+(ok?'สแกนแล้ว':'ยังไม่ได้สแกน')+'</div>'
-      +(ts?'<div style="font-size:10.5px;color:var(--muted)">'+esc(ts)+'</div>':'')
-      +'</div></div>';
+    pane3+='<div style="background:#fff;border:1.5px solid '+(ok?'var(--green)':'var(--line)')+';border-radius:12px;margin-bottom:12px;overflow:hidden">';
+    // Header
+    pane3+='<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:'+(ok?'var(--green-l)':'#F8FAFC')+'">'
+      +'<span style="font-size:20px">'+(ok?'✅':m.ic)+'</span>'
+      +'<div style="font-weight:700;font-size:13px;color:var(--ink)">'+m.lbl+'</div>'
+      +'<span style="margin-left:auto;font-size:11px;font-weight:700;color:'+(ok?'var(--green)':'var(--muted)')+'">'+(ok?'มีข้อมูล'+(ts?' · '+esc(ts):''):'ยังไม่มี')+'</span>'
+      +'</div>';
+    // Captured data (if available)
     if(ok){
-      var caps=(localDoc&&localDoc.captured)||(supaDoc&&supaDoc.caps)||[];
-      var imgSrc=(localDoc&&localDoc.imgSrc)||'';
-      pane3+='<div style="border-top:1px solid var(--line);padding:12px 13px 14px;background:#FAFBFC">';
-      if(imgSrc){
-        pane3+='<img src="'+imgSrc+'" style="width:100%;max-height:240px;object-fit:contain;border-radius:8px;margin-bottom:10px;background:#fff;border:1px solid var(--line)">';
-      }
+      pane3+='<div style="padding:10px 14px;border-top:1px solid var(--line)">';
+      if(imgSrc)pane3+='<img src="'+imgSrc+'" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;margin-bottom:10px;border:1px solid var(--line)">';
       if(caps.length){
-        pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--muted);letter-spacing:.4px;margin-bottom:6px;text-transform:uppercase">ข้อมูลที่อ่านได้ ('+caps.length+' ช่อง)</div>';
-        pane3+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px 12px">';
-        caps.forEach(function(c){
-          pane3+='<div style="min-width:0"><div style="font-size:10px;color:var(--muted);font-weight:600">'+esc(c.l)+'</div>'
-            +'<div style="font-size:12.5px;font-weight:700;color:var(--ink);white-space:pre-wrap;word-break:break-word">'+esc(c.v||'—')+'</div></div>';
-        });
+        pane3+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px 14px">';
+        caps.forEach(function(c){pane3+='<div><div style="font-size:9.5px;color:var(--muted);font-weight:700;text-transform:uppercase">'+esc(c.l)+'</div><div style="font-size:12.5px;font-weight:700;color:var(--ink)">'+esc(c.v||'—')+'</div></div>';});
         pane3+='</div>';
-      } else {
-        pane3+='<div style="font-size:12px;color:var(--muted);text-align:center;padding:6px 0">ไม่พบข้อมูล field</div>';
+      }else{pane3+='<div style="font-size:12px;color:var(--muted)">ไม่พบรายละเอียด fields</div>';}
+      pane3+='</div>';
+    }
+    // Editable form
+    var tpl=(typeof TPL!=='undefined'&&TPL[ft])||null;
+    if(tpl){
+      pane3+='<div style="padding:10px 14px 14px;border-top:1px solid var(--line2)'+(ok?';background:#FAFBFC':'')+'">';
+      pane3+='<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">'+(ok?'✏️ แก้ไข':'📝 กรอกข้อมูล')+'</div>';
+      tpl.groups.forEach(function(g){
+        pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--brand);margin:9px 0 5px;padding-top:6px;border-top:1px solid var(--line2)">'+g.h+'</div>';
+        g.f.forEach(function(fd){
+          var k=fd[0],label=fd[1],ftype=fd[2]||'text';var val=dflt[k]||'';
+          pane3+='<div style="margin-bottom:7px"><div style="font-size:10px;color:var(--muted);font-weight:600;margin-bottom:3px">'+esc(label)+'</div>';
+          if(ftype.indexOf('radio:')===0){
+            var ropts=ftype.slice(6).split(',');
+            pane3+='<div style="display:flex;flex-wrap:wrap;gap:5px">';
+            ropts.forEach(function(o){
+              pane3+='<label style="display:flex;align-items:center;gap:4px;font-size:11.5px;border:1px solid var(--line);padding:5px 10px;border-radius:7px;cursor:pointer;background:#fff">'
+                +'<input type="radio" name="drr_'+ft+'_'+k+'" value="'+esc(o)+'"'+(val===o?' checked':'')
+                +' onchange="(function(el){var hi=document.getElementById(\'drDoc_'+ft+'_'+k+'\');if(hi)hi.value=el.value;})(this)">'+esc(o)+'</label>';
+            });
+            pane3+='</div><input type="hidden" id="drDoc_'+ft+'_'+k+'" value="'+esc(val)+'">';
+          } else if(ftype.indexOf('checks:')===0){
+            var copts=ftype.slice(7).split(',');var cv=(val||'').split(',').map(function(s){return s.trim();});
+            pane3+='<input type="hidden" id="drDoc_'+ft+'_'+k+'" value="'+esc(val)+'">';
+            pane3+='<div data-chkgrp="drDoc_'+ft+'_'+k+'" style="display:flex;flex-wrap:wrap;gap:5px">';
+            copts.forEach(function(o){
+              pane3+='<label style="display:flex;align-items:center;gap:4px;font-size:11.5px;border:1px solid var(--line);padding:5px 10px;border-radius:7px;cursor:pointer;background:#fff">'
+                +'<input type="checkbox" value="'+esc(o)+'"'+(cv.indexOf(o)>=0?' checked':'')
+                +' onchange="ohChkUpdate(this)">'+esc(o)+'</label>';
+            });
+            pane3+='</div>';
+          } else {
+            pane3+='<input id="drDoc_'+ft+'_'+k+'" value="'+esc(val)+'" placeholder="'+esc(label)+'" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;box-sizing:border-box">';
+          }
+          pane3+='</div>';
+        });
+      });
+      if(ft==='issue'){
+        var iRow=function(ri,label,accentColor){
+          return '<div style="background:#F8FAFC;border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:7px">'
+            +'<div style="font-size:10.5px;font-weight:700;color:'+accentColor+';margin-bottom:7px">'+label+'</div>'
+            +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">'
+            +'<div><div style="font-size:9.5px;color:var(--muted);font-weight:700;margin-bottom:2px">ขนาด</div>'
+            +'<select id="drDoc_issue_r'+ri+'_sz" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12px">'
+            +'<option value="">— เลือก —</option><option>0.6 cm</option><option>1.6 cm</option></select></div>'
+            +'<div><div style="font-size:9.5px;color:var(--muted);font-weight:700;margin-bottom:2px">สี</div>'
+            +'<select id="drDoc_issue_r'+ri+'_cl" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12px">'
+            +'<option value="">— เลือก —</option><option>Beige</option><option>Organic beige</option><option>Barky beige</option><option>Whitebuzz</option></select></div>'
+            +'</div>'
+            +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">'
+            +'<div><div style="font-size:9.5px;color:var(--muted);font-weight:700;margin-bottom:2px">กว้าง (cm)</div>'
+            +'<input id="drDoc_issue_r'+ri+'_w" type="number" min="0" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12px;box-sizing:border-box"></div>'
+            +'<div><div style="font-size:9.5px;color:var(--muted);font-weight:700;margin-bottom:2px">ยาว (cm)</div>'
+            +'<input id="drDoc_issue_r'+ri+'_l" type="number" min="0" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12px;box-sizing:border-box"></div>'
+            +'<div><div style="font-size:9.5px;color:var(--muted);font-weight:700;margin-bottom:2px">จำนวน (ม้วน)</div>'
+            +'<input id="drDoc_issue_r'+ri+'_qty" type="number" min="0" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12px;box-sizing:border-box"></div>'
+            +'</div></div>';
+        };
+        pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--blue);margin:10px 0 5px">📦 เบิกสินค้า (เอาออกไป)</div>';
+        pane3+=iRow(0,'ม้วนที่ 1','var(--blue)')+iRow(1,'ม้วนที่ 2','var(--blue)')+iRow(2,'ม้วนที่ 3','var(--blue)');
+        pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--green);margin:10px 0 5px">🔁 จำนวนที่เหลือ / คืนกลับ</div>';
+        pane3+=iRow(3,'ม้วนที่ 1','var(--green)')+iRow(4,'ม้วนที่ 2','var(--green)')+iRow(5,'ม้วนที่ 3','var(--green)');
       }
+      pane3+='<button class="btn primary" style="width:100%;margin-top:10px;font-size:13px" onclick="ohSaveDoc(\''+esc(String(t.order))+'\',\''+ft+'\')">💾 บันทึกเอกสาร</button>';
       pane3+='</div>';
     }
     pane3+='</div>';
   });
-  pane3+='<div style="margin-top:14px"><button class="btn primary" style="width:100%" onclick="closeDrawer();go(\'scan\')">📸 สแกนเอกสารใหม่</button></div></div>';
+  pane3+='</div>';
   // TAB 4: ประเมิน
   var pane4='<div class="dr-pane" id="ohP-eval" style="padding:18px 26px 24px">';
   try{
@@ -1445,6 +1529,58 @@ function ohTab(btn,pane){
     var el=document.getElementById('ohP-'+p);
     if(el)el.classList.toggle('act',p===pane);
   });
+}
+
+function ohChkUpdate(el){
+  var grp=el.closest('[data-chkgrp]');if(!grp)return;
+  var tid=grp.getAttribute('data-chkgrp');
+  var inp=document.getElementById(tid);if(!inp)return;
+  var vals=[];grp.querySelectorAll('input[type="checkbox"]').forEach(function(cb){if(cb.checked)vals.push(cb.value);});
+  inp.value=vals.join(', ');
+}
+
+function ohSaveDoc(orderNo,ft){
+  var t=OH_DATA.find(function(x){return String(x.order)===String(orderNo);});
+  if(!t||typeof TPL==='undefined'||!TPL[ft]){toast('⚠ ไม่พบข้อมูล');return;}
+  var tpl=TPL[ft];var caps=[];
+  tpl.groups.forEach(function(g){
+    g.f.forEach(function(fd){
+      var el=document.getElementById('drDoc_'+ft+'_'+fd[0]);
+      var v=el?el.value.trim():'';
+      if(v)caps.push({l:fd[1],v:v});
+    });
+  });
+  if(ft==='issue'){
+    var rTypes=['เบิก','เบิก','เบิก','คืน','คืน','คืน'];
+    for(var ri=0;ri<6;ri++){
+      var sz=(document.getElementById('drDoc_issue_r'+ri+'_sz')||{}).value||'';
+      var cl=(document.getElementById('drDoc_issue_r'+ri+'_cl')||{}).value||'';
+      var rw=(document.getElementById('drDoc_issue_r'+ri+'_w')||{}).value||'';
+      var rl=(document.getElementById('drDoc_issue_r'+ri+'_l')||{}).value||'';
+      var rq=(document.getElementById('drDoc_issue_r'+ri+'_qty')||{}).value||'';
+      var parts=[sz,cl,rw&&('กว้าง '+rw+' cm'),rl&&('ยาว '+rl+' cm'),rq&&('จำนวน '+rq+' ม้วน')].filter(Boolean);
+      if(parts.length)caps.push({l:rTypes[ri]+' ม้วนที่ '+(ri<3?ri+1:ri-2),v:parts.join(' · ')});
+    }
+  }
+  if(!caps.length){toast('⚠ กรอกอย่างน้อย 1 ช่อง');return;}
+  var ds=JSON.parse(JSON.stringify(t.docs||[]));
+  var idx=ds.findIndex(function(x){return x.form_type===ft;});
+  var entry={form_type:ft,ts:today(),caps:caps};
+  if(idx>=0)ds[idx]=entry;else ds.push(entry);
+  if(SB)SB.from('install_jobs').update({docs:ds}).eq('order_no',t.order).then(function(){});
+  t.docs=ds;
+  if(typeof DOCS!=='undefined'&&typeof nextId!=='undefined'){
+    var ei=DOCS.findIndex(function(d){return d.bill===t.bill&&d.formType===ft;});
+    var doc={id:nextId++,code:t.bill||('DOC-'+ft),title:tpl.label,cat:tpl.cat,ver:'1.0',status:'pending',
+      owner:'กรอกจาก Job',dept:'บริการติดตั้ง',loc:{cab:'-',shelf:'-',folder:'-'},
+      paper:false,scanned:false,created:today(),updated:today(),review:'-',approver:'-',
+      captured:caps,bill:t.bill,formType:ft,imgSrc:'',
+      hist:[['กรอกจาก Job Drawer: '+tpl.label,today(),'ระบบ']]};
+    if(ei>=0)DOCS[ei]=doc;else DOCS.unshift(doc);
+    if(typeof refreshAll==='function')refreshAll();
+  }
+  toast('💾 บันทึก '+tpl.label+' แล้ว');
+  ohOpenDetail(orderNo);
 }
 
 </script>
