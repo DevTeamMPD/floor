@@ -536,7 +536,12 @@ function docSaveUpdated(id){
 }function markScanned(id){const d=DOCS.find(x=>x.id===id);d.scanned=true;d.hist.push(['สแกนเข้าระบบดิจิทัล',today(),'MPD']);toast('✔ ทำเครื่องหมายสแกนแล้ว');refreshAll();openDoc(id);}
 function docOpenFile(id){
   var d=DOCS.find(function(x){return x.id===id;});
-  if(!d||!d.imgSrc){toast('ยังไม่มีไฟล์ดิจิทัลที่เก็บไว้');return;}
+  if(!d){toast('ไม่พบเอกสาร');return;}
+  if(!d.imgSrc){
+    var _inp=document.createElement('input');_inp.type='file';_inp.accept='.pdf,image/*';
+    _inp.onchange=function(){if(!_inp.files||!_inp.files[0])return;d.imgSrc=URL.createObjectURL(_inp.files[0]);docOpenFile(id);};
+    _inp.click();return;
+  }
   if(document.getElementById('filePreviewPane')){docClosePreview();return;}
   var drw=document.getElementById('drawer');
   var existing=drw.innerHTML;
@@ -984,7 +989,7 @@ function wzPickType(t){ if(!TPL[t])return; curType=t;
   wzGo(2);
 }
 function handleScan(e){ if(!e.target.files||!e.target.files[0])return; wzGo(3); runOCR(e); }
-var OCR_QUEUE=[],OCR_QIDX=0,OCR_QDONE=0,OCR_QSKIP=0,OCR_BATCH=false,OCR_CURR_DATAURL='';
+var OCR_QUEUE=[],OCR_QIDX=0,OCR_QDONE=0,OCR_QSKIP=0,OCR_BATCH=false;
 function handleFolderScan(e){
   var files=Array.from(e.target.files).filter(function(f){return f.type.startsWith('image/')||f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf');}).sort(function(a,b){return a.name.localeCompare(b.name);});
   e.target.value='';
@@ -1016,10 +1021,7 @@ function batchRunCurrent(){
     $('#scanPrev').innerHTML='<img src="'+url+'" style="max-width:100%;max-height:100%;object-fit:contain"/><div class="scanline"></div><div style="font-size:11px;color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(f.name)+'</div>';
   }
   $('#ocrForm').innerHTML='<div class="empty"><div class="big">&#9203;</div><div id="ocrProg">กำลังส่งให้ AI อ่าน...</div></div>';
-  OCR_CURR_DATAURL='';
-  var _fr=new FileReader();
-  _fr.onload=function(e){OCR_CURR_DATAURL=e.target.result;if(isPdf){batchRunPdf(f);}else if(OCR_BACKEND)runServerOCR(f);else runTesseractOCR(f);};
-  _fr.readAsDataURL(f);
+  if(isPdf){batchRunPdf(f);}else if(OCR_BACKEND)runServerOCR(f);else runTesseractOCR(f);
 }
 function batchRunPdf(f){
   if(!OCR_BACKEND){autoSaveFailed(f);refreshAll();OCR_QDONE++;batchUpdateBar();batchNext();return;}
@@ -1070,7 +1072,7 @@ function autoSaveFromOcr(pf,ft){
   var code=bill||('FORM-'+Date.now().toString().slice(-6));
   var title=t.label+(pf.custName?' — '+pf.custName:(bill?' — เลข '+bill:''));
   var imgEl=$('#scanPrev').querySelector('img');
-  var imgSrc=OCR_CURR_DATAURL||(imgEl?imgEl.src:'');
+  var imgSrc=imgEl?imgEl.src:(OCR_BATCH&&OCR_QUEUE[OCR_QIDX]?URL.createObjectURL(OCR_QUEUE[OCR_QIDX]):'');
   var doc={id:nextId++,code:code,title:title,cat:t.cat,ver:'1.0',status:'pending',
     owner:'(Batch OCR)',dept:'บริการติดตั้ง',loc:{cab:'-',shelf:'-',folder:'-'},
     paper:true,scanned:true,created:today(),updated:today(),review:'-',approver:'-',
@@ -1082,7 +1084,7 @@ function autoSaveFromOcr(pf,ft){
 }
 function autoSaveFailed(f){
   var fname=(f&&f.name)||('ไฟล์ที่ '+(OCR_QIDX+1));
-  var fileUrl=OCR_CURR_DATAURL||'';
+  var fileUrl=f?URL.createObjectURL(f):'';
   var doc={id:nextId++,code:'BATCH-ERR-'+Date.now().toString().slice(-5),title:'[OCR ไม่สำเร็จ] '+fname,cat:'CLAIM',ver:'1.0',status:'pending',
     owner:'(Batch OCR)',dept:'บริการติดตั้ง',loc:{cab:'-',shelf:'-',folder:'-'},
     paper:true,scanned:false,created:today(),updated:today(),review:'-',approver:'-',
