@@ -243,6 +243,7 @@ API key อ่านจาก environment variable เท่านั้น (ไ
 
 | วันที่ | สิ่งที่ทำ | ไฟล์/ส่วนที่แตะ | ผู้ทำ |
 |--------|-----------|-----------------|-------|
+| 2026-07-02 | **กู้ข้อมูล DB:** ระหว่างเทสต์เผลอเลื่อน `install_jobs` order `263835` จาก stage 7 → 3 · กู้กลับเป็น 7 แล้ว (ยืนยัน distribution ตรง pristine: 2=35, 3=1, 4=6, 7=18) | Supabase `install_jobs` (order 263835) | Claude |
 | 2026-07-02 | **แก้บอร์ดเพี้ยน:** เอา logic `bill→ถัง 7` ออก (ที่เผลอกู้มาก่อนหน้า) — งานถัง 2 ที่มีบิล 35 งานถูกดันไปแสดงเป็น "เสร็จงาน" ผิด · ตอนนี้บอร์ดแสดง stage จริงตาม DB | `index.html` (`ipMap` ×2) | Claude |
 | 2026-07-02 | **Validate ถัง 2 ก่อนไปต่อ** — ปุ่ม "ทำขั้นนี้เสร็จ" บล็อกถ้าข้อมูลไม่ครบ (ที่อยู่ · พิกัด · กว้าง · ยาว · รูป 3 มุม), ขึ้นขอบแดง + toast · บันทึก `t.area` ตอนไปต่อ · **fix bug:** `ipMap` (ตัว override) ขาด `callLogs`→crash ตอนไปถัง 3 + กู้ logic `bill→ถัง 7` | `index.html` (`ipAdv`, `ipCheckStage2`, `ipMap` ×2, ถัง 2 card) | Claude |
 | 2026-07-02 | เพิ่มหน้า **"คู่มือ / โครงสร้างระบบ"** (`docs`) ในเว็บแอป — เมนูล่างสุด, ดึง `PROJECT_DOCS.md` มาแสดงด้วย `marked` + สร้าง TOC อัตโนมัติ | `index.html` (nav, VIEWS, go(), `renderDocs()`, section `v-docs`, marked CDN) | Claude |
