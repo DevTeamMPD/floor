@@ -6,6 +6,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 <style>
 :root{--ink:#1E293B;--ink2:#334155;--muted:#64748B;--line:#E2E8F0;--line2:#EEF2F7;--bg:#F1F5F9;--card:#fff;
 --brand:#4F46E5;--brand-d:#4338CA;--brand-l:#EEF0FE;--green:#15935E;--green-l:#E5F4EC;--amber:#C2820E;--amber-l:#FBF1DC;
@@ -163,6 +164,8 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
       <a data-view="search"><span class="ic">⌕</span> ค้นหา</a>
       <a data-view="approve"><span class="ic">✓</span> รออนุมัติ <span class="badge" id="nbAppr">0</span></a>
       <a data-view="cats"><span class="ic">◈</span> หมวดหมู่</a>
+      <div class="sec">ระบบ</div>
+      <a data-view="docs"><span class="ic">📖</span> คู่มือ / โครงสร้างระบบ</a>
     </nav>
     <div class="side-foot">MPD Workspace · Prototype v0.2<br>ข้อมูลตัวอย่าง/จริงเพื่อสาธิต</div>
   </aside>
@@ -177,6 +180,40 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
     <div class="wrap">
       <!-- OVERVIEW DASHBOARD -->
       <section class="view show" id="v-overview"><div id="ovBody"></div></section>
+      <!-- DOCS / คู่มือ · โครงสร้างระบบ -->
+      <section class="view" id="v-docs">
+        <style>
+         #v-docs .docs-wrap{display:flex;gap:22px;align-items:flex-start}
+         #v-docs .docs-toc{position:sticky;top:14px;flex:0 0 216px;max-height:calc(100vh - 96px);overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 12px;box-shadow:var(--shadow)}
+         #v-docs .toc-title{font-weight:700;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:2px 6px 10px}
+         #v-docs .docs-toc a{display:block;padding:5px 8px;border-radius:8px;color:var(--ink2);text-decoration:none;font-size:13px;line-height:1.35}
+         #v-docs .docs-toc a:hover{background:var(--brand-l);color:var(--brand-d)}
+         #v-docs .docs-toc a.toc-h3{padding-left:20px;font-size:12.5px;color:var(--muted)}
+         #v-docs .md-body{flex:1;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:26px 32px;box-shadow:var(--shadow);line-height:1.72;color:var(--ink2)}
+         #v-docs .md-body h1{font-size:24px;color:var(--ink);margin:.2em 0 .5em}
+         #v-docs .md-body h2{font-size:19px;color:var(--ink);margin:1.5em 0 .6em;padding-bottom:.3em;border-bottom:2px solid var(--line)}
+         #v-docs .md-body h3{font-size:16px;color:var(--ink);margin:1.2em 0 .5em}
+         #v-docs .md-body p{margin:.6em 0}
+         #v-docs .md-body ul,#v-docs .md-body ol{margin:.5em 0 .5em 1.4em}
+         #v-docs .md-body li{margin:.25em 0}
+         #v-docs .md-body a{color:var(--brand);text-decoration:none}
+         #v-docs .md-body a:hover{text-decoration:underline}
+         #v-docs .md-body code{background:var(--line2);padding:1px 6px;border-radius:6px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.88em;color:var(--red)}
+         #v-docs .md-body pre{background:#0F172A;color:#E2E8F0;padding:14px 16px;border-radius:10px;overflow:auto;margin:1em 0;font-size:12.5px;line-height:1.55}
+         #v-docs .md-body pre code{background:none;color:inherit;padding:0}
+         #v-docs .md-body table{border-collapse:collapse;width:100%;margin:1em 0;font-size:13px}
+         #v-docs .md-body th,#v-docs .md-body td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top}
+         #v-docs .md-body th{background:var(--bg);font-weight:600;color:var(--ink)}
+         #v-docs .md-body tr:nth-child(even) td{background:var(--line2)}
+         #v-docs .md-body blockquote{border-left:3px solid var(--brand);background:var(--brand-l);margin:1em 0;padding:.5em 14px;border-radius:0 8px 8px 0}
+         #v-docs .md-body hr{border:none;border-top:1px solid var(--line);margin:1.6em 0}
+         #v-docs .docs-loading,#v-docs .docs-err{padding:40px;text-align:center;color:var(--muted)}
+         #v-docs .docs-err .sub{font-size:12px;display:block;margin-top:6px}
+         #v-docs .docs-err button{display:block;margin:14px auto 0}
+         @media(max-width:860px){#v-docs .docs-toc{display:none}#v-docs .docs-wrap{display:block}}
+        </style>
+        <div id="docsBody"></div>
+      </section>
       <!-- DASHBOARD -->
       <section class="view" id="v-dash">
         <div class="kpis" id="kpis"></div>
@@ -403,15 +440,42 @@ approve:['รออนุมัติ','เอกสารที่รอกา�
 cats:['หมวดหมู่','จัดกลุ่มเอกสารตามประเภทงาน','',''],
 service:['บริการติดตั้ง & เคลม','ติดตามงานติดตั้ง 109 รายการ — เชื่อมข้อมูลด้วยเลขบิล','',''],
 history:['Job / ออเดอร์','รายการ order ทั้งหมด — จาก sales_transaction และสร้างเอง','',''],
-install:['Pipeline ติดตั้ง','ติดตามสถานะงานแบบ Kanban (Stage 1→7)','',''] };
+install:['Pipeline ติดตั้ง','ติดตามสถานะงานแบบ Kanban (Stage 1→7)','',''],
+docs:['คู่มือ / โครงสร้างระบบ','เอกสารโครงสร้างเว็บ · ฐานข้อมูล · Flow — จาก PROJECT_DOCS.md','',''] };
 function go(view){
   $$('#nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===view));
   $$('.view').forEach(v=>v.classList.remove('show'));$('#v-'+view).classList.add('show');
   $('#vTitle').textContent=VIEWS[view][0];$('#vSub').textContent=VIEWS[view][1];
   const tb=$('#topBtn');if(VIEWS[view][2]){tb.style.display='';tb.textContent=VIEWS[view][2];tb.setAttribute('onclick',VIEWS[view][3]);}else{tb.style.display='none';}
-  if(view==='overview')renderOverview();if(view==='register')renderRegister();if(view==='approve')renderApprove();if(view==='cats')renderCats();if(view==='search')runSearch();if(view==='service')svcRender();if(view==='install'){ipRenderBoard();ipLoad();}if(view==='queue'){ipRenderQueue();ipLoadQueue();}if(view==='history')ohLoad();
+  if(view==='overview')renderOverview();if(view==='register')renderRegister();if(view==='approve')renderApprove();if(view==='cats')renderCats();if(view==='search')runSearch();if(view==='service')svcRender();if(view==='install'){ipRenderBoard();ipLoad();}if(view==='queue'){ipRenderQueue();ipLoadQueue();}if(view==='history')ohLoad();if(view==='docs')renderDocs();
   window.scrollTo(0,0);
 }
+/* =================== DOCS (คู่มือ / โครงสร้างระบบ) =================== */
+var DOCS_MD_LOADED=false;
+function renderDocs(){
+  var host=$('#docsBody');if(!host||DOCS_MD_LOADED)return;
+  if(typeof marked==='undefined'){host.innerHTML='<div class="docs-err">⚠ โหลดตัวแปลง Markdown ไม่สำเร็จ (marked)</div>';return;}
+  host.innerHTML='<div class="docs-loading">⏳ กำลังโหลดเอกสาร…</div>';
+  fetch('PROJECT_DOCS.md',{cache:'no-store'})
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.text();})
+    .then(function(md){
+      DOCS_MD_LOADED=true;
+      host.innerHTML='<div class="docs-wrap"><nav class="docs-toc" id="docsToc"></nav><article class="md-body" id="docsMd">'+marked.parse(md)+'</article></div>';
+      docsBuildToc();
+    })
+    .catch(function(e){
+      host.innerHTML='<div class="docs-err">⚠ เปิดเอกสารไม่ได้ ('+e.message+')<span class="sub">ไฟล์ PROJECT_DOCS.md อาจยังไม่ถูก deploy หรือกำลังเปิดผ่าน file://</span><button class="btn" onclick="DOCS_MD_LOADED=false;renderDocs()">ลองใหม่</button></div>';
+    });
+}
+function docsBuildToc(){
+  var md=$('#docsMd'),toc=$('#docsToc');if(!md||!toc)return;
+  var items=[];md.querySelectorAll('h2, h3').forEach(function(h,i){
+    var id='doc-h-'+i;h.id=id;
+    items.push('<a href="#'+id+'" class="toc-'+h.tagName.toLowerCase()+'" onclick="docsJump(event,\''+id+'\')">'+h.textContent+'</a>');
+  });
+  toc.innerHTML='<div class="toc-title">สารบัญ</div>'+items.join('');
+}
+function docsJump(e,id){e.preventDefault();var el=document.getElementById(id);if(el)el.scrollIntoView({behavior:'smooth',block:'start'});}
 /* =================== DOCFLOW (documents) =================== */
 const CATS={SOP:{name:'SOP / คู่มือปฏิบัติงาน',icon:'📘',color:'var(--blue)',bg:'var(--blue-l)'},NCR:{name:'NCR / ข้อบกพร่อง',icon:'⚠️',color:'var(--amber)',bg:'var(--amber-l)'},CLAIM:{name:'Claim / เคลมสินค้า',icon:'📦',color:'var(--red)',bg:'var(--red-l)'},CHECK:{name:'Checklist / ใบตรวจ',icon:'✅',color:'var(--green)',bg:'var(--green-l)'},FORM:{name:'ฟอร์ม / แบบฟอร์ม',icon:'🗒️',color:'var(--brand)',bg:'var(--brand-l)'}};
 const STATUS={active:{name:'ใช้งานอยู่',cls:'s-green'},pending:{name:'รออนุมัติ',cls:'s-amber'},review:{name:'ครบรอบทบทวน',cls:'s-blue'},draft:{name:'ร่าง',cls:'s-gray'},expired:{name:'หมดอายุ',cls:'s-red'}};

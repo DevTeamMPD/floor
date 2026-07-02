@@ -92,6 +92,7 @@ Floor/
 | `search` | ค้นหา | `runSearch()` | `DOCS[]` |
 | `approve` | รออนุมัติ | `renderApprove()` | `DOCS[]` |
 | `cats` | หมวดหมู่ | `renderCats()` | `DOCS[]` |
+| `docs` | คู่มือ / โครงสร้างระบบ | `renderDocs()` | `PROJECT_DOCS.md` (fetch) |
 
 > หมายเหตุ: บาง view (`install`, `queue`, `eval`) ถูก **inject เข้า nav แบบ dynamic** ด้วย JS ตอนโหลด (โมดูลถูก append ต่อท้ายไฟล์) — โครงสร้างนี้สะท้อนว่าไฟล์โตขึ้นเป็น "โมดูล" ทีละส่วน
 
@@ -242,6 +243,7 @@ API key อ่านจาก environment variable เท่านั้น (ไ
 
 | วันที่ | สิ่งที่ทำ | ไฟล์/ส่วนที่แตะ | ผู้ทำ |
 |--------|-----------|-----------------|-------|
+| 2026-07-02 | เพิ่มหน้า **"คู่มือ / โครงสร้างระบบ"** (`docs`) ในเว็บแอป — เมนูล่างสุด, ดึง `PROJECT_DOCS.md` มาแสดงด้วย `marked` + สร้าง TOC อัตโนมัติ | `index.html` (nav, VIEWS, go(), `renderDocs()`, section `v-docs`, marked CDN) | Claude |
 | 2026-07-02 | สร้างเอกสารกลาง `PROJECT_DOCS.md` (โครงสร้างเว็บ + ฐานข้อมูล + activity log) | `PROJECT_DOCS.md` | Claude |
 
 ### ประวัติ Git ที่ผ่านมา (สรุปจาก commit log)
