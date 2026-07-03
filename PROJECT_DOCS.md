@@ -243,6 +243,7 @@ API key อ่านจาก environment variable เท่านั้น (ไ
 
 | วันที่ | สิ่งที่ทำ | ไฟล์/ส่วนที่แตะ | ผู้ทำ |
 |--------|-----------|-----------------|-------|
+| 2026-07-02 | **มือถือแบบพอดีจอ ไม่เลื่อนแนวนอน:** ตาราง (register/search/service) → **การ์ดแนวตั้ง** (ใส่ `data-label` อัตโนมัติจาก `<thead>` ผ่าน `applyTableLabels()`) · Pipeline board → เรียงถังแนวตั้ง · docs → ตาราง/โค้ด wrap พอดีจอ · ทดสอบ 12 หน้าที่ 375px ไม่มี horizontal scroll · desktop ไม่กระทบ | `index.html` (mobile `<style>`, `applyTableLabels()`, render 3 ตาราง) | Claude |
 | 2026-07-02 | **รองรับมือถือ (responsive):** แก้ `.grid3` ที่โมดูล Pipeline inject ทับ global (ทำให้ overview/dashboard ล้นจอมือถือ) → จำกัด scope เป็น `#drawer .grid3` · ตาราง (`.tbl`) + ตาราง/code ในหน้า docs เลื่อนภายในตัวเอง ไม่ดันทั้งหน้า (`@media ≤760px`) · sidebar ปิดอัตโนมัติเมื่อเลือกเมนู (ใน `go()`) · ทดสอบครบ 12 หน้าที่ 375px ไม่มี horizontal scroll | `index.html` (main `<style>`, injected `.grid3`, `go()`) | Claude |
 | 2026-07-02 | **กู้ข้อมูล DB:** ระหว่างเทสต์เผลอเลื่อน `install_jobs` order `263835` จาก stage 7 → 3 · กู้กลับเป็น 7 แล้ว (ยืนยัน distribution ตรง pristine: 2=35, 3=1, 4=6, 7=18) | Supabase `install_jobs` (order 263835) | Claude |
 | 2026-07-02 | **แก้บอร์ดเพี้ยน:** เอา logic `bill→ถัง 7` ออก (ที่เผลอกู้มาก่อนหน้า) — งานถัง 2 ที่มีบิล 35 งานถูกดันไปแสดงเป็น "เสร็จงาน" ผิด · ตอนนี้บอร์ดแสดง stage จริงตาม DB | `index.html` (`ipMap` ×2) | Claude |
