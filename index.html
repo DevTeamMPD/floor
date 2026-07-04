@@ -1259,9 +1259,9 @@ const SB_URL='https://nroyacasuchqniaiuirk.supabase.co';
 const SB_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5yb3lhY2FzdWNocW5pYWl1aXJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5MDE3NjIsImV4cCI6MjA5NjQ3Nzc2Mn0.kN_o7boGn592MCf9HwhHI9vNzA9ncFgDAqeRQzfGQZ8';
 var SB=null; try{ if(window.supabase&&window.supabase.createClient) SB=window.supabase.createClient(SB_URL,SB_ANON); }catch(e){}
 function ipShiftLabel(s){return s===3||s==='3'?'ทั้งวัน':(s===2||s==='2'?'13:30':'09:00');}
-function ipMap(r,i){var b=r.bill_no||'';return {id:i+1,ticket:'INST-'+r.order_no,order:r.order_no,bill:b,sku:(r.product_skus&&r.product_skus.join?r.product_skus.join(', '):''),product:r.product_name||'(ไม่ระบุ)',customer:(r.customer_name||r.customer_code||'-'),stage:(r.stage||2),via:(r.source==='planner'?'planner':(r.created_via==='manual'?'manual':'auto')),linked:r.linked!==false,date:(r.order_date||''),status:(r.status||''),due:(r.due_date||''),shift:(r.shift?String(r.shift):''),assignees:(r.assignees||[]),callLogs:(r.call_logs||[]),photos:{},docs:(r.docs&&typeof r.docs==='object'?r.docs:{}),area:{w:(r.area_w!=null?r.area_w:''),l:(r.area_l!=null?r.area_l:'')},addr:(r.address||''),loc:(r.location||'')};}
+function ipMap(r,i){var b=r.bill_no||'';return {id:i+1,ticket:'INST-'+r.order_no,order:r.order_no,bill:b,sku:(r.product_skus&&r.product_skus.join?r.product_skus.join(', '):''),product:r.product_name||'(ไม่ระบุ)',customer:(r.customer_name||r.customer_code||'-'),stage:(r.stage||2),via:(r.source==='planner'?'planner':(r.created_via==='manual'?'manual':'auto')),linked:r.linked!==false,date:(r.order_date||''),status:(r.status||''),due:(r.due_date||''),shift:(r.shift?String(r.shift):''),assignees:(r.assignees||[]),callLogs:(r.call_logs||[]),photos:{},docs:(Array.isArray(r.docs)?r.docs:[]),sitePhotos:(r.site_photos&&typeof r.site_photos==='object'&&!Array.isArray(r.site_photos)?r.site_photos:{}),area:{w:(r.area_w!=null?r.area_w:''),l:(r.area_l!=null?r.area_l:'')},addr:(r.address||''),loc:(r.location||''),phone:(r.customer_phone||''),price:(r.price!=null?Number(r.price):null),jobNo:(r.job_no||'')};}
 function ipSetLive(on,msg){var el=$('#ipLive');if(!el)return;el.textContent=on?'🟢 เชื่อม Supabase (สด)':(msg||'🔴 โหมด snapshot (ออฟไลน์)');el.style.color=on?'var(--green)':'var(--muted)';}
-function ipLoad(){if(!SB){ipSetLive(false);return;}SB.from('install_jobs').select('*').order('stage',{ascending:false}).order('due_date',{ascending:true,nullsFirst:false}).then(function(r){if(r.error){ipSetLive(false,'🔴 โหลดสดไม่ได้ ใช้ snapshot');return;}IP_T=(r.data||[]).map(ipMap);ipSetLive(true);ipRenderBoard();ohApplyAccept();});}
+function ipLoad(){ohLoad();}  /* ใช้ loader เดียวกับ Job/ออเดอร์ (ข้อมูล+ตัวเลขชุดเดียวกัน) */
 function ipLoadQueue(){if(!SB)return;SB.from('tech_queue').select('*').order('appointment_date',{ascending:true}).then(function(r){if(r.error)return;IP_QUEUE=(r.data||[]).map(function(x){return {job:x.job_no,order:x.order_no,product:x.product_name||'',date:x.appointment_date||'',shift:String(x.shift||'1'),label:ipShiftLabel(x.shift),team:(x.team||[]),note:x.call_note||''};});ipRenderQueue();});}
 function ipSaveStage(order,stage,status){if(!SB||!order)return;SB.from('install_jobs').update({stage:stage,status:status||null,updated_at:new Date().toISOString()}).eq('order_no',order).then(function(r){if(r.error)toast('⚠ บันทึกสถานะไม่สำเร็จ');});}
 function ipSaveBooking(t){if(!SB||!t.order)return;var sh=parseInt(t.shift,10)||1;
@@ -1278,7 +1278,7 @@ function ipCalc(w,l,rolls){var best=null;rolls.forEach(function(rw){[[w,l],[l,w]
 function ipCallLog(t){if(!t.callLogs.length)return '<div style="font-size:11.5px;color:var(--gray);margin-top:8px">ยังไม่มีบันทึกการโทร</div>';return '<div style="margin-top:10px"><div style="font-size:11px;color:var(--muted);font-weight:700;margin-bottom:4px">ประวัติการโทร (track)</div>'+t.callLogs.map(function(c){return '<div class="callrow">📞 '+c.by+' · '+c.at+'</div>';}).join('')+'</div>';}
 function ipUplBox(id,key,label,evi){
  var t=IP_T.find(function(x){return x.id===id;});
- var has=t&&t.docs&&t.docs[key];
+ var has=t&&t.sitePhotos&&t.sitePhotos[key];
  var body=has?((/^image\//.test(has.type||'')?'<img src="'+has.data+'">':'<div style="font-size:26px">📄</div>')+'<div class="upl-name">✔ '+has.name+'</div>'):label;
  return '<label class="upl'+(has?' set':'')+'"'+(evi?' data-evi="'+evi+'"':'')+'><input type="file" accept="image/*,application/pdf" capture="environment" hidden onchange="ipAttach(this,'+id+',\''+key+'\')"><span class="upl-body">'+body+'</span></label>';
 }
@@ -1288,7 +1288,7 @@ function ipAttach(input,id,key){
  var reader=new FileReader();
  reader.onload=function(e){
   var t=IP_T.find(function(x){return x.id===id;});
-  if(t){t.docs=t.docs||{};t.docs[key]={name:f.name,data:e.target.result,type:f.type};}
+  if(t){t.sitePhotos=t.sitePhotos||{};t.sitePhotos[key]={name:f.name,data:e.target.result,type:f.type};}
   box.classList.add('set');box.style.borderColor='';
   var isImg=/^image\//.test(f.type);
   box.querySelector('.upl-body').innerHTML=(isImg?'<img src="'+e.target.result+'">':'<div style="font-size:26px">📄</div>')+'<div class="upl-name">✔ '+f.name+'</div>';
@@ -1298,7 +1298,7 @@ function ipAttach(input,id,key){
 }
 function ipDataCard(t){
  var sh=String(t.shift||'1');var rl='display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:7px 10px;border-radius:9px;font-size:12px;cursor:pointer';
- var done=[['📄 เอกสารเซ็น',t.docs&&t.docs.signed],['📷 รูปพื้นที่',t.docs&&t.docs.ph_top&&t.docs.ph_wide&&t.docs.ph_plan],['📞 โทร',t.callLogs&&t.callLogs.length],['📅 นัด',t.due],['📐 ตร.ม.',t.area&&t.area.w&&t.area.l],['📷 ภาพหลัง',t.docs&&t.docs.after]];
+ var done=[['📄 เอกสารเซ็น',t.sitePhotos&&t.sitePhotos.signed],['📷 รูปพื้นที่',t.sitePhotos&&t.sitePhotos.ph_top&&t.sitePhotos.ph_wide&&t.sitePhotos.ph_plan],['📞 โทร',t.callLogs&&t.callLogs.length],['📅 นัด',t.due],['📐 ตร.ม.',t.area&&t.area.w&&t.area.l],['📷 ภาพหลัง',t.sitePhotos&&t.sitePhotos.after]];
  var prog=done.map(function(d){return '<span class="tag" style="background:'+(d[1]?'var(--green-l)':'var(--line2)')+';color:'+(d[1]?'var(--green)':'var(--gray)')+'">'+(d[1]?'✔ ':'○ ')+d[0]+'</span>';}).join(' ');
  return '<div class="dr-card"><h4>📋 ข้อมูลงาน (แก้ได้ทุกขั้น)</h4>'
   +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px">'+prog+'</div>'
@@ -1613,7 +1613,7 @@ function evalCardHtml(e){ var a=evalAvg(e);
   return '<div class="dr-card" style="border-color:'+evalColor(a)+'55"><h4>⭐ คะแนนประเมินหลังการขาย — เฉลี่ย <span style="color:'+evalColor(a)+'">'+a.toFixed(1)+'/5</span></h4>'+rows+(e.comment&&e.comment!=='ไม่มี'?'<div style="margin-top:8px;font-size:12.5px;background:var(--bg);padding:9px 11px;border-radius:8px;line-height:1.6"><b>คำแนะนำจากลูกค้า:</b> '+esc(e.comment)+'</div>':'')+'<div style="margin-top:6px;font-size:11px;color:var(--muted)">บิล '+esc(''+e.bill)+(e.ts?' · '+esc(e.ts):'')+'</div></div>'; }
 
 /* override ipMap to carry bill_no */
-function ipMap(r,i){var b=r.bill_no||'';return {id:i+1,ticket:'INST-'+r.order_no,order:r.order_no,sku:(r.product_skus&&r.product_skus.join?r.product_skus.join(', '):''),product:r.product_name||'(ไม่ระบุ)',customer:(r.customer_name||r.customer_code||'-'),stage:(r.stage||2),via:(r.source==='planner'?'planner':(r.created_via==='manual'?'manual':'auto')),linked:r.linked!==false,date:(r.order_date||''),status:(r.status||''),due:(r.due_date||''),shift:(r.shift?String(r.shift):''),assignees:(r.assignees||[]),bill:b,callLogs:(r.call_logs||[]),photos:{},docs:(r.docs&&typeof r.docs==='object'?r.docs:{}),area:{w:(r.area_w!=null?r.area_w:''),l:(r.area_l!=null?r.area_l:'')},addr:(r.address||''),loc:(r.location||'')};}
+function ipMap(r,i){var b=r.bill_no||'';return {id:i+1,ticket:'INST-'+r.order_no,order:r.order_no,sku:(r.product_skus&&r.product_skus.join?r.product_skus.join(', '):''),product:r.product_name||'(ไม่ระบุ)',customer:(r.customer_name||r.customer_code||'-'),stage:(r.stage||2),via:(r.source==='planner'?'planner':(r.created_via==='manual'?'manual':'auto')),linked:r.linked!==false,date:(r.order_date||''),status:(r.status||''),due:(r.due_date||''),shift:(r.shift?String(r.shift):''),assignees:(r.assignees||[]),bill:b,callLogs:(r.call_logs||[]),photos:{},docs:(Array.isArray(r.docs)?r.docs:[]),sitePhotos:(r.site_photos&&typeof r.site_photos==='object'&&!Array.isArray(r.site_photos)?r.site_photos:{}),area:{w:(r.area_w!=null?r.area_w:''),l:(r.area_l!=null?r.area_l:'')},addr:(r.address||''),loc:(r.location||''),phone:(r.customer_phone||''),price:(r.price!=null?Number(r.price):null),jobNo:(r.job_no||'')};}
 /* override ipCard to show eval badge */
 function ipCard(t){var via=t.via==='planner'?'<span class="tag" style="background:#FAEEDA;color:#854F0B">📋 Planner</span>':(t.via==='auto'?'<span class="tag t-auto">🔗 จากออเดอร์</span>':'<span class="tag t-man">✍ สร้างเอง</span>');var warn=(!t.linked)?' <span class="tag t-warn">รอเชื่อม</span>':'';var urgent=/ห้ามเลื่อน/.test(t.product||'')?' <span class="tag t-warn">⛔ ห้ามเลื่อน</span>':'';var due=t.due?'<div class="cu">📅 นัด '+t.due+'</div>':'';var asg=(t.assignees&&t.assignees.length)?'<div class="cu">👷 '+t.assignees.length+' คน</div>':'';var ev=evalBadge(t.bill);
  return '<div class="cardt" onclick="ipOpen('+t.id+')"><span class="tkn">'+t.ticket+' · #'+(''+t.order).slice(0,10)+'</span><b>'+t.product+'</b><div class="cu">👤 '+(t.customer||'-')+'</div>'+due+asg+ev+via+warn+urgent+'</div>';}
@@ -1727,50 +1727,24 @@ function ohApplyAccept(){
     if(row.tech)job.tech=row.tech;
     job.items=row.items||'';
     job.accept=row.ok?'ok':'fix';
-    if(row.ok&&job.stage<IP_LAST)job.stage=IP_LAST;
   });
 }
 var OH_DATA=[];
 var OH_FILTER={q:'',stage:''};
 
 function ohLoad(){
-  if(!SB){$('#ohMsg').textContent='🔴 ไม่ได้เชื่อม Supabase';return;}
-  $('#ohMsg').textContent='⏳ กำลังโหลด...';
-  var g=$('#ohGrid');if(g)g.innerHTML='';
+  var mm=$('#ohMsg');
+  if(!SB){if(mm)mm.textContent='🔴 ไม่ได้เชื่อม Supabase';ipSetLive(false);return;}
+  if(mm)mm.textContent='⏳ กำลังโหลด...';
   SB.from('install_jobs').select('*').order('order_date',{ascending:false}).then(function(r){
-    if(r.error){$('#ohMsg').textContent='⚠ โหลดไม่สำเร็จ: '+r.error.message;return;}
-    OH_DATA=(r.data||[]).map(function(x,i){
-      var m=ipMap(x,i);
-      m.bill=x.bill_no||'';
-      m.phone=x.customer_phone||'';
-      m.addr=x.address||'';
-      m.docs=Array.isArray(x.docs)?x.docs:[];
-      m.callLogs=Array.isArray(x.call_logs)?x.call_logs:[];
-      m.jobNo=x.job_no||'';
-      m.price=(x.price!=null)?Number(x.price):null;
-      if(m.bill&&m.stage<IP_LAST){m.stage=IP_LAST;}
-      return m;
-    });
-    // auto-complete: มี eval score แล้วแต่ stage ยังไม่ถึง 7
-    var toComplete=OH_DATA.filter(function(t){
-      if(t.stage>=IP_LAST)return false;
-      try{return !!evalBill(t.bill);}catch(e){return false;}
-    });
-    if(toComplete.length){
-      var ids=toComplete.map(function(t){return t.order;});
-      SB.from('install_jobs').update({stage:7,status:'done'}).in('order_no',ids).then(function(upd){
-        if(!upd.error){
-          toComplete.forEach(function(t){t.stage=IP_LAST;});
-          ohRenderKpis();
-          ohRender();
-        }
-      });
-    }
-    $('#ohMsg').textContent='';
-    ohRenderKpis();
-    ohRender();
+    if(r.error){if(mm)mm.textContent='⚠ โหลดไม่สำเร็จ: '+r.error.message;ipSetLive(false);return;}
+    IP_T=(r.data||[]).map(ipMap);   // ชุดข้อมูลเดียว ใช้ทั้ง board + Job/ออเดอร์ · แสดง stage จริงตาม DB
+    OH_DATA=IP_T;
+    if(mm)mm.textContent='';
+    ipSetLive(true);
     ohApplyAccept();
-    var nb=$('#nbInst');if(nb)nb.textContent=OH_DATA.length;
+    ohRenderKpis();ohRender();ipRenderBoard();
+    var nb=$('#nbInst');if(nb)nb.textContent=IP_T.length;
   });
 }
 
