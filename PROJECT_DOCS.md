@@ -247,6 +247,7 @@ API key อ่านจาก environment variable เท่านั้น (ไ
 
 | วันที่ | สิ่งที่ทำ | ไฟล์/ส่วนที่แตะ | ผู้ทำ |
 |--------|-----------|-----------------|-------|
+| 2026-07-04 | **เอกสาร/รูปในถัง = แนบไฟล์ได้จริง** — เปลี่ยนวิดเจ็ตเอกสาร (ถัง 2 เซ็นกลับ · ถัง 4 รูป 3 มุม · ถัง 8 ภาพหลัง) จากปุ่มติ๊กเป็น uploader จริง (`ipUplBox`/`ipAttach`) เลือกไฟล์/ถ่ายรูป → preview → เก็บใน `t.docs[key]` (data URL, ต่อ session) · gate เช็ค `.upl[data-evi]` · ส่วนยืนยัน (ลองตัวอย่าง/อนุญาต/เก็บเงิน) ยังเป็นปุ่มติ๊ก `.evi` | `index.html` (`ipUplBox`,`ipAttach`,`ipStageGate`, `.upl` CSS) | Claude |
 | 2026-07-04 | **จัด Pipeline ใหม่ 8 ถังตาม SOP (Sale & DC)** — เปลี่ยน `IP_STAGES` เป็น 8 ถัง + role + หลักฐาน · เพิ่ม `IP_LAST` แทนเลข 7 ทั้งไฟล์ · gate ทั่วไป `ipStageGate` (บล็อกตามหลักฐานแต่ละถัง: ถัง4 พื้นที่+รูป, ถัง6 อนุญาต 2 ฝ่าย, ถัง8 ภาพหลัง+เก็บเงิน) · อัปเดต overview funnel เป็น 8 | `index.html` (IP_STAGES, ipOpen, ipStageGate, ipAdv, ipFinish, renderOverview) | Claude |
 | 2026-07-04 | **Migrate Supabase `install_jobs` → 8 ถัง** — remap stage เก่า→ใหม่ `7→8` (18 แถว) + `4→7` (6 แถว) · ยืนยัน distribution ใหม่ `{2:35,3:1,7:6,8:18}=60` · backup ไว้ที่ scratchpad/backup_stages.json | Supabase `install_jobs` (60 แถว) | Claude |
 | 2026-07-04 | **Drawer → popup ลอยกลางจอ + 3 แท็บ** (ข้อมูล/เอกสาร/โทร) — `ipOpen` แยกเนื้อหาเป็น pane + `drTab` · ปุ่มไปต่ออยู่ footer sticky | `index.html` (`.drawer` CSS, `ipOpen`, `drTab`) | Claude |

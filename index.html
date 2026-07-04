@@ -104,6 +104,11 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
 .evi{display:flex;align-items:center;justify-content:center;gap:6px;text-align:center;padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:12.5px;cursor:pointer;background:var(--bg);line-height:1.4}
 .evi.set{background:var(--green-l);border-color:var(--green);color:var(--green);border-style:solid;font-weight:600}
 .evi.set::before{content:"✔ "}
+.upl{display:block;border:1px dashed var(--line);border-radius:10px;padding:16px 12px;text-align:center;color:var(--muted);font-size:12.5px;cursor:pointer;background:var(--bg)}
+.upl:hover{border-color:var(--brand);color:var(--brand)}
+.upl.set{border-style:solid;border-color:var(--green);background:var(--green-l);color:var(--green);padding:8px}
+.upl img{max-width:100%;max-height:130px;border-radius:8px;display:block;margin:0 auto}
+.upl .upl-name{font-size:11px;margin-top:4px;word-break:break-all;font-weight:600}
 .dr-head{background:var(--card);padding:20px 26px 0;border-bottom:1px solid var(--line);border-radius:16px 16px 0 0;position:sticky;top:0;z-index:2}
 .dr-head .x{position:absolute;top:18px;right:20px;font-size:22px;color:var(--muted);cursor:pointer;line-height:1;border:0;background:0}
 .dr-head .code,.dr-head .bill{font-size:13px}
@@ -1271,6 +1276,26 @@ function ipRenderBoard(){var h='';IP_STAGES.forEach(function(s,i){var st=i+1;var
  var b=$('#installBoard'); if(b)b.innerHTML=h; var nb=$('#nbInst'); if(nb)nb.textContent=IP_T.length;}
 function ipCalc(w,l,rolls){var best=null;rolls.forEach(function(rw){[[w,l],[l,w]].forEach(function(o,idx){var strips=Math.ceil(o[0]/rw);var each=o[1];var mat=strips*rw*each;var used=w*l;var waste=(mat-used)/mat*100;var c={rw:rw,strips:strips,each:+each.toFixed(2),mat:+mat.toFixed(2),used:+used.toFixed(2),waste:+waste.toFixed(1),dir:idx===0?'ตามแนวกว้าง':'ตามแนวยาว'};if(!best||c.waste<best.waste)best=c;});});return best;}
 function ipCallLog(t){if(!t.callLogs.length)return '<div style="font-size:11.5px;color:var(--gray);margin-top:8px">ยังไม่มีบันทึกการโทร</div>';return '<div style="margin-top:10px"><div style="font-size:11px;color:var(--muted);font-weight:700;margin-bottom:4px">ประวัติการโทร (track)</div>'+t.callLogs.map(function(c){return '<div class="callrow">📞 '+c.by+' · '+c.at+'</div>';}).join('')+'</div>';}
+function ipUplBox(id,key,label,evi){
+ var t=IP_T.find(function(x){return x.id===id;});
+ var has=t&&t.docs&&t.docs[key];
+ var body=has?((/^image\//.test(has.type||'')?'<img src="'+has.data+'">':'<div style="font-size:26px">📄</div>')+'<div class="upl-name">✔ '+has.name+'</div>'):label;
+ return '<label class="upl'+(has?' set':'')+'"'+(evi?' data-evi="'+evi+'"':'')+'><input type="file" accept="image/*,application/pdf" capture="environment" hidden onchange="ipAttach(this,'+id+',\''+key+'\')"><span class="upl-body">'+body+'</span></label>';
+}
+function ipAttach(input,id,key){
+ var f=input.files&&input.files[0];if(!f)return;
+ var box=input.closest('.upl');
+ var reader=new FileReader();
+ reader.onload=function(e){
+  var t=IP_T.find(function(x){return x.id===id;});
+  if(t){t.docs=t.docs||{};t.docs[key]={name:f.name,data:e.target.result,type:f.type};}
+  box.classList.add('set');box.style.borderColor='';
+  var isImg=/^image\//.test(f.type);
+  box.querySelector('.upl-body').innerHTML=(isImg?'<img src="'+e.target.result+'">':'<div style="font-size:26px">📄</div>')+'<div class="upl-name">✔ '+f.name+'</div>';
+  toast('📎 แนบไฟล์ '+f.name+' แล้ว');
+ };
+ reader.readAsDataURL(f);
+}
 function ipOpen(id){var t=IP_T.find(function(x){return x.id===id;});if(!t)return;var s=IP_STAGES[t.stage-1];
  var steps='<div class="steps">'+IP_STAGES.map(function(_,i){return '<div class="stp" style="background:'+(i<t.stage?s[1]:'var(--line)')+'"></div>';}).join('')+'</div>';
  var b='<div class="dr-card"><h4>ข้อมูล Ticket</h4>'
@@ -1281,15 +1306,15 @@ function ipOpen(id){var t=IP_T.find(function(x){return x.id===id;});if(!t)return
   +'<div class="field"><span class="fk">ที่มา</span><span class="fv">'+(t.via==='planner'?'Planner':(t.via==='auto'?'จากออเดอร์ (อัตโนมัติ)':'สร้างเอง'))+'</span></div>'+'<div class="field"><span class="fk">วันนัดติดตั้ง</span><span class="fv">'+(t.due||'—')+'</span></div>'+'<div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv" style="max-width:60%">'+((t.assignees&&t.assignees.length)?t.assignees.join(', '):'—')+'</span></div>'+(t.tech?'<div class="field"><span class="fk">ช่างติดตั้ง</span><span class="fv">👷 '+t.tech+'</span></div>':'')+(t.accept?'<div class="field"><span class="fk">ตรวจรับงาน</span><span class="fv">'+(t.accept==='ok'?'✅ ตรวจสอบแล้ว':'⚠ มีรายการแก้ไข')+'</span></div>':'')+'</div>';
  var docs='',call='';
  b='<div class="dr-card" style="border-left:3px solid '+s[1]+'"><h4>ขั้นตอนนี้ (SOP)</h4><div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv"><b>'+ipRole(t.stage)+'</b></span></div>'+(ipEvi(t.stage)?'<div class="field"><span class="fk">หลักฐานที่ต้องมี</span><span class="fv" style="max-width:62%">'+ipEvi(t.stage)+'</span></div>':'')+'</div>'+b;
- if(t.stage===2){docs+='<div class="dr-card"><h4>📄 เอกสารข้อตกลง (เซล)</h4><div class="evi" data-evi="เอกสารเซ็นกลับ" onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">อัปโหลดเอกสารที่ลูกค้าเซ็นกลับ</div></div>';}
+ if(t.stage===2){docs+='<div class="dr-card"><h4>📄 เอกสารข้อตกลง (เซล)</h4>'+ipUplBox(t.id,'signed','อัปโหลดเอกสารที่ลูกค้าเซ็นกลับ','เอกสารเซ็นกลับ')+'</div>';}
  if(t.stage===3){b+='<div class="dr-card"><h4>🗓️ นัดหมาย + เลือกกะช่าง</h4><div class="fi"><label>ผลการโทร / โน้ต</label><input id="ip_note" placeholder="เช่น รับสาย นัดติดตั้งได้"></div>'+'<div class="fi"><label>วันที่นัดติดตั้ง</label><input id="ip_due" type="date" value="'+(t.due||'')+'"></div>'+'<div class="fi"><label>เลือกกะช่าง</label><div style="display:flex;gap:8px;flex-wrap:wrap">'+'<label style="flex:1 1 30%;display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:8px 10px;border-radius:9px;font-size:12.5px;cursor:pointer"><input type="radio" name="ip_shift" value="1" checked> กะ 1 · 09:00</label>'+'<label style="flex:1 1 30%;display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:8px 10px;border-radius:9px;font-size:12.5px;cursor:pointer"><input type="radio" name="ip_shift" value="2"> กะ 2 · 13:30</label>'+'<label style="flex:1 1 100%;display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:8px 10px;border-radius:9px;font-size:12.5px;cursor:pointer"><input type="radio" name="ip_shift" value="3"> ☀️ ปูทั้งวัน (09:00–17:00)</label>'+'</div></div>'+'<button class="btn primary sm" style="width:100%" onclick="ipBook('+t.id+')">✅ ยืนยันนัด + เข้าคิวช่าง → ถัดไป</button></div>';}
  if(t.stage===4){b+='<div class="dr-card"><h4>📐 ข้อมูลพื้นที่หน้างาน (DC)</h4><div class="fi"><label>ที่อยู่ลูกค้า</label><input id="ipf_addr" value="'+(t.addr||'')+'"></div><div class="fi"><label>Location/พิกัด</label><input id="ipf_loc" value="'+(t.loc||'')+'"></div></div>'
   +'<div class="dr-card"><h4>🤖 AI แปลน → ขนาดแผ่น (เศษน้อยสุด)</h4><div style="display:flex;gap:8px"><div class="fi" style="flex:1"><label>กว้าง (ม.)</label><input id="ipp_w" value="'+((t.area&&t.area.w)||'')+'"></div><div class="fi" style="flex:1"><label>ยาว (ม.)</label><input id="ipp_l" value="'+((t.area&&t.area.l)||'')+'"></div></div><button class="btn primary sm" style="width:100%" onclick="ipRunPlan('+t.id+')">ให้ AI คำนวณ</button><div id="ipPlanOut"></div></div>';
-  docs+='<div class="dr-card"><h4>📷 รูปพื้นที่ (3 มุม)</h4><div class="grid3" style="margin-top:4px"><div class="ph" onclick="this.classList.add(\'set\');this.style.borderColor=\'\';this.textContent=\'✔ มุมสูง\'">＋ มุมสูง</div><div class="ph" onclick="this.classList.add(\'set\');this.style.borderColor=\'\';this.textContent=\'✔ มุมกว้าง\'">＋ มุมกว้าง</div><div class="ph" onclick="this.classList.add(\'set\');this.style.borderColor=\'\';this.textContent=\'✔ แปลน\'">＋ แปลน</div></div><div class="evi" style="margin-top:8px" data-evi="ให้ลูกค้าลองตัวอย่าง" onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">ให้ลูกค้าลองแผ่นตัวอย่าง (สีตัวจบ)</div></div>';}
+  docs+='<div class="dr-card"><h4>📷 รูปพื้นที่ (3 มุม)</h4><div class="grid3" style="margin-top:4px">'+ipUplBox(t.id,'ph_top','＋ มุมสูง','')+ipUplBox(t.id,'ph_wide','＋ มุมกว้าง','')+ipUplBox(t.id,'ph_plan','＋ แปลน','')+'</div><div class="evi" style="margin-top:8px" data-evi="ให้ลูกค้าลองตัวอย่าง" onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">ให้ลูกค้าลองแผ่นตัวอย่าง (สีตัวจบ)</div></div>';}
  if(t.stage===5){b+='<div class="dr-card"><h4>✅ สรุป/ยืนยันพื้นที่ (คุณเต้ย)</h4><div class="field"><span class="fk">จำนวนตร.ม.</span><span class="fv"><b>'+((t.area&&t.area.w&&t.area.l)?(t.area.w+' × '+t.area.l+' ม.'):'— ยังไม่มีข้อมูล —')+'</b></span></div><div class="evi" style="margin-top:10px" data-evi="คุณเต้ยยืนยันตร.ม." onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">คุณเต้ยยืนยันจำนวนตร.ม. ในกลุ่ม</div></div>';}
  if(t.stage===6){b+='<div class="dr-card"><h4>🔓 อนุญาตเริ่มติดตั้ง</h4><div class="evi" data-evi="เซลคอนเฟิร์มตร.ม." onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">เซลคอนเฟิร์มตร.ม. ในกลุ่ม</div><div class="evi" style="margin-top:8px" data-evi="คุณเต้ยอนุญาต" onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">คุณเต้ยอนุญาตเริ่มติดตั้ง</div><div style="font-size:11.5px;color:var(--red);margin-top:8px">⛔ ห้ามเริ่มติดตั้งก่อนได้รับอนุญาตครบทั้งสอง</div></div>';}
  if(t.stage===7){b+='<div class="dr-card"><h4>🚧 กำลังติดตั้ง (DC)</h4><div style="font-size:12.5px;color:var(--muted);line-height:1.6">เริ่มติดตั้งได้หลังผ่านขั้น “อนุญาต” แล้ว · กดถัดไปเมื่อติดตั้งเสร็จ</div></div>';}
- if(t.stage===IP_LAST){docs+='<div class="dr-card"><h4>📷 ส่งมอบงาน (DC)</h4><div class="evi" data-evi="ภาพหลังติดตั้ง" onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">ถ่ายภาพหลังติดตั้ง + เอกสารส่งมอบ</div></div>';
+ if(t.stage===IP_LAST){docs+='<div class="dr-card"><h4>📷 ส่งมอบงาน (DC)</h4>'+ipUplBox(t.id,'after','ถ่ายภาพหลังติดตั้ง + เอกสารส่งมอบ','ภาพหลังติดตั้ง')+'</div>';
   b+='<div class="dr-card"><h4>💰 ปิดงาน (เซล)</h4><div class="evi" data-evi="เก็บเงินครบ" onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">เก็บเงินส่วนที่เหลือครบแล้ว</div></div>';}
  if(t.stage===3){call+='<div class="dr-card"><h4>📞 โทรยืนยันก่อนถึง (≥10 นาที)</h4><a class="btn ok sm" href="tel:" onclick="ipLogCall('+t.id+',\'ทีม DC\');return false;">📞 โทรลูกค้า (บันทึกเวลา)</a>'+ipCallLog(t)+'</div>';}
  else if(t.stage===5){call+='<div class="dr-card"><h4>📞 โทรลูกค้า</h4><button class="btn ok sm" onclick="ipLogCall('+t.id+',\'ทีม DC\')">📞 โทร (บันทึกเวลา)</button>'+ipCallLog(t)+'</div>';}
@@ -1312,13 +1337,13 @@ function ipStageGate(t){
   var lb=!(loc&&loc.value.trim());mark(loc,lb);if(lb)miss.push('พิกัด');
   var wb=!(w&&parseFloat(w.value)>0);mark(w,wb);if(wb)miss.push('กว้าง');
   var l2=!(l&&parseFloat(l.value)>0);mark(l,l2);if(l2)miss.push('ยาว');
-  var phs=[].slice.call(document.querySelectorAll('#drawer .grid3 .ph'));
+  var phs=[].slice.call(document.querySelectorAll('#drawer .grid3 .upl'));
   phs.forEach(function(p){p.style.borderColor=p.classList.contains('set')?'':'var(--red)';});
   if(!(phs.length===3&&phs.every(function(p){return p.classList.contains('set');})))miss.push('รูป 3 มุม');
   if(!wb&&!l2)t.area=Object.assign({},t.area,{w:w.value,l:l.value});
  }
  if(t.stage===3&&(!t.callLogs||!t.callLogs.length))miss.push('บันทึกการโทร');
- [].slice.call(document.querySelectorAll('#drawer .evi')).forEach(function(c){if(!c.classList.contains('set')){c.style.borderColor='var(--red)';miss.push(c.getAttribute('data-evi')||'หลักฐาน');}else c.style.borderColor='';});
+ [].slice.call(document.querySelectorAll('#drawer .evi, #drawer .upl[data-evi]')).forEach(function(c){if(!c.classList.contains('set')){c.style.borderColor='var(--red)';miss.push(c.getAttribute('data-evi')||'หลักฐาน');}else c.style.borderColor='';});
  return miss;
 }
 function ipAdv(id){var t=IP_T.find(function(x){return x.id===id;});var a=$('#ipf_addr');if(a)t.addr=a.value;var lo=$('#ipf_loc');if(lo)t.loc=lo.value;
