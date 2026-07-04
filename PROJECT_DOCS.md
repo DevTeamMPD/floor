@@ -247,6 +247,7 @@ API key อ่านจาก environment variable เท่านั้น (ไ
 
 | วันที่ | สิ่งที่ทำ | ไฟล์/ส่วนที่แตะ | ผู้ทำ |
 |--------|-----------|-----------------|-------|
+| 2026-07-04 | **รวมสไตล์ popup 2 หน้าให้เหมือนกัน** — Pipeline drawer ใช้ดีไซน์เดียวกับ Job/ออเดอร์: stepper เลข 1-8 (`.stg-track`) · bill chip + ชื่อลูกค้าใน header · badge `X/8 · ชื่อ` · แท็บมีไอคอน (📋/📄/📞) · **แก้บั๊ก** badge `X/7` → `X/IP_LAST` (card + drawer หน้า Job/ออเดอร์) | `index.html` (`ipOpen`, `ohOpenDetail`, `ohRender`) | Claude |
 | 2026-07-04 | แก้ข้อความค้าง "7 สเตจ"/"Stage 1→7" → **8 สเตจ**/"1→8" (หัวข้อหน้า Pipeline + overview 4 จุด) | `index.html` (VIEWS.install ×2, renderOverview) | Claude |
 | 2026-07-04 | **ย้ายปุ่มสแกน/แนบไฟล์ขึ้นบนสุด** (แท็บแก้เอกสารใน drawer Order History `ohP-docs`) — จากล่างสุดหลังกรอกช่อง → บนสุดของทุกฟอร์ม (receive/issue/sign) ให้ช่างสแกนก่อน + เพิ่ม `capture="environment"` เปิดกล้องบนมือถือ | `index.html` (pane3 build) | Claude |
 | 2026-07-04 | **แท็บ "ข้อมูล" = การ์ดข้อมูลงาน แก้ได้ทุกถัง** — รวมช่องทุกขั้น (ที่อยู่/พิกัด/นัดหมาย/กะ/ขนาด+AI) ไว้ในการ์ด `ipDataCard` ที่โผล่ทุกถัง + แถบความคืบหน้า ✓/○ · ปุ่ม 💾 `ipSaveData` บันทึกลง Supabase (`address,location,due_date,shift,area_w,area_l`) · เอาช่องซ้ำออกจากถัง 3/4 · แก้ `ipMap` อ่าน `area_w/area_l`+`docs` จาก DB (เดิมอ่าน `area` ผิด) | `index.html` (`ipDataCard`,`ipSaveData`,`ipMap`,`ipOpen`) | Claude |

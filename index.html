@@ -1316,7 +1316,7 @@ function ipSaveData(id){var t=IP_T.find(function(x){return x.id===id;});
  if(SB&&t.order){SB.from('install_jobs').update({address:t.addr||null,location:t.loc||null,due_date:t.due||null,shift:parseInt(t.shift,10)||null,area_w:(t.area&&t.area.w?parseFloat(t.area.w):null),area_l:(t.area&&t.area.l?parseFloat(t.area.l):null),updated_at:new Date().toISOString()}).eq('order_no',t.order).then(function(r){toast(r.error?'⚠ บันทึกไม่สำเร็จ':'💾 บันทึกข้อมูลแล้ว');});}else toast('💾 บันทึก (ออฟไลน์)');
  ipRenderBoard();}
 function ipOpen(id){var t=IP_T.find(function(x){return x.id===id;});if(!t)return;var s=IP_STAGES[t.stage-1];
- var steps='<div class="steps">'+IP_STAGES.map(function(_,i){return '<div class="stp" style="background:'+(i<t.stage?s[1]:'var(--line)')+'"></div>';}).join('')+'</div>';
+ var steps='<div class="stg-track">'+IP_STAGES.map(function(_,i){var a=i<t.stage,cur=i===t.stage-1;return '<div class="stg-track-stp"><div class="stg-track-bar" style="background:'+(a?s[1]:'var(--line)')+'"></div><div class="stg-track-lbl" style="color:'+(cur?s[1]:'var(--muted)')+';font-weight:'+(cur?700:400)+'">'+(i+1)+'</div></div>';}).join('')+'</div>';
  var b='<div class="dr-card"><h4>ข้อมูล Ticket</h4>'
   +'<div class="field"><span class="fk">เลขออเดอร์</span><span class="fv">'+(t.order?'#'+t.order:'<span style="color:var(--red)">ยังไม่เชื่อม</span>')+'</span></div>'
   +'<div class="field"><span class="fk">SKU</span><span class="fv">'+t.sku+'</span></div>'
@@ -1339,7 +1339,7 @@ function ipOpen(id){var t=IP_T.find(function(x){return x.id===id;});if(!t)return
  if(!t.linked){b+='<div class="dr-card" style="border-color:#E9C2BD;background:var(--red-l)"><h4 style="color:var(--red)">⚠ ยังไม่เชื่อมออเดอร์</h4><div class="fi"><label>ใส่เลขออเดอร์</label><input id="ipf_link"></div><button class="btn lt sm" style="background:var(--bg);border:1px solid var(--line)" onclick="ipLink('+t.id+')">🔗 เชื่อมออเดอร์</button></div>';}
  if(!docs)docs='<div class="dr-empty">— ไม่มีเอกสาร/รูป ในขั้นนี้ —</div>';
  var foot='<div class="dr-foot"><div style="display:flex;gap:8px">'+(t.stage<IP_LAST?'<button class="btn primary" style="flex:1" onclick="ipAdv('+t.id+')">ทำขั้นนี้เสร็จ → ถัดไป ▶</button>':'<button class="btn ok" style="flex:1" onclick="ipFinish('+t.id+')">✅ ปิดงาน</button>')+'</div>'+(ipEvi(t.stage)?'<div style="font-size:11.5px;color:var(--muted);margin-top:8px">ℹ️ หลักฐานที่ต้องมีก่อนไปต่อ: '+ipEvi(t.stage)+'</div>':'')+'</div>';
- $('#drawer').innerHTML='<div class="dr-head"><button class="x" onclick="closeDrawer()">×</button><span class="code">'+t.ticket+'</span><h2>'+t.product+'</h2><span class="tag" style="background:'+s[2]+';color:'+s[1]+'">ถัง '+t.stage+': '+s[0]+'</span>'+steps+'<div class="dr-tabs"><button class="dr-tab active" onclick="drTab(this,\'info\')">ข้อมูล</button><button class="dr-tab" onclick="drTab(this,\'docs\')">เอกสาร</button><button class="dr-tab" onclick="drTab(this,\'call\')">โทร</button></div></div><div class="dr-body"><div class="dr-pane show" id="pane-info">'+b+'</div><div class="dr-pane" id="pane-docs">'+docs+'</div><div class="dr-pane" id="pane-call">'+call+'</div></div>'+foot;
+ $('#drawer').innerHTML='<div class="dr-head" style="padding-bottom:0"><button class="x" onclick="closeDrawer()">×</button>'+(t.bill?'<div style="margin-bottom:6px"><span class="bill-chip" style="font-size:12px;padding:4px 10px">💳 บิล '+t.bill+'</span></div>':'')+'<span class="code">'+t.ticket+'</span><h2 style="margin:4px 0 5px">'+t.product+'</h2><div class="cu" style="margin-bottom:6px">👤 '+(t.customer||'—')+'</div><span class="tag" style="background:'+s[2]+';color:'+s[1]+'">'+t.stage+'/'+IP_LAST+' · '+s[0]+'</span>'+steps+'<div class="dr-tabs"><button class="dr-tab active" onclick="drTab(this,\'info\')">📋 ข้อมูล</button><button class="dr-tab" onclick="drTab(this,\'docs\')">📄 เอกสาร</button><button class="dr-tab" onclick="drTab(this,\'call\')">📞 โทร</button></div></div><div class="dr-body"><div class="dr-pane show" id="pane-info">'+b+'</div><div class="dr-pane" id="pane-docs">'+docs+'</div><div class="dr-pane" id="pane-call">'+call+'</div></div>'+foot;
  $('#scrim').classList.add('show');$('#drawer').classList.add('show');}
 function drTab(btn,name){var d=document.getElementById('drawer');if(!d)return;d.querySelectorAll('.dr-tab').forEach(function(x){x.classList.toggle('active',x===btn);});d.querySelectorAll('.dr-pane').forEach(function(p){p.classList.toggle('show',p.id==='pane-'+name);});}
 function ipRunPlan(id){var t=IP_T.find(function(x){return x.id===id;});var w=parseFloat($('#ipp_w').value),l=parseFloat($('#ipp_l').value);if(!w||!l){toast('กรอกขนาดห้องก่อน');return;}var rolls=IP_PRODUCTS[(t.sku||'').split(',')[0].trim()]||[1.4,2.0];var r=ipCalc(w,l,rolls);
@@ -1811,7 +1811,7 @@ function ohRender(){
     var srcTag=t.via==='auto'?'<span class="tag t-auto" style="font-size:10px;padding:2px 7px">🔗 Auto</span>'
       :t.via==='planner'?'<span class="tag" style="font-size:10px;padding:2px 7px;background:#FAEEDA;color:#854F0B">📋 Planner</span>'
       :'<span class="tag t-man" style="font-size:10px;padding:2px 7px">✍ Manual</span>';
-    var stgBadge='<span style="font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:20px;background:'+s[2]+';color:'+s[1]+'">'+t.stage+'/7 · '+s[0]+'</span>';
+    var stgBadge='<span style="font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:20px;background:'+s[2]+';color:'+s[1]+'">'+t.stage+'/'+IP_LAST+' · '+s[0]+'</span>';
     var dueStr=t.due?'📅 '+t.due+(t.shift?' กะ'+t.shift:''):'<span style="color:var(--gray)">ยังไม่นัด</span>';
     var asgStr=t.assignees&&t.assignees.length?'👷 '+t.assignees.slice(0,2).join(', ')+(t.assignees.length>2?' +'+(t.assignees.length-2):''):'';
     var evBadge='';try{var ev=evalBill(t.bill);if(ev)evBadge='<span style="font-size:11px;font-weight:700;color:'+evalColor(evalAvg(ev))+'">⭐ '+evalAvg(ev).toFixed(1)+'</span>';}catch(er){}
@@ -1847,7 +1847,7 @@ function ohOpenDetail(orderNo){
     +(t.bill?'<div style="margin-bottom:6px"><span class="bill-chip" style="font-size:12px;padding:4px 10px">💳 บิล '+esc(t.bill)+'</span></div>':'')
     +'<h2 style="margin:4px 0 5px">'+esc(t.product)+'</h2>'
     +'<div class="cu" style="margin-bottom:6px">👤 '+esc(t.customer||'—')+(t.phone?' · 📞 '+esc(t.phone):'')+'</div>'
-    +'<span class="tag" style="background:'+s[2]+';color:'+s[1]+'">'+t.stage+'/7 · '+s[0]+'</span>'
+    +'<span class="tag" style="background:'+s[2]+';color:'+s[1]+'">'+t.stage+'/'+IP_LAST+' · '+s[0]+'</span>'
     +'<div class="stg-track">'+track+'</div>'
     +'<div class="dr-tabs">'
     +'<button class="dr-tab act" onclick="ohTab(this,\'info\')">📋 ข้อมูล</button>'
