@@ -99,7 +99,7 @@ Floor/
 ### 3.3 โมดูลหลักในโค้ด (แบ่งตาม comment block)
 - **DOCFLOW** — จัดการเอกสาร: `CATS`, `STATUS`, `DOCS[]`, `renderRegister/Dash/Approve/Cats`, ค้นหา
 - **SCAN / OCR** — อัปโหลดรูป/PDF, batch folder OCR, ต่อ backend, เติมฟอร์ม `TPL`
-- **INSTALL PIPELINE** — Stage Board 7 ถัง: `IP_STAGES`, `ipLoad/ipMap/ipRenderBoard/ipAdv/ipSaveStage`
+- **INSTALL PIPELINE** — Stage Board 8 ถัง (ตาม SOP): `IP_STAGES`, `IP_LAST`, `ipLoad/ipMap/ipRenderBoard/ipAdv/ipStageGate/ipSaveStage` · drawer = popup 3 แท็บ (`ipOpen`+`drTab`)
 - **QUEUE (คิวช่าง)** — `ipLoadQueue`, insert `tech_queue`
 - **ORDER HISTORY (OH)** — การ์ดออเดอร์ + drawer 4 แท็บ: `ohLoad`, `ohApplyAccept`, `ohFilter`
 - **EVAL (ประเมินผล)** — ผูกคะแนนประเมินกับบิล: `evalBill`, `evalCardHtml`
@@ -126,7 +126,7 @@ Floor/
 |---------|------|----------|
 | `order_no` | text | เลขออเดอร์ (คีย์อ้างอิงหลัก, ใช้ `.eq('order_no', ...)`) |
 | `bill_no` | text | เลขบิล — **ถ้ามีบิลและ stage < 7 จะถูกดันเป็น stage 7 อัตโนมัติ** |
-| `stage` | int | ถังใน Pipeline 1–7 (ดู `IP_STAGES`) |
+| `stage` | int | ถังใน Pipeline 1–8 (ดู `IP_STAGES` · `IP_LAST=8`=ปิดงาน) |
 | `status` | text | สถานะย่อยในถัง |
 | `due_date` | date | วันนัด/กำหนดส่ง |
 | `shift` | text/int | รอบ/กะ |
@@ -176,15 +176,19 @@ Floor/
 
 ## 5. Flow การทำงานหลัก
 
-### 5.1 Pipeline ติดตั้ง (7 ถัง)
-`IP_STAGES` (`index.html:1140`):
+### 5.1 Pipeline ติดตั้ง (8 ถัง — ตาม SOP การประสานงาน Sale & DC)
+`IP_STAGES` = `[ชื่อ, สี, พื้นหลัง, ผู้รับผิดชอบ, หลักฐานที่ต้องมี]` (`const IP_LAST=8`)
 ```
-1 รับออร์เดอร์ → 2 รอใส่ข้อมูล (ขาย) → 3 โทรนัด (แอดมิน) → 4 ทีมรับงาน
-→ 5 กำลังเดินทาง → 6 ถึงหน้างาน → 7 เสร็จงาน
+1 จองคิว/รับออร์เดอร์ (เซล) → 2 ส่งเอกสาร–รับเซ็น (เซล) → 3 โทรยืนยันก่อนถึง (DC)
+→ 4 วัดพื้นที่–ลองตัวอย่าง–ถ่ายภาพ (DC) → 5 คุณเต้ยสรุป/ยืนยันพื้นที่ (คุณเต้ย)
+→ 6 อนุญาตเริ่มติดตั้ง (เซล+คุณเต้ย) → 7 ติดตั้ง (DC) → 8 ตรวจ–ส่งมอบ–ปิดงาน
 ```
-- เปิดการ์ด → drawer แสดง stepper + การ์ดเฉพาะถัง (ถ่ายเอกสาร/โทร/ถ่ายรูป/อัปโหลด)
-- ปุ่ม **"ทำขั้นนี้เสร็จ ▶"** = `ipAdv()` → เพิ่ม stage → `ipSaveStage()` sync กลับ Supabase ทันที
-- **Auto-advance**: job ที่มี `bill_no` จะถูกดันเป็น stage 7 อัตโนมัติ (ดู `ipMap` + commit `a5febab`)
+- ที่มา: ไฟล์ SOP `SOP การประสานงานระหว่าง Sale&DC.xlsx` (3 ชีต: ขั้นตอน 8 ข้อ · เหตุฉุกเฉิน · Checklist เซล/DC)
+- แต่ละถังมี **ผู้รับผิดชอบ (role)** + **หลักฐานที่ต้องมี (evidence gate)** — ดูใน drawer หัวการ์ด "ขั้นตอนนี้ (SOP)"
+- **Popup ลอยกลางจอ + 3 แท็บ**: ข้อมูล / เอกสาร / โทร (`ipOpen` + `drTab`)
+- ปุ่ม **"ทำขั้นนี้เสร็จ ▶"** = `ipAdv()` → เช็ค `ipStageGate(t)` ก่อน (บล็อกถ้าหลักฐานไม่ครบ) → เพิ่ม stage → `ipSaveStage()` sync Supabase
+- **Gate สำคัญ:** ถัง 4 (ที่อยู่+พิกัด+ตร.ม.+รูป 3 มุม) · ถัง 6 (เซลคอนเฟิร์ม+คุณเต้ยอนุญาต — ⛔ ห้ามเริ่มก่อน) · ถัง 8/`ipFinish` (ภาพหลัง+เก็บเงินครบ)
+- หลักฐานแบบกดยืนยัน = ปุ่ม `.evi` (data-evi=ชื่อหลักฐาน) · `ipStageGate` เช็ค `.evi.set` ทุกตัว
 
 ### 5.2 OCR เอกสาร
 ```
@@ -243,6 +247,9 @@ API key อ่านจาก environment variable เท่านั้น (ไ
 
 | วันที่ | สิ่งที่ทำ | ไฟล์/ส่วนที่แตะ | ผู้ทำ |
 |--------|-----------|-----------------|-------|
+| 2026-07-04 | **จัด Pipeline ใหม่ 8 ถังตาม SOP (Sale & DC)** — เปลี่ยน `IP_STAGES` เป็น 8 ถัง + role + หลักฐาน · เพิ่ม `IP_LAST` แทนเลข 7 ทั้งไฟล์ · gate ทั่วไป `ipStageGate` (บล็อกตามหลักฐานแต่ละถัง: ถัง4 พื้นที่+รูป, ถัง6 อนุญาต 2 ฝ่าย, ถัง8 ภาพหลัง+เก็บเงิน) · อัปเดต overview funnel เป็น 8 | `index.html` (IP_STAGES, ipOpen, ipStageGate, ipAdv, ipFinish, renderOverview) | Claude |
+| 2026-07-04 | **Migrate Supabase `install_jobs` → 8 ถัง** — remap stage เก่า→ใหม่ `7→8` (18 แถว) + `4→7` (6 แถว) · ยืนยัน distribution ใหม่ `{2:35,3:1,7:6,8:18}=60` · backup ไว้ที่ scratchpad/backup_stages.json | Supabase `install_jobs` (60 แถว) | Claude |
+| 2026-07-04 | **Drawer → popup ลอยกลางจอ + 3 แท็บ** (ข้อมูล/เอกสาร/โทร) — `ipOpen` แยกเนื้อหาเป็น pane + `drTab` · ปุ่มไปต่ออยู่ footer sticky | `index.html` (`.drawer` CSS, `ipOpen`, `drTab`) | Claude |
 | 2026-07-02 | **มือถือแบบพอดีจอ ไม่เลื่อนแนวนอน:** ตาราง (register/search/service) → **การ์ดแนวตั้ง** (ใส่ `data-label` อัตโนมัติจาก `<thead>` ผ่าน `applyTableLabels()`) · Pipeline board → เรียงถังแนวตั้ง · docs → ตาราง/โค้ด wrap พอดีจอ · ทดสอบ 12 หน้าที่ 375px ไม่มี horizontal scroll · desktop ไม่กระทบ | `index.html` (mobile `<style>`, `applyTableLabels()`, render 3 ตาราง) | Claude |
 | 2026-07-02 | **รองรับมือถือ (responsive):** แก้ `.grid3` ที่โมดูล Pipeline inject ทับ global (ทำให้ overview/dashboard ล้นจอมือถือ) → จำกัด scope เป็น `#drawer .grid3` · ตาราง (`.tbl`) + ตาราง/code ในหน้า docs เลื่อนภายในตัวเอง ไม่ดันทั้งหน้า (`@media ≤760px`) · sidebar ปิดอัตโนมัติเมื่อเลือกเมนู (ใน `go()`) · ทดสอบครบ 12 หน้าที่ 375px ไม่มี horizontal scroll | `index.html` (main `<style>`, injected `.grid3`, `go()`) | Claude |
 | 2026-07-02 | **กู้ข้อมูล DB:** ระหว่างเทสต์เผลอเลื่อน `install_jobs` order `263835` จาก stage 7 → 3 · กู้กลับเป็น 7 แล้ว (ยืนยัน distribution ตรง pristine: 2=35, 3=1, 4=6, 7=18) | Supabase `install_jobs` (order 263835) | Claude |

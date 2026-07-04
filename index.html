@@ -93,9 +93,18 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
 .av i{width:23px;height:23px;border-radius:50%;background:var(--brand);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;margin-left:-6px;border:2px solid #fff;font-style:normal}
 .av i:first-child{margin-left:0}
 .scrim{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:40;display:none}.scrim.show{display:block}
-.drawer{position:fixed;top:0;right:-560px;width:540px;max-width:94vw;bottom:0;background:var(--bg);z-index:50;transition:right .28s cubic-bezier(.4,0,.2,1);overflow:auto;box-shadow:-8px 0 30px rgba(15,23,42,.18)}
-.drawer.show{right:0}
-.dr-head{background:var(--card);padding:22px 26px;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2}
+.drawer{position:fixed;top:50%;left:50%;transform:translate(-50%,-46%) scale(.96);width:560px;max-width:94vw;max-height:88vh;background:var(--bg);z-index:50;border-radius:16px;overflow:auto;box-shadow:0 24px 64px rgba(15,23,42,.32);opacity:0;visibility:hidden;transition:opacity .22s ease,transform .22s cubic-bezier(.4,0,.2,1)}
+.drawer.show{opacity:1;visibility:visible;transform:translate(-50%,-50%) scale(1)}
+.dr-tabs{display:flex;gap:2px;margin-top:14px}
+.dr-tab{flex:1;padding:9px 6px;border:0;background:transparent;font-family:inherit;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+.dr-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
+.dr-pane{display:none}.dr-pane.show{display:block}
+.dr-foot{position:sticky;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:13px 26px;border-radius:0 0 16px 16px}
+.dr-empty{text-align:center;color:var(--muted);padding:34px 10px;font-size:13px}
+.evi{display:flex;align-items:center;justify-content:center;gap:6px;text-align:center;padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:12.5px;cursor:pointer;background:var(--bg);line-height:1.4}
+.evi.set{background:var(--green-l);border-color:var(--green);color:var(--green);border-style:solid;font-weight:600}
+.evi.set::before{content:"✔ "}
+.dr-head{background:var(--card);padding:20px 26px 0;border-bottom:1px solid var(--line);border-radius:16px 16px 0 0;position:sticky;top:0;z-index:2}
 .dr-head .x{position:absolute;top:18px;right:20px;font-size:22px;color:var(--muted);cursor:pointer;line-height:1;border:0;background:0}
 .dr-head .code,.dr-head .bill{font-size:13px}
 .dr-head h2{font-size:19px;margin:5px 0 9px;font-weight:700;padding-right:30px}
@@ -141,7 +150,7 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--ink);color:#fff;padding:13px 22px;border-radius:12px;font-size:13.5px;font-weight:500;z-index:80;box-shadow:0 8px 30px rgba(0,0,0,.25);transition:.3s;opacity:0}
 .toast.show{transform:translateX(-50%) translateY(0);opacity:1}
 @media(max-width:1100px){.kpis,.kpis.k5{grid-template-columns:repeat(2,1fr)}.grid2,.grid3{grid-template-columns:1fr}.scan-grid{grid-template-columns:1fr}.cat-grid{grid-template-columns:repeat(2,1fr)}}
-.hamb{display:none;background:0;border:0;font-size:22px;color:var(--ink);cursor:pointer;padding:2px 8px;margin-right:2px;line-height:1}.navscrim{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:25}.qgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}@media(max-width:760px){.side{transform:translateX(-100%);transition:transform .25s;box-shadow:6px 0 30px rgba(0,0,0,.28)}.side.open{transform:none}.main{margin-left:0}.hamb{display:inline-block}.navscrim.show{display:block}.search-top{display:none}.top{padding:11px 14px;gap:10px}.top h1{font-size:16px}.top .sub{display:none}.wrap{padding:16px 13px 44px}.kpis,.kpis.k5{grid-template-columns:1fr 1fr}.grid2,.grid3{grid-template-columns:1fr}.qgrid{grid-template-columns:1fr}.col{flex:0 0 82vw}.cat-grid{grid-template-columns:1fr 1fr}.scan-grid{grid-template-columns:1fr}.drawer{width:100vw;max-width:100vw;right:-100vw}.btn{padding:8px 12px;font-size:13px}.avatar{width:32px;height:32px;font-size:12px}}
+.hamb{display:none;background:0;border:0;font-size:22px;color:var(--ink);cursor:pointer;padding:2px 8px;margin-right:2px;line-height:1}.navscrim{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:25}.qgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}@media(max-width:760px){.side{transform:translateX(-100%);transition:transform .25s;box-shadow:6px 0 30px rgba(0,0,0,.28)}.side.open{transform:none}.main{margin-left:0}.hamb{display:inline-block}.navscrim.show{display:block}.search-top{display:none}.top{padding:11px 14px;gap:10px}.top h1{font-size:16px}.top .sub{display:none}.wrap{padding:16px 13px 44px}.kpis,.kpis.k5{grid-template-columns:1fr 1fr}.grid2,.grid3{grid-template-columns:1fr}.qgrid{grid-template-columns:1fr}.col{flex:0 0 82vw}.cat-grid{grid-template-columns:1fr 1fr}.scan-grid{grid-template-columns:1fr}.drawer{width:94vw;max-width:94vw;max-height:90vh}.dr-head{padding:16px 18px}.dr-body{padding:16px 18px}.dr-foot{padding:12px 18px}.btn{padding:8px 12px;font-size:13px}.avatar{width:32px;height:32px;font-size:12px}}
 /* ===== Mobile: พอดีจอ ไม่เลื่อนแนวนอน (≤760px) ===== */
 @media(max-width:760px){
   /* ตาราง → การ์ดแนวตั้ง (label จาก data-label) */
@@ -1223,7 +1232,19 @@ function wzManual(){ wzGo(3); var sp=document.getElementById('scanPrev'); if(sp)
 })();
 
 /* ===== Install Pipeline module (merged) — real Supabase install_jobs ===== */
-const IP_STAGES=[["รับออร์เดอร์","#534AB7","#EEEDFE"],["รอใส่ข้อมูล (ขาย)","#185FA5","#E6F1FB"],["โทรนัด (แอดมิน)","#854F0B","#FAEEDA"],["ทีมรับงาน","#0F6E56","#E1F5EE"],["กำลังเดินทาง","#0F6E56","#E1F5EE"],["ถึงหน้างาน","#0F6E56","#E1F5EE"],["เสร็จงาน","#15935E","#E5F4EC"]];
+const IP_STAGES=[
+["จองคิว / รับออร์เดอร์","#534AB7","#EEEDFE","เซล",""],
+["ส่งเอกสาร–รับเซ็น","#185FA5","#E6F1FB","เซล","เอกสารที่ลูกค้าเซ็นกลับ"],
+["โทรยืนยันก่อนถึง","#854F0B","#FAEEDA","DC","บันทึกการโทร (โทรก่อนถึง ≥10 นาที)"],
+["วัดพื้นที่–ลองตัวอย่าง–ถ่ายภาพ","#0F6E56","#E1F5EE","DC","รูปถ่ายพื้นที่ + จำนวนตร.ม."],
+["คุณเต้ยสรุป/ยืนยันพื้นที่","#7C3AED","#F1EAFE","คุณเต้ย","ยืนยันจำนวนตร.ม. ในกลุ่ม"],
+["อนุญาตเริ่มติดตั้ง","#0E7490","#E0F2F7","เซล + คุณเต้ย","เซลคอนเฟิร์ม + คุณเต้ยอนุญาต"],
+["ติดตั้ง","#1A8C70","#E1F5EE","DC","เริ่มหลังได้รับอนุญาตเท่านั้น"],
+["ตรวจ–ส่งมอบ–ปิดงาน","#15935E","#E5F4EC","DC / คุณเต้ย / เซล","ภาพหลังติดตั้ง + เก็บเงินครบ"]
+];
+const IP_LAST=IP_STAGES.length;
+function ipRole(st){var s=IP_STAGES[st-1];return s&&s[3]?s[3]:'';}
+function ipEvi(st){var s=IP_STAGES[st-1];return s&&s[4]?s[4]:'';}
 const IP_PRODUCTS={"LDSSF001":[1.4,2.0],"LDSSF002":[1.4,2.0],"LDSSF003":[1.1,1.4],"LDSSF004":[1.1,1.4]};
 let IP_T=[{"id": 1, "ticket": "INST-263835", "order": "263835", "sku": "-", "product": "KEERATI...❥⚡︎(Host Tail)/ ยังไม่ชำระเงิน/จองไว้วันที่ 06/05/69", "customer": "-", "stage": 4, "via": "planner", "linked": true, "date": "2026-04-16", "status": "จองคิวติดตั้ง", "due": "2026-05-06", "assignees": ["Taew Kanittha (Sale)", "Tye Pisittorn (LEN)", "Ann Thanyaporn (BD)", "Pim Sasipim (Admim WH)", "Punch Siwaporn (MKT)", "Karn Sakaorat (WH)"]}, {"id": 2, "ticket": "INST-268760", "order": "268760", "sku": "-", "product": "คอกกั้นเด็ก 7in1 รุ่น Homie", "customer": "-", "stage": 4, "via": "planner", "linked": true, "date": "2026-05-22", "status": "รอเข้าติดตั้ง", "due": "2026-06-06", "assignees": ["Ann Thanyaporn (BD)", "Pim Sasipim (Admim WH)", "Karn Sakaorat (WH)"]}, {"id": 3, "ticket": "INST-274420", "order": "274420", "sku": "LDSSF002", "product": "Deuce S.(Bebeplayofficial)", "customer": "Ua6b9…", "stage": 4, "via": "planner", "linked": true, "date": "2026-06-10", "status": "รอเข้าติดตั้ง", "due": "2026-06-15", "assignees": ["Taew Kanittha (Sale)", "Tye Pisittorn (LEN)", "Pim Sasipim (Admim WH)", "Wai Jirasuta (MKT)", "Karn Sakaorat (WH)"]}, {"id": 4, "ticket": "INST-274770", "order": "274770", "sku": "-", "product": "p.(Host Tail)/ชำระมัดจำมา 50%/**ห้ามเลื่อนวันเข้าติดตัั้ง**", "customer": "-", "stage": 4, "via": "planner", "linked": true, "date": "2026-06-12", "status": "จองคิวติดตั้ง", "due": "2026-06-22", "assignees": ["Tye Pisittorn (LEN)", "Pop Pattamawan (Sale)", "Ann Thanyaporn (BD)", "Pim Sasipim (Admim WH)", "Punch Siwaporn (MKT)", "Karn Sakaorat (WH)"]}, {"id": 5, "ticket": "INST-270084", "order": "270084", "sku": "LDSSF002", "product": "บ้านคุณพายดารา/ชำระ 5000", "customer": "บ้านคุณพาย", "stage": 4, "via": "planner", "linked": true, "date": "2026-05-15", "status": "จองคิวติดตั้ง", "due": "2026-06-23", "assignees": ["Taew Kanittha (Sale)", "Tye Pisittorn (LEN)", "Ann Thanyaporn (BD)", "Pim Sasipim (Admim WH)", "Punch Siwaporn (MKT)", "Karn Sakaorat (WH)"]}, {"id": 6, "ticket": "INST-269837", "order": "269837", "sku": "-", "product": "Jook Jook(Host Tail)/ชำระมัดจำ 1000 บาท/ **ห้ามเลื่อนวันเข้าติดตัั้ง**", "customer": "-", "stage": 4, "via": "planner", "linked": true, "date": "2026-05-14", "status": "จองคิวติดตั้ง", "due": "2026-07-01", "assignees": ["Taew Kanittha (Sale)", "Tye Pisittorn (LEN)", "Ann Thanyaporn (BD)", "Pim Sasipim (Admim WH)", "Punch Siwaporn (MKT)", "Karn Sakaorat (WH)"]}, {"id": 7, "ticket": "INST-274136", "order": "274136", "sku": "-", "product": "Prim(Host Tail)/ชำระมัดจำมา 50%/**ห้ามเลื่อนวันเข้าติดตัั้ง**", "customer": "-", "stage": 4, "via": "planner", "linked": true, "date": "2026-06-08", "status": "จองคิวติดตั้ง", "due": "2026-07-06", "assignees": ["Tye Pisittorn (LEN)", "Ann Thanyaporn (BD)", "Pim Sasipim (Admim WH)", "Punch Siwaporn (MKT)", "Beau Amarin (Sale)", "Karn Sakaorat (WH)"]}, {"id": 8, "ticket": "INST-272479", "order": "272479", "sku": "-", "product": "Bambi :)(Bebeplayofficial)/จ่ายมัดจำ 5000", "customer": "-", "stage": 4, "via": "planner", "linked": true, "date": "2026-06-05", "status": "จองคิวติดตั้ง", "due": "", "assignees": ["Taew Kanittha (Sale)", "Tye Pisittorn (LEN)", "Ann Thanyaporn (BD)", "Pim Sasipim (Admim WH)", "Wai Jirasuta (MKT)", "Karn Sakaorat (WH)"]}, {"id": 9, "ticket": "INST-269007", "order": "269007", "sku": "-", "product": "โคมไฟ ส่องแสง(Bebeplay)", "customer": "-", "stage": 4, "via": "planner", "linked": true, "date": "2026-06-12", "status": "จองคิวติดตั้ง", "due": "", "assignees": ["Ann Thanyaporn (BD)", "Pim Sasipim (Admim WH)", "Karn Sakaorat (WH)"]}, {"id": 10, "ticket": "INST-263857", "order": "263857", "sku": "-", "product": "เตียง รุ่น Luna/Rinlita(Bebeplay)", "customer": "-", "stage": 4, "via": "planner", "linked": true, "date": "2026-04-15", "status": "จองคิวติดตั้ง", "due": "", "assignees": ["Ann Thanyaporn (BD)", "Pim Sasipim (Admim WH)", "Beau Amarin (Sale)", "Karn Sakaorat (WH)"]}, {"id": 11, "ticket": "INST-262200", "order": "262200", "sku": "-", "product": "คอกHomie/บงกชรัตน์ เชิดชู(Bebeplay)", "customer": "-", "stage": 4, "via": "planner", "linked": true, "date": "2026-04-02", "status": "จองคิวติดตั้ง", "due": "", "assignees": ["Taew Kanittha (Sale)", "Ann Thanyaporn (BD)", "Pim Sasipim (Admim WH)", "Karn Sakaorat (WH)"]}, {"id": 12, "ticket": "INST-253307", "order": "253307", "sku": "-", "product": "เตียงEdenขาว ยกเลิกคืนเงิน", "customer": "-", "stage": 4, "via": "planner", "linked": true, "date": "2026-02-09", "status": "จองคิวติดตั้ง", "due": "", "assignees": []}, {"id": 13, "ticket": "INST-253035", "order": "253035", "sku": "-", "product": "เตียงLuna", "customer": "-", "stage": 4, "via": "planner", "linked": true, "date": "2026-02-09", "status": "จองคิวติดตั้ง", "due": "", "assignees": []}, {"id": 14, "ticket": "INST-252947", "order": "252947", "sku": "-", "product": "เตียงEden,เตียงSnowy (Bebeplay)", "customer": "-", "stage": 4, "via": "planner", "linked": true, "date": "2026-02-09", "status": "จองคิวติดตั้ง", "due": "", "assignees": ["Ann Thanyaporn (BD)"]}, {"id": 15, "ticket": "INST-253245", "order": "253245", "sku": "-", "product": "คอกHomie,ส่งLalamoveแล้ว", "customer": "-", "stage": 3, "via": "planner", "linked": true, "date": "2026-02-09", "status": "โทรคอนเฟิร์ม", "due": "", "assignees": []}, {"id": 16, "ticket": "INST-275465", "order": "275465", "sku": "LDSSF001", "product": "Rollsafe 1.6cm ติดตั้ง (Whitebuzz)", "customer": "26983310154664035", "stage": 2, "via": "auto", "linked": true, "date": "2026-06-16", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}, {"id": 17, "ticket": "INST-275230", "order": "275230", "sku": "LDSSF002", "product": "Rollsafe 1.6cm ติดตั้ง (Organic beige)", "customer": "U3cf6…e40", "stage": 2, "via": "auto", "linked": true, "date": "2026-06-15", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}, {"id": 18, "ticket": "INST-274420", "order": "274420", "sku": "LDSSF002", "product": "Rollsafe 1.6cm ติดตั้ง (Organic beige)", "customer": "Ua6b9…c71", "stage": 2, "via": "auto", "linked": true, "date": "2026-06-10", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}, {"id": 19, "ticket": "INST-272816", "order": "272816", "sku": "LDSSF002", "product": "Rollsafe 1.6cm ติดตั้ง (Organic beige)", "customer": "U3500…0f5", "stage": 2, "via": "auto", "linked": true, "date": "2026-06-02", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}, {"id": 20, "ticket": "INST-272577", "order": "272577", "sku": "LDSSF002", "product": "Rollsafe 1.6cm ติดตั้ง (Organic beige)", "customer": "26368298589516651", "stage": 2, "via": "auto", "linked": true, "date": "2026-06-01", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}, {"id": 21, "ticket": "INST-272103", "order": "272103", "sku": "LDSSF002", "product": "Rollsafe 1.6cm ติดตั้ง (Organic beige)", "customer": "Udc55…cd1", "stage": 2, "via": "auto", "linked": true, "date": "2026-05-28", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}, {"id": 22, "ticket": "INST-271596", "order": "271596", "sku": "LDSSF002", "product": "Rollsafe 1.6cm ติดตั้ง (Organic beige)", "customer": "Ubbf2…49a", "stage": 2, "via": "auto", "linked": true, "date": "2026-05-25", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}, {"id": 23, "ticket": "INST-271351", "order": "271351", "sku": "LDSSF002", "product": "Rollsafe 1.6cm ติดตั้ง (Organic beige)", "customer": "Uf009…827", "stage": 2, "via": "auto", "linked": true, "date": "2026-05-24", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}, {"id": 24, "ticket": "INST-271251", "order": "271251", "sku": "LDSSF001", "product": "Rollsafe 1.6cm ติดตั้ง (Whitebuzz)", "customer": "25963368026675821", "stage": 2, "via": "auto", "linked": true, "date": "2026-05-23", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}, {"id": 25, "ticket": "INST-2058755895530246144", "order": "2058755895530246144", "sku": "LDSSF002", "product": "Rollsafe 1.6cm ติดตั้ง (Organic beige)", "customer": "O Signal", "stage": 2, "via": "auto", "linked": true, "date": "2026-05-25", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}, {"id": 26, "ticket": "INST-2038137918104080384", "order": "2038137918104080384", "sku": "LDSSF004", "product": "Roll Mat 4mm ปูพื้น (White Buzz)", "customer": "Wantanee Kulpeng", "stage": 2, "via": "auto", "linked": true, "date": "2026-03-29", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}, {"id": 27, "ticket": "INST-2038882312769445888", "order": "2038882312769445888", "sku": "LDSSF002", "product": "Roll Mat 16mm ปูพื้น (Beige)", "customer": "Note Jakkrapan", "stage": 2, "via": "auto", "linked": true, "date": "2026-03-31", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}, {"id": 28, "ticket": "INST-2035961824180609024", "order": "2035961824180609024", "sku": "LDSSF003", "product": "Roll Mat 4mm ปูพื้น (Beige)", "customer": "✿ NNICKK ✿", "stage": 2, "via": "auto", "linked": true, "date": "2026-03-23", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}, {"id": 29, "ticket": "INST-2052247528508305408", "order": "2052247528508305408", "sku": "LDSSF002, LDSSF003", "product": "Safespace 0.4cm + Rollsafe 1.6cm", "customer": "Natenapha", "stage": 2, "via": "auto", "linked": true, "date": "2026-05-07", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}, {"id": 30, "ticket": "INST-2031275752713695232", "order": "2031275752713695232", "sku": "LDSSF002", "product": "Roll Mat 16mm ปูพื้น (Beige)", "customer": "Bee Jitsuda", "stage": 2, "via": "auto", "linked": true, "date": "2026-03-10", "status": "รอใส่ข้อมูล", "due": "", "assignees": []}].map(function(x){return Object.assign({callLogs:[],photos:{},docs:{}},x);});
 let ipNextId=200;
@@ -1258,39 +1279,52 @@ function ipOpen(id){var t=IP_T.find(function(x){return x.id===id;});if(!t)return
   +'<div class="field"><span class="fk">สินค้า</span><span class="fv">'+t.product+'</span></div>'
   +'<div class="field"><span class="fk">ลูกค้า</span><span class="fv">'+t.customer+'</span></div>'
   +'<div class="field"><span class="fk">ที่มา</span><span class="fv">'+(t.via==='planner'?'Planner':(t.via==='auto'?'จากออเดอร์ (อัตโนมัติ)':'สร้างเอง'))+'</span></div>'+'<div class="field"><span class="fk">วันนัดติดตั้ง</span><span class="fv">'+(t.due||'—')+'</span></div>'+'<div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv" style="max-width:60%">'+((t.assignees&&t.assignees.length)?t.assignees.join(', '):'—')+'</span></div>'+(t.tech?'<div class="field"><span class="fk">ช่างติดตั้ง</span><span class="fv">👷 '+t.tech+'</span></div>':'')+(t.accept?'<div class="field"><span class="fk">ตรวจรับงาน</span><span class="fv">'+(t.accept==='ok'?'✅ ตรวจสอบแล้ว':'⚠ มีรายการแก้ไข')+'</span></div>':'')+'</div>';
- if(t.stage===2){b+='<div class="dr-card"><h4>📋 ฝ่ายขายกรอกข้อมูล</h4><div class="fi"><label>ที่อยู่ลูกค้า</label><input id="ipf_addr" value="'+(t.addr||'')+'"></div><div class="fi"><label>Location/พิกัด</label><input id="ipf_loc" value="'+(t.loc||'')+'"></div><div class="grid3" style="margin-top:4px"><div class="ph" onclick="this.classList.add(\'set\');this.style.borderColor=\'\';this.textContent=\'✔ มุมสูง\'">＋ มุมสูง</div><div class="ph" onclick="this.classList.add(\'set\');this.style.borderColor=\'\';this.textContent=\'✔ มุมกว้าง\'">＋ มุมกว้าง</div><div class="ph" onclick="this.classList.add(\'set\');this.style.borderColor=\'\';this.textContent=\'✔ แปลน\'">＋ แปลน</div></div></div>'
-  +'<div class="dr-card"><h4>🤖 AI แปลน → ขนาดแผ่น (เศษน้อยสุด)</h4><div style="display:flex;gap:8px"><div class="fi" style="flex:1"><label>กว้าง (ม.)</label><input id="ipp_w" value="'+((t.area&&t.area.w)||'')+'"></div><div class="fi" style="flex:1"><label>ยาว (ม.)</label><input id="ipp_l" value="'+((t.area&&t.area.l)||'')+'"></div></div><button class="btn primary sm" style="width:100%" onclick="ipRunPlan('+t.id+')">ให้ AI คำนวณ</button><div id="ipPlanOut"></div></div>';}
- if(t.stage===3){b+='<div class="dr-card"><h4>📞 โทรนัด + บันทึกการโทร</h4>'+'<a class="btn ok sm" href="tel:" onclick="ipLogCall('+t.id+',\'แอดมิน\');return false;">📞 โทรลูกค้า (บันทึกเวลา)</a>'+ipCallLog(t)+'<div class="fi" style="margin-top:10px"><label>ผลการโทร / โน้ต</label><input id="ip_note" placeholder="เช่น รับสาย นัดติดตั้งได้"></div>'+'<div class="fi"><label>วันที่นัดติดตั้ง</label><input id="ip_due" type="date" value="'+(t.due||'')+'"></div>'+'<div class="fi"><label>เลือกกะช่าง</label><div style="display:flex;gap:8px;flex-wrap:wrap">'+'<label style="flex:1 1 30%;display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:8px 10px;border-radius:9px;font-size:12.5px;cursor:pointer"><input type="radio" name="ip_shift" value="1" checked> กะ 1 · 09:00</label>'+'<label style="flex:1 1 30%;display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:8px 10px;border-radius:9px;font-size:12.5px;cursor:pointer"><input type="radio" name="ip_shift" value="2"> กะ 2 · 13:30</label>'+'<label style="flex:1 1 100%;display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:8px 10px;border-radius:9px;font-size:12.5px;cursor:pointer"><input type="radio" name="ip_shift" value="3"> ☀️ ปูทั้งวัน (09:00–17:00)</label>'+'</div></div>'+'<button class="btn primary sm" style="width:100%" onclick="ipBook('+t.id+')">✅ ยืนยันนัด + เข้าคิวช่าง → ถัดไป</button></div>';}
- if(t.stage===4){b+='<div class="dr-card"><h4>📄 ทีมรับงาน</h4><div class="ph" onclick="this.classList.add(\'set\');this.textContent=\'✔ ถ่ายเอกสารแล้ว\'">＋ ถ่ายเอกสารที่รับ</div></div>';}
- if(t.stage===5){b+='<div class="dr-card"><h4>📞 ใกล้ถึง — โทรลูกค้า</h4><button class="btn ok sm" onclick="ipLogCall('+t.id+',\'ทีมติดตั้ง\')">📞 โทร (บันทึกเวลา)</button>'+ipCallLog(t)+'</div>';}
- if(t.stage===6){b+='<div class="dr-card"><h4>📷 ถึงหน้างาน</h4><div class="ph" onclick="this.classList.add(\'set\');this.textContent=\'✔ ถ่ายรูปหน้างานแล้ว\'">＋ ถ่ายรูปหน้างาน</div></div>';}
- if(t.stage===7){b+='<div class="dr-card"><h4>✅ เสร็จงาน</h4><div class="ph" onclick="this.classList.add(\'set\');this.textContent=\'✔ อัพโหลดเอกสารแล้ว\'">＋ อัพโหลดเอกสารส่งมอบ</div></div>';}
+ var docs='',call='';
+ b='<div class="dr-card" style="border-left:3px solid '+s[1]+'"><h4>ขั้นตอนนี้ (SOP)</h4><div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv"><b>'+ipRole(t.stage)+'</b></span></div>'+(ipEvi(t.stage)?'<div class="field"><span class="fk">หลักฐานที่ต้องมี</span><span class="fv" style="max-width:62%">'+ipEvi(t.stage)+'</span></div>':'')+'</div>'+b;
+ if(t.stage===2){docs+='<div class="dr-card"><h4>📄 เอกสารข้อตกลง (เซล)</h4><div class="evi" data-evi="เอกสารเซ็นกลับ" onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">อัปโหลดเอกสารที่ลูกค้าเซ็นกลับ</div></div>';}
+ if(t.stage===3){b+='<div class="dr-card"><h4>🗓️ นัดหมาย + เลือกกะช่าง</h4><div class="fi"><label>ผลการโทร / โน้ต</label><input id="ip_note" placeholder="เช่น รับสาย นัดติดตั้งได้"></div>'+'<div class="fi"><label>วันที่นัดติดตั้ง</label><input id="ip_due" type="date" value="'+(t.due||'')+'"></div>'+'<div class="fi"><label>เลือกกะช่าง</label><div style="display:flex;gap:8px;flex-wrap:wrap">'+'<label style="flex:1 1 30%;display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:8px 10px;border-radius:9px;font-size:12.5px;cursor:pointer"><input type="radio" name="ip_shift" value="1" checked> กะ 1 · 09:00</label>'+'<label style="flex:1 1 30%;display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:8px 10px;border-radius:9px;font-size:12.5px;cursor:pointer"><input type="radio" name="ip_shift" value="2"> กะ 2 · 13:30</label>'+'<label style="flex:1 1 100%;display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:8px 10px;border-radius:9px;font-size:12.5px;cursor:pointer"><input type="radio" name="ip_shift" value="3"> ☀️ ปูทั้งวัน (09:00–17:00)</label>'+'</div></div>'+'<button class="btn primary sm" style="width:100%" onclick="ipBook('+t.id+')">✅ ยืนยันนัด + เข้าคิวช่าง → ถัดไป</button></div>';}
+ if(t.stage===4){b+='<div class="dr-card"><h4>📐 ข้อมูลพื้นที่หน้างาน (DC)</h4><div class="fi"><label>ที่อยู่ลูกค้า</label><input id="ipf_addr" value="'+(t.addr||'')+'"></div><div class="fi"><label>Location/พิกัด</label><input id="ipf_loc" value="'+(t.loc||'')+'"></div></div>'
+  +'<div class="dr-card"><h4>🤖 AI แปลน → ขนาดแผ่น (เศษน้อยสุด)</h4><div style="display:flex;gap:8px"><div class="fi" style="flex:1"><label>กว้าง (ม.)</label><input id="ipp_w" value="'+((t.area&&t.area.w)||'')+'"></div><div class="fi" style="flex:1"><label>ยาว (ม.)</label><input id="ipp_l" value="'+((t.area&&t.area.l)||'')+'"></div></div><button class="btn primary sm" style="width:100%" onclick="ipRunPlan('+t.id+')">ให้ AI คำนวณ</button><div id="ipPlanOut"></div></div>';
+  docs+='<div class="dr-card"><h4>📷 รูปพื้นที่ (3 มุม)</h4><div class="grid3" style="margin-top:4px"><div class="ph" onclick="this.classList.add(\'set\');this.style.borderColor=\'\';this.textContent=\'✔ มุมสูง\'">＋ มุมสูง</div><div class="ph" onclick="this.classList.add(\'set\');this.style.borderColor=\'\';this.textContent=\'✔ มุมกว้าง\'">＋ มุมกว้าง</div><div class="ph" onclick="this.classList.add(\'set\');this.style.borderColor=\'\';this.textContent=\'✔ แปลน\'">＋ แปลน</div></div><div class="evi" style="margin-top:8px" data-evi="ให้ลูกค้าลองตัวอย่าง" onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">ให้ลูกค้าลองแผ่นตัวอย่าง (สีตัวจบ)</div></div>';}
+ if(t.stage===5){b+='<div class="dr-card"><h4>✅ สรุป/ยืนยันพื้นที่ (คุณเต้ย)</h4><div class="field"><span class="fk">จำนวนตร.ม.</span><span class="fv"><b>'+((t.area&&t.area.w&&t.area.l)?(t.area.w+' × '+t.area.l+' ม.'):'— ยังไม่มีข้อมูล —')+'</b></span></div><div class="evi" style="margin-top:10px" data-evi="คุณเต้ยยืนยันตร.ม." onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">คุณเต้ยยืนยันจำนวนตร.ม. ในกลุ่ม</div></div>';}
+ if(t.stage===6){b+='<div class="dr-card"><h4>🔓 อนุญาตเริ่มติดตั้ง</h4><div class="evi" data-evi="เซลคอนเฟิร์มตร.ม." onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">เซลคอนเฟิร์มตร.ม. ในกลุ่ม</div><div class="evi" style="margin-top:8px" data-evi="คุณเต้ยอนุญาต" onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">คุณเต้ยอนุญาตเริ่มติดตั้ง</div><div style="font-size:11.5px;color:var(--red);margin-top:8px">⛔ ห้ามเริ่มติดตั้งก่อนได้รับอนุญาตครบทั้งสอง</div></div>';}
+ if(t.stage===7){b+='<div class="dr-card"><h4>🚧 กำลังติดตั้ง (DC)</h4><div style="font-size:12.5px;color:var(--muted);line-height:1.6">เริ่มติดตั้งได้หลังผ่านขั้น “อนุญาต” แล้ว · กดถัดไปเมื่อติดตั้งเสร็จ</div></div>';}
+ if(t.stage===IP_LAST){docs+='<div class="dr-card"><h4>📷 ส่งมอบงาน (DC)</h4><div class="evi" data-evi="ภาพหลังติดตั้ง" onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">ถ่ายภาพหลังติดตั้ง + เอกสารส่งมอบ</div></div>';
+  b+='<div class="dr-card"><h4>💰 ปิดงาน (เซล)</h4><div class="evi" data-evi="เก็บเงินครบ" onclick="this.classList.toggle(\'set\');this.style.borderColor=\'\'">เก็บเงินส่วนที่เหลือครบแล้ว</div></div>';}
+ if(t.stage===3){call+='<div class="dr-card"><h4>📞 โทรยืนยันก่อนถึง (≥10 นาที)</h4><a class="btn ok sm" href="tel:" onclick="ipLogCall('+t.id+',\'ทีม DC\');return false;">📞 โทรลูกค้า (บันทึกเวลา)</a>'+ipCallLog(t)+'</div>';}
+ else if(t.stage===5){call+='<div class="dr-card"><h4>📞 โทรลูกค้า</h4><button class="btn ok sm" onclick="ipLogCall('+t.id+',\'ทีม DC\')">📞 โทร (บันทึกเวลา)</button>'+ipCallLog(t)+'</div>';}
+ else{call+='<div class="dr-card"><h4>📞 ประวัติการโทร</h4>'+ipCallLog(t)+'</div>';}
  if(!t.linked){b+='<div class="dr-card" style="border-color:#E9C2BD;background:var(--red-l)"><h4 style="color:var(--red)">⚠ ยังไม่เชื่อมออเดอร์</h4><div class="fi"><label>ใส่เลขออเดอร์</label><input id="ipf_link"></div><button class="btn lt sm" style="background:var(--bg);border:1px solid var(--line)" onclick="ipLink('+t.id+')">🔗 เชื่อมออเดอร์</button></div>';}
- b+='<div style="display:flex;gap:8px">'+(t.stage<7?'<button class="btn primary" onclick="ipAdv('+t.id+')">ทำขั้นนี้เสร็จ → ถัดไป ▶</button>':'<button class="btn ok" onclick="ipFinish('+t.id+')">✅ ปิดงาน</button>')+'</div>'+(t.stage===2?'<div style="font-size:11.5px;color:var(--muted);margin-top:8px">ℹ️ ต้องกรอก ที่อยู่ · พิกัด · ขนาด (กว้าง/ยาว) · รูป 3 มุม ให้ครบก่อนถึงจะไปต่อได้</div>':'');
- $('#drawer').innerHTML='<div class="dr-head"><button class="x" onclick="closeDrawer()">×</button><span class="code">'+t.ticket+'</span><h2>'+t.product+'</h2><span class="tag" style="background:'+s[2]+';color:'+s[1]+'">ถัง '+t.stage+': '+s[0]+'</span></div><div class="dr-body">'+steps+b+'</div>';
+ if(!docs)docs='<div class="dr-empty">— ไม่มีเอกสาร/รูป ในขั้นนี้ —</div>';
+ var foot='<div class="dr-foot"><div style="display:flex;gap:8px">'+(t.stage<IP_LAST?'<button class="btn primary" style="flex:1" onclick="ipAdv('+t.id+')">ทำขั้นนี้เสร็จ → ถัดไป ▶</button>':'<button class="btn ok" style="flex:1" onclick="ipFinish('+t.id+')">✅ ปิดงาน</button>')+'</div>'+(ipEvi(t.stage)?'<div style="font-size:11.5px;color:var(--muted);margin-top:8px">ℹ️ หลักฐานที่ต้องมีก่อนไปต่อ: '+ipEvi(t.stage)+'</div>':'')+'</div>';
+ $('#drawer').innerHTML='<div class="dr-head"><button class="x" onclick="closeDrawer()">×</button><span class="code">'+t.ticket+'</span><h2>'+t.product+'</h2><span class="tag" style="background:'+s[2]+';color:'+s[1]+'">ถัง '+t.stage+': '+s[0]+'</span>'+steps+'<div class="dr-tabs"><button class="dr-tab active" onclick="drTab(this,\'info\')">ข้อมูล</button><button class="dr-tab" onclick="drTab(this,\'docs\')">เอกสาร</button><button class="dr-tab" onclick="drTab(this,\'call\')">โทร</button></div></div><div class="dr-body"><div class="dr-pane show" id="pane-info">'+b+'</div><div class="dr-pane" id="pane-docs">'+docs+'</div><div class="dr-pane" id="pane-call">'+call+'</div></div>'+foot;
  $('#scrim').classList.add('show');$('#drawer').classList.add('show');}
+function drTab(btn,name){var d=document.getElementById('drawer');if(!d)return;d.querySelectorAll('.dr-tab').forEach(function(x){x.classList.toggle('active',x===btn);});d.querySelectorAll('.dr-pane').forEach(function(p){p.classList.toggle('show',p.id==='pane-'+name);});}
 function ipRunPlan(id){var t=IP_T.find(function(x){return x.id===id;});var w=parseFloat($('#ipp_w').value),l=parseFloat($('#ipp_l').value);if(!w||!l){toast('กรอกขนาดห้องก่อน');return;}var rolls=IP_PRODUCTS[(t.sku||'').split(',')[0].trim()]||[1.4,2.0];var r=ipCalc(w,l,rolls);
  $('#ipPlanOut').innerHTML='<div class="aibox"><div style="font-size:12px;color:var(--purple);font-weight:600">AI แนะนำ (เศษน้อยสุด)</div><div style="font-size:28px;font-weight:700;color:var(--purple)">'+r.waste+'% <span style="font-size:13px;font-weight:500;color:var(--muted)">เศษวัสดุ</span></div><div style="font-size:12.5px;line-height:1.7;margin-top:4px">ม้วนหน้ากว้าง <b>'+r.rw+' ม.</b> · ตัด <b>'+r.strips+' เส้น</b> ('+r.dir+') ยาวเส้นละ <b>'+r.each+' ม.</b><br>วัสดุรวม ~<b>'+r.mat+' ตร.ม.</b> (พื้นที่จริง '+r.used+')</div></div>';toast('🤖 คำนวณแผนแล้ว');}
 function ipLogCall(id,by){var t=IP_T.find(function(x){return x.id===id;});t.callLogs.push({by:by,at:ipNow()});if(SB&&t.order){SB.from('install_jobs').update({call_logs:t.callLogs}).eq('order_no',t.order).then(function(){});}toast('📞 บันทึกเวลาโทรแล้ว');setTimeout(function(){ipOpen(id);},40);}
-function ipCheckStage2(t){
+function ipStageGate(t){
  var miss=[];
  function mark(el,bad){if(el)el.style.borderColor=bad?'var(--red)':'';}
- var addr=$('#ipf_addr'),loc=$('#ipf_loc'),w=$('#ipp_w'),l=$('#ipp_l');
- var addrBad=!(addr&&addr.value.trim());mark(addr,addrBad);if(addrBad)miss.push('ที่อยู่ลูกค้า');
- var locBad=!(loc&&loc.value.trim());mark(loc,locBad);if(locBad)miss.push('พิกัด');
- var wBad=!(w&&parseFloat(w.value)>0);mark(w,wBad);if(wBad)miss.push('กว้าง');
- var lBad=!(l&&parseFloat(l.value)>0);mark(l,lBad);if(lBad)miss.push('ยาว');
- var phs=[].slice.call(document.querySelectorAll('#drawer .grid3 .ph'));
- phs.forEach(function(p){p.style.borderColor=p.classList.contains('set')?'':'var(--red)';});
- var photosDone=phs.length===3&&phs.every(function(p){return p.classList.contains('set');});
- if(!photosDone)miss.push('รูป 3 มุม');
- if(!wBad&&!lBad)t.area=Object.assign({},t.area,{w:w.value,l:l.value});
+ if(t.stage===4){
+  var addr=$('#ipf_addr'),loc=$('#ipf_loc'),w=$('#ipp_w'),l=$('#ipp_l');
+  var ab=!(addr&&addr.value.trim());mark(addr,ab);if(ab)miss.push('ที่อยู่');
+  var lb=!(loc&&loc.value.trim());mark(loc,lb);if(lb)miss.push('พิกัด');
+  var wb=!(w&&parseFloat(w.value)>0);mark(w,wb);if(wb)miss.push('กว้าง');
+  var l2=!(l&&parseFloat(l.value)>0);mark(l,l2);if(l2)miss.push('ยาว');
+  var phs=[].slice.call(document.querySelectorAll('#drawer .grid3 .ph'));
+  phs.forEach(function(p){p.style.borderColor=p.classList.contains('set')?'':'var(--red)';});
+  if(!(phs.length===3&&phs.every(function(p){return p.classList.contains('set');})))miss.push('รูป 3 มุม');
+  if(!wb&&!l2)t.area=Object.assign({},t.area,{w:w.value,l:l.value});
+ }
+ if(t.stage===3&&(!t.callLogs||!t.callLogs.length))miss.push('บันทึกการโทร');
+ [].slice.call(document.querySelectorAll('#drawer .evi')).forEach(function(c){if(!c.classList.contains('set')){c.style.borderColor='var(--red)';miss.push(c.getAttribute('data-evi')||'หลักฐาน');}else c.style.borderColor='';});
  return miss;
 }
 function ipAdv(id){var t=IP_T.find(function(x){return x.id===id;});var a=$('#ipf_addr');if(a)t.addr=a.value;var lo=$('#ipf_loc');if(lo)t.loc=lo.value;
- if(t.stage===2){var miss=ipCheckStage2(t);if(miss.length){toast('⚠ ใส่ข้อมูลไม่ครบ — ยังขาด: '+miss.join(', '));return;}}
- if(t.stage<7){t.stage++;toast('▶ ย้ายไปถัง '+t.stage+': '+IP_STAGES[t.stage-1][0]);}ipSaveStage(t.order,t.stage,t.status);ipRenderBoard();ipOpen(id);}
-function ipFinish(id){var t=IP_T.find(function(x){return x.id===id;});t.done=true;toast('✅ ปิดงาน '+t.ticket);closeDrawer();ipRenderBoard();}
+ var miss=ipStageGate(t);if(miss.length){toast('⚠ หลักฐานไม่ครบ — ยังขาด: '+miss.join(', '));return;}
+ if(t.stage<IP_LAST){t.stage++;toast('▶ ย้ายไปถัง '+t.stage+': '+IP_STAGES[t.stage-1][0]);}ipSaveStage(t.order,t.stage,t.status);ipRenderBoard();ipOpen(id);}
+function ipFinish(id){var t=IP_T.find(function(x){return x.id===id;});var miss=ipStageGate(t);if(miss.length){toast('⚠ ปิดงานไม่ได้ — ยังขาด: '+miss.join(', '));return;}t.done=true;toast('✅ ปิดงาน '+t.ticket);closeDrawer();ipRenderBoard();}
 function ipLink(id){var t=IP_T.find(function(x){return x.id===id;});var v=($('#ipf_link').value||'').trim();if(!v){toast('ใส่เลขออเดอร์ก่อน');return;}t.order=v;t.linked=true;toast('🔗 เชื่อมออเดอร์ #'+v);ipRenderBoard();ipOpen(id);}
 function ipOpenCreate(){$('#ipCm').classList.add('show');}
 function ipCloseCreate(){$('#ipCm').classList.remove('show');}
@@ -1301,7 +1335,7 @@ function ipBook(id){var t=IP_T.find(function(x){return x.id===id;});var due=$('#
  var note=$('#ip_note')?$('#ip_note').value:'';
  t.due=due;t.shift=sh;t.status='จองคิวติดตั้ง';
  IP_QUEUE.push({job:t.ticket,order:t.order,product:t.product,date:due,shift:sh,label:label,team:(t.assignees||[]),note:note});
- if(t.stage<7)t.stage++;
+ if(t.stage<IP_LAST)t.stage++;
  toast('✅ จองคิวช่าง '+due+' · กะ '+sh+' ('+label+') แล้ว');
  ipSaveBooking(t);ipRenderBoard();ipRenderQueue();closeDrawer();}
 function ipRenderQueue(){var nbq=$('#nbQ');if(nbq)nbq.textContent=IP_QUEUE.length;var host=$('#queueBoard');if(!host)return;if(!IP_QUEUE.length){host.innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">ยังไม่มีคิวช่าง — ไปที่ถัง “โทรนัด” แล้วยืนยันนัด+เลือกกะ</div>';return;}var s1=IP_QUEUE.filter(function(x){return x.shift==='1';}).length,s2=IP_QUEUE.filter(function(x){return x.shift==='2';}).length,s3=IP_QUEUE.filter(function(x){return x.shift==='3';}).length;var h='<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">'+ipKpi('🕘','กะ 1 · 09:00',s1,'var(--blue)','var(--blue-l)')+ipKpi('🕜','กะ 2 · 13:30',s2,'var(--amber)','var(--amber-l)')+ipKpi('☀️','ปูทั้งวัน',s3,'var(--green)','var(--green-l)')+ipKpi('📋','คิวทั้งหมด',IP_QUEUE.length,'var(--brand)','var(--brand-l)')+'</div>';var dates={};IP_QUEUE.forEach(function(x){(dates[x.date]=dates[x.date]||[]).push(x);});var keys=Object.keys(dates).sort();var TH=['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];keys.forEach(function(dk){var dt=dk?new Date(dk):null;var dow=(dt&&!isNaN(dt))?(' · '+TH[dt.getDay()]):'';var items=dates[dk];h+='<div style="margin-bottom:14px"><div style="display:flex;align-items:center;gap:8px;background:#161E2E;color:#fff;padding:8px 14px;border-radius:10px 10px 0 0;font-weight:600;font-size:13px">📅 '+(dk||'ไม่ระบุวัน')+dow+'<span style="margin-left:auto;font-weight:400;font-size:11.5px;color:#C9D6E6">'+items.length+' งาน</span></div>';h+='<div class="qgrid" style="border:1px solid var(--line);border-top:0;border-radius:0 0 10px 10px;padding:10px;background:#fff">';[['1','กะ 1 · 09:00','var(--blue)','var(--blue-l)'],['2','กะ 2 · 13:30','var(--amber)','var(--amber-l)'],['3','☀️ ปูทั้งวัน','var(--green)','var(--green-l)']].forEach(function(col){var cs=items.filter(function(x){return x.shift===col[0];});h+='<div><div style="font-size:11.5px;font-weight:600;color:'+col[2]+';background:'+col[3]+';padding:4px 8px;border-radius:7px;margin-bottom:6px">'+col[1]+' ('+cs.length+')</div>';h+=cs.map(function(x){return '<div style="border:1px solid var(--line);border-radius:8px;padding:8px 9px;margin-bottom:6px"><div class="bill" style="font-size:11px">#'+(''+x.order).slice(0,10)+'</div><div style="font-size:12px;font-weight:500;margin:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+x.product+'</div><div style="font-size:10.5px;color:var(--muted)">👷 '+(x.team&&x.team.length?x.team.length+' คน':'—')+'</div></div>';}).join('')||'<div style="font-size:11px;color:var(--gray);padding:4px 2px">—</div>';h+='</div>';});h+='</div></div>';});host.innerHTML=h;}function ipKpi(ic,lbl,n,c,bg){return '<div class="kpi" style="flex:1;min-width:150px"><div class="lbl"><span class="ic" style="background:'+bg+';color:'+c+'">'+ic+'</span>'+lbl+'</div><div class="num">'+n+'</div></div>';}
@@ -1370,10 +1404,10 @@ function renderOverview(){
   var MNAME={'01':'ม.ค.','02':'ก.พ.','03':'มี.ค.','04':'เม.ย.','05':'พ.ค.','06':'มิ.ย.','07':'ก.ค.','08':'ส.ค.','09':'ก.ย.','10':'ต.ค.','11':'พ.ย.','12':'ธ.ค.'};
 
   /* Pipeline stages */
-  var stC=[0,0,0,0,0,0,0];
-  jobs.forEach(function(j){if(j.stage>=1&&j.stage<=7)stC[j.stage-1]++;});
-  var stNm=['รับออร์เดอร์','รอข้อมูลขาย','โทรนัด','ทีมรับงาน','กำลังเดินทาง','ถึงหน้างาน','เสร็จงาน'];
-  var stCl=['#534AB7','#185FA5','#854F0B','#0F6E56','#1A8C70','#2EA882','#15935E'];
+  var stC=[0,0,0,0,0,0,0,0];
+  jobs.forEach(function(j){if(j.stage>=1&&j.stage<=IP_LAST)stC[j.stage-1]++;});
+  var stNm=['จองคิว','ส่งเอกสาร','โทรยืนยัน','วัดพื้นที่','สรุปพื้นที่','อนุญาต','ติดตั้ง','ปิดงาน'];
+  var stCl=['#534AB7','#185FA5','#854F0B','#0F6E56','#7C3AED','#0E7490','#1A8C70','#15935E'];
 
   /* Eval category avg */
   var eCats=(typeof EVAL_CATS!=='undefined')?EVAL_CATS:[];
@@ -1392,7 +1426,7 @@ function renderOverview(){
   var todayS=(new Date()).toISOString().slice(0,10);
   var futD=new Date();futD.setDate(futD.getDate()+14);var futS=futD.toISOString().slice(0,10);
   var urgTasks=tasks.filter(function(d){return d.late&&d.status!=='Completed';}).slice(0,4);
-  var upPipe=jobs.filter(function(j){return j.due&&j.due>=todayS&&j.due<=futS&&j.stage<7;}).sort(function(a,b){return a.due<b.due?-1:1;}).slice(0,4);
+  var upPipe=jobs.filter(function(j){return j.due&&j.due>=todayS&&j.due<=futS&&j.stage<IP_LAST;}).sort(function(a,b){return a.due<b.due?-1:1;}).slice(0,4);
 
   /* ---- Builders ---- */
   function kpi(ic,lbl,val,sub,c,bg){return '<div class="kpi"><div class="lbl"><span class="ic" style="background:'+bg+';color:'+c+'">'+ic+'</span>'+lbl+'</div><div class="num" style="font-size:26px;line-height:1.1">'+val+'</div><div class="delta">'+sub+'</div></div>';}
@@ -1651,7 +1685,7 @@ function ohApplyAccept(){
     if(row.tech)job.tech=row.tech;
     job.items=row.items||'';
     job.accept=row.ok?'ok':'fix';
-    if(row.ok&&job.stage<7)job.stage=7;
+    if(row.ok&&job.stage<IP_LAST)job.stage=IP_LAST;
   });
 }
 var OH_DATA=[];
@@ -1672,19 +1706,19 @@ function ohLoad(){
       m.callLogs=Array.isArray(x.call_logs)?x.call_logs:[];
       m.jobNo=x.job_no||'';
       m.price=(x.price!=null)?Number(x.price):null;
-      if(m.bill&&m.stage<7){m.stage=7;}
+      if(m.bill&&m.stage<IP_LAST){m.stage=IP_LAST;}
       return m;
     });
     // auto-complete: มี eval score แล้วแต่ stage ยังไม่ถึง 7
     var toComplete=OH_DATA.filter(function(t){
-      if(t.stage>=7)return false;
+      if(t.stage>=IP_LAST)return false;
       try{return !!evalBill(t.bill);}catch(e){return false;}
     });
     if(toComplete.length){
       var ids=toComplete.map(function(t){return t.order;});
       SB.from('install_jobs').update({stage:7,status:'done'}).in('order_no',ids).then(function(upd){
         if(!upd.error){
-          toComplete.forEach(function(t){t.stage=7;});
+          toComplete.forEach(function(t){t.stage=IP_LAST;});
           ohRenderKpis();
           ohRender();
         }
@@ -1701,7 +1735,7 @@ function ohLoad(){
 function ohRenderKpis(){
   var el=$('#ohKpis');if(!el)return;
   var total=OH_DATA.length;
-  var done=OH_DATA.filter(function(t){return t.stage===7;}).length;
+  var done=OH_DATA.filter(function(t){return t.stage===IP_LAST;}).length;
   var active=OH_DATA.filter(function(t){return t.stage>=4&&t.stage<=6;}).length;
   var waiting=OH_DATA.filter(function(t){return t.stage<=3;}).length;
   var evalN=0,evalS=0;
