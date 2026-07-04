@@ -1984,10 +1984,14 @@ function ohOpenDetail(orderNo){
             +'<input id="drDoc_issue_r'+ri+'_qty" type="number" min="0" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12px;box-sizing:border-box"></div>'
             +'</div></div>';
         };
+        pane3+='<div id="drDoc_issue_totals" style="background:var(--brand-l);color:var(--ink);border-radius:9px;padding:9px 12px;font-size:12.5px;margin:8px 0;text-align:center">เบิก <b>0</b> · คืน <b>0</b> · ใช้จริง <b>0</b> ม้วน</div>';
         pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--blue);margin:10px 0 5px">📦 เบิกสินค้า (เอาออกไป)</div>';
-        pane3+=iRow(0,'ม้วนที่ 1','var(--blue)')+iRow(1,'ม้วนที่ 2','var(--blue)')+iRow(2,'ม้วนที่ 3','var(--blue)');
-        pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--green);margin:10px 0 5px">🔁 จำนวนที่เหลือ / คืนกลับ</div>';
-        pane3+=iRow(3,'ม้วนที่ 1','var(--green)')+iRow(4,'ม้วนที่ 2','var(--green)')+iRow(5,'ม้วนที่ 3','var(--green)');
+        pane3+='<div id="drDoc_issue_out">'+ohRollRowHtml('out')+'</div>';
+        pane3+='<button type="button" class="btn sm" style="width:100%;background:var(--blue-l);color:var(--blue);border:0;margin-bottom:4px" onclick="ohAddRoll(\'out\')">＋ เพิ่มม้วนเบิก</button>';
+        pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--green);margin:12px 0 5px">🔁 จำนวนที่เหลือ / คืนกลับ</div>';
+        pane3+='<div id="drDoc_issue_ret">'+ohRollRowHtml('ret')+'</div>';
+        pane3+='<button type="button" class="btn sm" style="width:100%;background:var(--green-l);color:var(--green);border:0;margin-bottom:4px" onclick="ohAddRoll(\'ret\')">＋ เพิ่มม้วนคืน</button>';
+        pane3+='<div style="margin-top:10px"><div style="font-size:10.5px;color:var(--muted);font-weight:700;margin-bottom:3px">✍ ผู้อนุมัติรับคืน (ต้องมีคนอนุมัติรับของกลับ)</div><input id="drDoc_issue_approver" placeholder="ชื่อผู้อนุมัติรับของกลับ" style="width:100%;padding:8px 11px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;box-sizing:border-box"></div>';
       }
       pane3+='<button class="btn primary" style="width:100%;margin-top:10px;font-size:13px" onclick="ohSaveDoc(\''+esc(String(t.order))+'\',\''+ft+'\')">💾 บันทึกเอกสาร</button>';
       pane3+='</div>';
@@ -2054,6 +2058,24 @@ function ohChkUpdate(el){
   inp.value=vals.join(', ');
 }
 
+function ohRollRowHtml(sec){
+ var L='font-size:9.5px;color:var(--muted);font-weight:700;margin-bottom:2px';
+ var I='width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12px;box-sizing:border-box';
+ return '<div class="roll-row" style="background:#F8FAFC;border:1px solid var(--line);border-radius:9px;padding:9px 26px 9px 11px;margin-bottom:7px;position:relative">'
+  +'<button type="button" title="ลบแถว" onclick="this.closest(\'.roll-row\').remove();ohRollTotals()" style="position:absolute;top:5px;right:7px;border:0;background:0;color:var(--muted);font-size:17px;cursor:pointer;line-height:1">×</button>'
+  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">'
+  +'<div><div style="'+L+'">ขนาด</div><select class="rr-sz" style="'+I+'"><option value="">— เลือก —</option><option>0.6 cm</option><option>1.6 cm</option></select></div>'
+  +'<div><div style="'+L+'">สี</div><select class="rr-cl" style="'+I+'"><option value="">— เลือก —</option><option>Beige</option><option>Organic beige</option><option>Barky beige</option><option>Whitebuzz</option></select></div>'
+  +'</div>'
+  +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">'
+  +'<div><div style="'+L+'">กว้าง (cm)</div><input class="rr-w" type="number" min="0" style="'+I+'"></div>'
+  +'<div><div style="'+L+'">ยาว (cm)</div><input class="rr-l" type="number" min="0" style="'+I+'"></div>'
+  +'<div><div style="'+L+'">จำนวน (ม้วน)</div><input class="rr-qty" type="number" min="0" oninput="ohRollTotals()" style="'+I+'"></div>'
+  +'</div></div>';
+}
+function ohAddRoll(sec){var c=document.getElementById('drDoc_issue_'+sec);if(c)c.insertAdjacentHTML('beforeend',ohRollRowHtml(sec));}
+function ohRollSum(sec){var n=0;document.querySelectorAll('#drDoc_issue_'+sec+' .rr-qty').forEach(function(i){n+=parseFloat(i.value)||0;});return n;}
+function ohRollTotals(){var o=ohRollSum('out'),r=ohRollSum('ret');var el=document.getElementById('drDoc_issue_totals');if(el)el.innerHTML='เบิก <b>'+o+'</b> · คืน <b>'+r+'</b> · ใช้จริง <b style="color:var(--brand)">'+(o-r)+'</b> ม้วน';}
 function ohSaveDoc(orderNo,ft){
   var t=OH_DATA.find(function(x){return String(x.order)===String(orderNo);});
   if(!t||typeof TPL==='undefined'||!TPL[ft]){toast('⚠ ไม่พบข้อมูล');return;}
@@ -2065,17 +2087,21 @@ function ohSaveDoc(orderNo,ft){
       if(v)caps.push({l:fd[1],v:v});
     });
   });
+  var issueApprover='';
   if(ft==='issue'){
-    var rTypes=['เบิก','เบิก','เบิก','คืน','คืน','คืน'];
-    for(var ri=0;ri<6;ri++){
-      var sz=(document.getElementById('drDoc_issue_r'+ri+'_sz')||{}).value||'';
-      var cl=(document.getElementById('drDoc_issue_r'+ri+'_cl')||{}).value||'';
-      var rw=(document.getElementById('drDoc_issue_r'+ri+'_w')||{}).value||'';
-      var rl=(document.getElementById('drDoc_issue_r'+ri+'_l')||{}).value||'';
-      var rq=(document.getElementById('drDoc_issue_r'+ri+'_qty')||{}).value||'';
-      var parts=[sz,cl,rw&&('กว้าง '+rw+' cm'),rl&&('ยาว '+rl+' cm'),rq&&('จำนวน '+rq+' ม้วน')].filter(Boolean);
-      if(parts.length)caps.push({l:rTypes[ri]+' ม้วนที่ '+(ri<3?ri+1:ri-2),v:parts.join(' · ')});
-    }
+    ['out','ret'].forEach(function(sec){
+      var rtype=sec==='out'?'เบิก':'คืน';
+      document.querySelectorAll('#drDoc_issue_'+sec+' .roll-row').forEach(function(row,i){
+        function v(cls){var e=row.querySelector(cls);return e?e.value:'';}
+        var sz=v('.rr-sz'),cl=v('.rr-cl'),rw=v('.rr-w'),rl=v('.rr-l'),rq=v('.rr-qty');
+        var parts=[sz,cl,rw&&('กว้าง '+rw+' cm'),rl&&('ยาว '+rl+' cm'),rq&&('จำนวน '+rq+' ม้วน')].filter(Boolean);
+        if(parts.length)caps.push({l:rtype+' ม้วนที่ '+(i+1),v:parts.join(' · ')});
+      });
+    });
+    var _o=ohRollSum('out'),_r=ohRollSum('ret');
+    caps.push({l:'สรุปจำนวน',v:'เบิก '+_o+' · คืน '+_r+' · ใช้จริง '+(_o-_r)+' ม้วน'});
+    issueApprover=(document.getElementById('drDoc_issue_approver')||{}).value||'';
+    if(issueApprover)caps.push({l:'ผู้อนุมัติรับคืน',v:issueApprover});
   }
   if(!caps.length){toast('⚠ กรอกอย่างน้อย 1 ช่อง');return;}
   // Collect attachments (stored in OH_ATTACH during preview)
@@ -2093,7 +2119,7 @@ function ohSaveDoc(orderNo,ft){
     var ei=DOCS.findIndex(function(d){return d.bill===t.bill&&d.formType===ft;});
     var doc={id:nextId++,code:t.bill||('DOC-'+ft),title:tpl.label,cat:tpl.cat,ver:'1.0',status:'pending',
       owner:'กรอกจาก Job',dept:'บริการติดตั้ง',loc:{cab:'-',shelf:'-',folder:'-'},
-      paper:false,scanned:false,created:today(),updated:today(),review:'-',approver:'-',
+      paper:false,scanned:false,created:today(),updated:today(),review:'-',approver:(issueApprover||'-'),
       captured:caps,bill:t.bill,formType:ft,imgSrc:'',
       attachments:attachments,
       hist:[['กรอกจาก Job Drawer: '+tpl.label,today(),'ระบบ']]};
