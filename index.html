@@ -98,6 +98,8 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
 .dr-tabs{display:flex;gap:2px;margin-top:14px}
 .dr-tab{flex:1;padding:9px 6px;border:0;background:transparent;font-family:inherit;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
 .dr-tab.active{color:var(--brand);border-bottom-color:var(--brand)}
+.dr-tab.gate-miss{color:var(--red)}
+.dr-tab.gate-miss::after{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);margin-left:5px;vertical-align:middle}
 .dr-pane{display:none}.dr-pane.show{display:block}
 .dr-foot{position:sticky;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:13px 26px;border-radius:0 0 16px 16px}
 .dr-empty{text-align:center;color:var(--muted);padding:34px 10px;font-size:13px}
@@ -1342,7 +1344,7 @@ function ipOpen(id){var t=IP_T.find(function(x){return x.id===id;});if(!t)return
  var apq=(typeof IP_QUEUE!=='undefined'?IP_QUEUE:[]).find(function(x){return String(x.order)===String(t.order);});
  var appt='<div class="dr-card"><h4>🗓 การนัดหมาย</h4>'+(t.due?('<div class="field"><span class="fk">วันนัด</span><span class="fv"><b>'+t.due+'</b></span></div><div class="field"><span class="fk">กะช่าง</span><span class="fv">'+(t.shift==='3'?'☀️ ทั้งวัน':(t.shift==='2'?'กะ 2 · 13:30':'กะ 1 · 09:00'))+'</span></div>'+((apq&&apq.team&&apq.team.length)?'<div class="field"><span class="fk">ทีมช่าง</span><span class="fv">👷 '+apq.team.length+' คน</span></div>':'')):'<div style="color:var(--muted);font-size:12.5px">ยังไม่มีวันนัด — ตั้งวันนัด/กะ ได้ที่แท็บ “ข้อมูล”</div>')+'</div>'+call;
  var evalC='';try{var _ev=(typeof evalBill==='function')?evalBill(t.bill):null;evalC=_ev?evalCardHtml(_ev):'<div class="dr-empty"><div style="font-size:38px;margin-bottom:8px">⭐</div>ยังไม่มีผลประเมิน<div style="font-size:12px;margin-top:6px;color:var(--gray)">ผลจะปรากฏหลังลูกค้ากรอกแบบประเมิน</div></div>';}catch(e){evalC='<div class="dr-empty">โหลดผลประเมินไม่ได้</div>';}
- var foot='<div class="dr-foot"><div style="display:flex;gap:8px">'+(t.stage<IP_LAST?'<button class="btn primary" style="flex:1" onclick="ipAdv('+t.id+')">ทำขั้นนี้เสร็จ → ถัดไป ▶</button>':'<button class="btn ok" style="flex:1" onclick="ipFinish('+t.id+')">✅ ปิดงาน</button>')+'</div>'+(ipEvi(t.stage)?'<div style="font-size:11.5px;color:var(--muted);margin-top:8px">ℹ️ หลักฐานที่ต้องมีก่อนไปต่อ: '+ipEvi(t.stage)+'</div>':'')+'</div>';
+ var foot='<div class="dr-foot"><div id="drGate" style="display:none;background:var(--red-l);border:1px solid #E9C2BD;border-radius:10px;padding:10px 12px;margin-bottom:10px"></div><div style="display:flex;gap:8px">'+(t.stage<IP_LAST?'<button class="btn primary" style="flex:1" onclick="ipAdv('+t.id+')">ทำขั้นนี้เสร็จ → ถัดไป ▶</button>':'<button class="btn ok" style="flex:1" onclick="ipFinish('+t.id+')">✅ ปิดงาน</button>')+'</div>'+(ipEvi(t.stage)?'<div style="font-size:11.5px;color:var(--muted);margin-top:8px">ℹ️ หลักฐานที่ต้องมีก่อนไปต่อ: '+ipEvi(t.stage)+'</div>':'')+'</div>';
  $('#drawer').innerHTML='<div class="dr-head" style="padding-bottom:0"><button class="x" onclick="closeDrawer()">×</button>'+(t.bill?'<div style="margin-bottom:6px"><span class="bill-chip" style="font-size:12px;padding:4px 10px">💳 บิล '+t.bill+'</span></div>':'')+'<span class="code">'+t.ticket+'</span><h2 style="margin:4px 0 5px">'+t.product+'</h2><div class="cu" style="margin-bottom:6px">👤 '+(t.customer||'—')+'</div><span class="tag" style="background:'+s[2]+';color:'+s[1]+'">'+t.stage+'/'+IP_LAST+' · '+s[0]+'</span>'+steps+'<div class="dr-tabs"><button class="dr-tab active" onclick="drTab(this,\'info\')">📋 ข้อมูล</button><button class="dr-tab" onclick="drTab(this,\'appt\')">🗓 นัดหมาย</button><button class="dr-tab" onclick="drTab(this,\'docs\')">📄 เอกสาร</button><button class="dr-tab" onclick="drTab(this,\'eval\')">⭐ ประเมิน</button></div></div><div class="dr-body"><div class="dr-pane show" id="pane-info">'+b+'</div><div class="dr-pane" id="pane-appt">'+appt+'</div><div class="dr-pane" id="pane-docs">'+docs+'</div><div class="dr-pane" id="pane-eval">'+evalC+'</div></div>'+foot;
  $('#scrim').classList.add('show');$('#drawer').classList.add('show');}
 function drTab(btn,name){var d=document.getElementById('drawer');if(!d)return;d.querySelectorAll('.dr-tab').forEach(function(x){x.classList.toggle('active',x===btn);});d.querySelectorAll('.dr-pane').forEach(function(p){p.classList.toggle('show',p.id==='pane-'+name);});}
@@ -1350,27 +1352,39 @@ function ipRunPlan(id){var t=IP_T.find(function(x){return x.id===id;});var w=par
  $('#ipPlanOut').innerHTML='<div class="aibox"><div style="font-size:12px;color:var(--purple);font-weight:600">AI แนะนำ (เศษน้อยสุด)</div><div style="font-size:28px;font-weight:700;color:var(--purple)">'+r.waste+'% <span style="font-size:13px;font-weight:500;color:var(--muted)">เศษวัสดุ</span></div><div style="font-size:12.5px;line-height:1.7;margin-top:4px">ม้วนหน้ากว้าง <b>'+r.rw+' ม.</b> · ตัด <b>'+r.strips+' เส้น</b> ('+r.dir+') ยาวเส้นละ <b>'+r.each+' ม.</b><br>วัสดุรวม ~<b>'+r.mat+' ตร.ม.</b> (พื้นที่จริง '+r.used+')</div></div>';toast('🤖 คำนวณแผนแล้ว');}
 function ipLogCall(id,by){var t=IP_T.find(function(x){return x.id===id;});t.callLogs.push({by:by,at:ipNow()});if(SB&&t.order){SB.from('install_jobs').update({call_logs:t.callLogs}).eq('order_no',t.order).then(function(){});}toast('📞 บันทึกเวลาโทรแล้ว');setTimeout(function(){ipOpen(id);},40);}
 function ipStageGate(t){
- var miss=[];
- function mark(el,bad){if(el)el.style.borderColor=bad?'var(--red)':'';}
+ var miss=[],els=[];
+ function mark(el,bad){if(el){el.style.borderColor=bad?'var(--red)':'';if(bad)els.push(el);}}
  if(t.stage===4){
   var addr=$('#ipf_addr'),loc=$('#ipf_loc'),w=$('#ipp_w'),l=$('#ipp_l');
-  var ab=!(addr&&addr.value.trim());mark(addr,ab);if(ab)miss.push('ที่อยู่');
+  var ab=!(addr&&addr.value.trim());mark(addr,ab);if(ab)miss.push('ที่อยู่ลูกค้า');
   var lb=!(loc&&loc.value.trim());mark(loc,lb);if(lb)miss.push('พิกัด');
-  var wb=!(w&&parseFloat(w.value)>0);mark(w,wb);if(wb)miss.push('กว้าง');
-  var l2=!(l&&parseFloat(l.value)>0);mark(l,l2);if(l2)miss.push('ยาว');
+  var wb=!(w&&parseFloat(w.value)>0);mark(w,wb);if(wb)miss.push('กว้าง (ตร.ม.)');
+  var l2=!(l&&parseFloat(l.value)>0);mark(l,l2);if(l2)miss.push('ยาว (ตร.ม.)');
   var phs=[].slice.call(document.querySelectorAll('#drawer .grid3 .upl'));
   phs.forEach(function(p){p.style.borderColor=p.classList.contains('set')?'':'var(--red)';});
-  if(!(phs.length===3&&phs.every(function(p){return p.classList.contains('set');})))miss.push('รูป 3 มุม');
+  if(!(phs.length===3&&phs.every(function(p){return p.classList.contains('set');}))){miss.push('รูปพื้นที่ 3 มุม');var uf=phs.filter(function(p){return !p.classList.contains('set');})[0];if(uf)els.push(uf);}
   if(!wb&&!l2)t.area=Object.assign({},t.area,{w:w.value,l:l.value});
  }
  if(t.stage===3&&(!t.callLogs||!t.callLogs.length))miss.push('บันทึกการโทร');
- [].slice.call(document.querySelectorAll('#drawer .evi, #drawer .upl[data-evi]')).forEach(function(c){if(!c.classList.contains('set')){c.style.borderColor='var(--red)';miss.push(c.getAttribute('data-evi')||'หลักฐาน');}else c.style.borderColor='';});
- return miss;
+ [].slice.call(document.querySelectorAll('#drawer .evi, #drawer .upl[data-evi]')).forEach(function(c){if(!c.classList.contains('set')){c.style.borderColor='var(--red)';miss.push(c.getAttribute('data-evi')||'หลักฐาน');els.push(c);}else c.style.borderColor='';});
+ return {miss:miss,els:els};
 }
+function ipTabOf(el,d){var pane=el&&el.closest?el.closest('.dr-pane'):null;if(!pane)return null;var nm=pane.id.replace('pane-','');var tab=[].slice.call(d.querySelectorAll('.dr-tab')).find(function(x){return (x.getAttribute('onclick')||'').indexOf("'"+nm+"'")>=0;});return {nm:nm,tab:tab};}
+function ipShowGate(res){
+ var d=document.getElementById('drawer');if(!d)return;
+ var box=document.getElementById('drGate');
+ if(box){box.style.display='';box.innerHTML='<div style="font-weight:700;color:var(--red);font-size:12.5px;margin-bottom:7px">⚠ ยังไปต่อไม่ได้ — ต้องทำให้ครบ ('+res.miss.length+')</div><div style="display:flex;flex-wrap:wrap;gap:6px">'+res.miss.map(function(m){return '<span style="background:#fff;border:1px solid #E9C2BD;color:var(--red);border-radius:20px;padding:3px 11px;font-size:11.5px;font-weight:600">○ '+m+'</span>';}).join('')+'</div>';}
+ d.querySelectorAll('.dr-tab.gate-miss').forEach(function(x){x.classList.remove('gate-miss');});
+ res.els.forEach(function(el){var to=ipTabOf(el,d);if(to&&to.tab)to.tab.classList.add('gate-miss');});
+ var first=res.els[0];
+ if(first){var to=ipTabOf(first,d);if(to&&to.tab)drTab(to.tab,to.nm);setTimeout(function(){try{first.scrollIntoView({behavior:'smooth',block:'center'});if(first.focus&&/INPUT|SELECT|TEXTAREA/.test(first.tagName))first.focus();}catch(e){}},90);}
+ toast('⚠ ยังขาด '+res.miss.length+' อย่าง — ดูกล่องแดงเหนือปุ่ม');
+}
+function ipClearGate(){var b=document.getElementById('drGate');if(b){b.style.display='none';b.innerHTML='';}var d=document.getElementById('drawer');if(d)d.querySelectorAll('.dr-tab.gate-miss').forEach(function(x){x.classList.remove('gate-miss');});}
 function ipAdv(id){var t=IP_T.find(function(x){return x.id===id;});var a=$('#ipf_addr');if(a)t.addr=a.value;var lo=$('#ipf_loc');if(lo)t.loc=lo.value;
- var miss=ipStageGate(t);if(miss.length){toast('⚠ หลักฐานไม่ครบ — ยังขาด: '+miss.join(', '));return;}
+ var res=ipStageGate(t);if(res.miss.length){ipShowGate(res);return;}ipClearGate();
  if(t.stage<IP_LAST){t.stage++;toast('▶ ย้ายไปถัง '+t.stage+': '+IP_STAGES[t.stage-1][0]);}ipSaveStage(t.order,t.stage,t.status);ipRenderBoard();ipOpen(id);}
-function ipFinish(id){var t=IP_T.find(function(x){return x.id===id;});var miss=ipStageGate(t);if(miss.length){toast('⚠ ปิดงานไม่ได้ — ยังขาด: '+miss.join(', '));return;}t.done=true;toast('✅ ปิดงาน '+t.ticket);closeDrawer();ipRenderBoard();}
+function ipFinish(id){var t=IP_T.find(function(x){return x.id===id;});var res=ipStageGate(t);if(res.miss.length){ipShowGate(res);return;}ipClearGate();t.done=true;toast('✅ ปิดงาน '+t.ticket);closeDrawer();ipRenderBoard();}
 function ipLink(id){var t=IP_T.find(function(x){return x.id===id;});var v=($('#ipf_link').value||'').trim();if(!v){toast('ใส่เลขออเดอร์ก่อน');return;}t.order=v;t.linked=true;toast('🔗 เชื่อมออเดอร์ #'+v);ipRenderBoard();ipOpen(id);}
 function ipOpenCreate(){$('#ipCm').classList.add('show');}
 function ipCloseCreate(){$('#ipCm').classList.remove('show');}
