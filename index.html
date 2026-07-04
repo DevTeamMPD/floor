@@ -1949,6 +1949,12 @@ function ohOpenDetail(orderNo){
     if(tpl){
       pane3+='<div style="padding:10px 14px 14px;border-top:1px solid var(--line2)'+(ok?';background:#FAFBFC':'')+'">';
       pane3+='<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">'+(ok?'✏️ แก้ไข':'📝 กรอกข้อมูล')+'</div>';
+      // File attach zone — moved to TOP so technicians can scan first
+      pane3+='<label style="display:flex;align-items:center;justify-content:center;gap:10px;padding:14px;border:1.5px dashed var(--brand);border-radius:11px;cursor:pointer;background:var(--brand-l);color:var(--brand);font-size:13.5px;font-weight:700;margin-bottom:6px">'
+        +'<span style="font-size:24px">📷</span> สแกน / แนบเอกสาร (รูปภาพ / PDF)'
+        +'<input type="file" id="drDoc_'+ft+'_files" accept="image/*,application/pdf" capture="environment" multiple style="display:none" onchange="ohPreviewAttach(this,\''+ft+'\')">'
+        +'</label>';
+      pane3+='<div id="drDoc_'+ft+'_prevs" style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px"></div>';
       tpl.groups.forEach(function(g){
         pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--brand);margin:9px 0 5px;padding-top:6px;border-top:1px solid var(--line2)">'+g.h+'</div>';
         g.f.forEach(function(fd){
@@ -2005,15 +2011,6 @@ function ohOpenDetail(orderNo){
         pane3+='<div style="font-size:10.5px;font-weight:700;color:var(--green);margin:10px 0 5px">🔁 จำนวนที่เหลือ / คืนกลับ</div>';
         pane3+=iRow(3,'ม้วนที่ 1','var(--green)')+iRow(4,'ม้วนที่ 2','var(--green)')+iRow(5,'ม้วนที่ 3','var(--green)');
       }
-      // File attach zone
-      pane3+='<div style="margin-top:10px">'
-        +'<div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:5px">📎 แนบเอกสาร / รูปถ่าย</div>'
-        +'<label style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:1.5px dashed var(--brand);border-radius:10px;cursor:pointer;background:var(--brand-l);color:var(--brand);font-size:12.5px;font-weight:600">'
-        +'<span style="font-size:20px">📁</span> เลือกไฟล์ (รูปภาพ / PDF)'
-        +'<input type="file" id="drDoc_'+ft+'_files" accept="image/*,application/pdf" multiple style="display:none" onchange="ohPreviewAttach(this,\''+ft+'\')">'
-        +'</label>'
-        +'<div id="drDoc_'+ft+'_prevs" style="display:flex;flex-wrap:wrap;gap:7px;margin-top:8px"></div>'
-        +'</div>';
       pane3+='<button class="btn primary" style="width:100%;margin-top:10px;font-size:13px" onclick="ohSaveDoc(\''+esc(String(t.order))+'\',\''+ft+'\')">💾 บันทึกเอกสาร</button>';
       pane3+='</div>';
     }
