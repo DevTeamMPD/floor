@@ -1279,25 +1279,45 @@ function ipRenderBoard(){var h='';IP_STAGES.forEach(function(s,i){var st=i+1;var
  var b=$('#installBoard'); if(b)b.innerHTML=h; var nb=$('#nbInst'); if(nb)nb.textContent=IP_T.length;}
 function ipCalc(w,l,rolls){var best=null;rolls.forEach(function(rw){[[w,l],[l,w]].forEach(function(o,idx){var strips=Math.ceil(o[0]/rw);var each=o[1];var mat=strips*rw*each;var used=w*l;var waste=(mat-used)/mat*100;var c={rw:rw,strips:strips,each:+each.toFixed(2),mat:+mat.toFixed(2),used:+used.toFixed(2),waste:+waste.toFixed(1),dir:idx===0?'ตามแนวกว้าง':'ตามแนวยาว'};if(!best||c.waste<best.waste)best=c;});});return best;}
 function ipCallLog(t){if(!t.callLogs.length)return '<div style="font-size:11.5px;color:var(--gray);margin-top:8px">ยังไม่มีบันทึกการโทร</div>';return '<div style="margin-top:10px"><div style="font-size:11px;color:var(--muted);font-weight:700;margin-bottom:4px">ประวัติการโทร (track)</div>'+t.callLogs.map(function(c){return '<div class="callrow">📞 '+c.by+' · '+c.at+'</div>';}).join('')+'</div>';}
+var IP_BUCKET='job-files';
+function sbUploadFile(file,path){
+ return new Promise(function(resolve){
+  try{
+   if(!SB||!SB.storage){resolve(null);return;}
+   SB.storage.from(IP_BUCKET).upload(path,file,{upsert:true,contentType:file.type||'application/octet-stream'}).then(function(r){
+    if(r&&r.error){resolve(null);return;}
+    try{var pub=SB.storage.from(IP_BUCKET).getPublicUrl(path);resolve((pub&&pub.data&&pub.data.publicUrl)||null);}catch(e){resolve(null);}
+   },function(){resolve(null);});
+  }catch(e){resolve(null);}
+ });
+}
 function ipUplBox(id,key,label,evi){
  var t=IP_T.find(function(x){return x.id===id;});
  var has=t&&t.sitePhotos&&t.sitePhotos[key];
- var body=has?((/^image\//.test(has.type||'')?'<img src="'+has.data+'">':'<div style="font-size:26px">📄</div>')+'<div class="upl-name">✔ '+has.name+'</div>'):label;
+ var src=has?(has.url||has.data||''):'';
+ var body=has?(((/^image\//.test(has.type||''))&&src?'<img src="'+src+'">':'<div style="font-size:26px">📄</div>')+'<div class="upl-name">✔ '+has.name+'</div>'):label;
  return '<label class="upl'+(has?' set':'')+'"'+(evi?' data-evi="'+evi+'"':'')+'><input type="file" accept="image/*,application/pdf" capture="environment" hidden onchange="ipAttach(this,'+id+',\''+key+'\')"><span class="upl-body">'+body+'</span></label>';
 }
 function ipAttach(input,id,key){
  var f=input.files&&input.files[0];if(!f)return;
- var box=input.closest('.upl');
- var reader=new FileReader();
- reader.onload=function(e){
-  var t=IP_T.find(function(x){return x.id===id;});
-  if(t){t.sitePhotos=t.sitePhotos||{};t.sitePhotos[key]={name:f.name,data:e.target.result,type:f.type};}
-  box.classList.add('set');box.style.borderColor='';
-  var isImg=/^image\//.test(f.type);
-  box.querySelector('.upl-body').innerHTML=(isImg?'<img src="'+e.target.result+'">':'<div style="font-size:26px">📄</div>')+'<div class="upl-name">✔ '+f.name+'</div>';
-  toast('📎 แนบไฟล์ '+f.name+' แล้ว');
- };
- reader.readAsDataURL(f);
+ var box=input.closest('.upl');var bodyEl=box.querySelector('.upl-body');
+ var t=IP_T.find(function(x){return x.id===id;});
+ bodyEl.innerHTML='<div style="font-size:11px;color:var(--muted)">⏳ กำลังอัปโหลด...</div>';
+ var clean=f.name.replace(/[^a-zA-Z0-9._-]/g,'_');var ext=(clean.match(/\.[a-zA-Z0-9]+$/)||[''])[0];
+ var path=(t&&t.order?String(t.order):'x')+'/'+key+ext;
+ sbUploadFile(f,path).then(function(url){
+  var reader=new FileReader();
+  reader.onload=function(e){
+   var rec={name:f.name,type:f.type};if(url)rec.url=url;else rec.data=e.target.result;
+   if(t){t.sitePhotos=t.sitePhotos||{};t.sitePhotos[key]=rec;
+    if(SB&&t.order)SB.from('install_jobs').update({site_photos:t.sitePhotos}).eq('order_no',t.order).then(function(){});}
+   box.classList.add('set');box.style.borderColor='';
+   var isImg=/^image\//.test(f.type);var src=url||e.target.result;
+   bodyEl.innerHTML=(isImg?'<img src="'+src+'">':'<div style="font-size:26px">📄</div>')+'<div class="upl-name">✔ '+f.name+(url?'':' · ในเครื่อง')+'</div>';
+   toast(url?'☁ อัปโหลดขึ้น Storage แล้ว':'📎 แนบไฟล์ (ยังไม่มี bucket — เก็บในเครื่อง)');
+  };
+  reader.readAsDataURL(f);
+ });
 }
 function ipDataCard(t){
  var sh=String(t.shift||'1');var rl='display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:7px 10px;border-radius:9px;font-size:12px;cursor:pointer';
@@ -1356,10 +1376,13 @@ function ipLogCall(id,by){var t=IP_T.find(function(x){return x.id===id;});t.call
 function ipStageGate(t){
  var miss=[],els=[];
  function mark(el,bad){if(el){el.style.borderColor=bad?'var(--red)':'';if(bad)els.push(el);}}
+ if(t.stage===2){
+  var addr2=$('#ipf_addr'),loc2=$('#ipf_loc');
+  var a2=!(addr2&&addr2.value.trim());mark(addr2,a2);if(a2)miss.push('ที่อยู่ลูกค้า');
+  var lo2=!(loc2&&loc2.value.trim());mark(loc2,lo2);if(lo2)miss.push('พิกัด');
+ }
  if(t.stage===5){
-  var addr=$('#ipf_addr'),loc=$('#ipf_loc'),w=$('#ipp_w'),l=$('#ipp_l');
-  var ab=!(addr&&addr.value.trim());mark(addr,ab);if(ab)miss.push('ที่อยู่ลูกค้า');
-  var lb=!(loc&&loc.value.trim());mark(loc,lb);if(lb)miss.push('พิกัด');
+  var w=$('#ipp_w'),l=$('#ipp_l');
   var wb=!(w&&parseFloat(w.value)>0);mark(w,wb);if(wb)miss.push('กว้าง (ตร.ม.)');
   var l2=!(l&&parseFloat(l.value)>0);mark(l,l2);if(l2)miss.push('ยาว (ตร.ม.)');
   var phs=[].slice.call(document.querySelectorAll('#drawer .grid3 .upl'));
