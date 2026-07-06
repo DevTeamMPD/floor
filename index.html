@@ -1262,7 +1262,7 @@ const IP_STAGES=[
 ["โทรยืนยันก่อนถึง","#854F0B","#FAEEDA","DC","บันทึกการโทร (โทรก่อนถึง ≥10 นาที)"],
 ["วัดพื้นที่–ลองตัวอย่าง","#0F6E56","#E1F5EE","DC","จำนวนตร.ม. + ให้ลูกค้าลองตัวอย่าง"],
 ["ยืนยันพื้นที่ + อนุญาตเริ่มติดตั้ง","#7C3AED","#F1EAFE","คุณเต้ย + เซล","คุณเต้ยยืนยันตร.ม. + เซลคอนเฟิร์ม + คุณเต้ยอนุญาต"],
-["ติดตั้ง","#1A8C70","#E1F5EE","DC","เริ่มหลังได้รับอนุญาตเท่านั้น"],
+["ติดตั้ง","#1A8C70","#E1F5EE","DC","ภาพเริ่มงาน 1 ภาพ (เริ่มหลังได้รับอนุญาตเท่านั้น)"],
 ["ตรวจ–ส่งมอบ–ปิดงาน","#15935E","#E5F4EC","DC / คุณเต้ย / เซล","ภาพหลังติดตั้ง + เก็บเงินครบ"]
 ];
 const IP_LAST=IP_STAGES.length;
@@ -1411,7 +1411,8 @@ function ipOpen(id){IP_ACTIVE_MODE='admin';IP_ACTIVE_ID=id;var t=IP_T.find(funct
  if(t.stage===4){b+='<div class="dr-card"><h4>🗓️ ยืนยันนัด + เข้าคิวช่าง</h4><div class="fi"><label>ผลการโทร / โน้ต</label><input id="ip_note" placeholder="เช่น รับสาย นัดติดตั้งได้"></div><div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">ตั้งวันนัด/กะช่าง ที่การ์ด “ข้อมูลงาน” ด้านบน</div><button class="btn primary sm" style="width:100%" onclick="ipBook('+t.id+')">✅ ยืนยันนัด + เข้าคิวช่าง → ถัดไป</button></div>';}
  if(t.stage===5){b+='<div class="dr-card"><h4>📐 วัดพื้นที่ + ลองตัวอย่าง</h4><div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">รูปพื้นที่ขอไว้แล้วตั้งแต่ถัง "ส่งเอกสาร" — เข้าหน้างานแค่วัดจริง + ให้ลูกค้าลองตัวอย่าง</div>'+ipEviBox(t,'ให้ลูกค้าลองตัวอย่าง','ให้ลูกค้าลองแผ่นตัวอย่าง (สีตัวจบ)')+'</div>';}
  if(t.stage===6){b+='<div class="dr-card"><h4>✅ ยืนยันพื้นที่ + อนุญาตเริ่มติดตั้ง</h4><div class="field"><span class="fk">จำนวนตร.ม.</span><span class="fv"><b>'+((t.area&&t.area.w&&t.area.l)?(t.area.w+' × '+t.area.l+' ม.'):'— ยังไม่มีข้อมูล —')+'</b></span></div>'+ipEviBox(t,'คุณเต้ยยืนยันตร.ม.','คุณเต้ยยืนยันจำนวนตร.ม. ในกลุ่ม','margin-top:10px')+ipEviBox(t,'เซลคอนเฟิร์มตร.ม.','เซลคอนเฟิร์มตร.ม. ในกลุ่ม','margin-top:8px')+ipEviBox(t,'คุณเต้ยอนุญาต','คุณเต้ยอนุญาตเริ่มติดตั้ง','margin-top:8px')+'<div style="font-size:11.5px;color:var(--red);margin-top:8px">⛔ ห้ามเริ่มติดตั้งก่อนได้รับอนุญาตครบทั้งสอง</div></div>';}
- if(t.stage===7){b+='<div class="dr-card"><h4>🚧 กำลังติดตั้ง (DC)</h4><div style="font-size:12.5px;color:var(--muted);line-height:1.6">เริ่มติดตั้งได้หลังผ่านขั้น “อนุญาต” แล้ว · กดถัดไปเมื่อติดตั้งเสร็จ</div></div>';}
+ if(t.stage===7){docs+='<div class="dr-card"><h4>📷 ภาพเริ่มงาน</h4>'+ipUplBox(t.id,'before','ถ่ายรูปหน้างานก่อนเริ่มติดตั้ง','ภาพเริ่มงาน')+'</div>';
+  b+='<div class="dr-card"><h4>🚧 กำลังติดตั้ง (DC)</h4><div style="font-size:12.5px;color:var(--muted);line-height:1.6">เริ่มติดตั้งได้หลังผ่านขั้น “อนุญาต” แล้ว · ถ่ายภาพเริ่มงาน 1 ภาพก่อนลงมือ แล้วกดถัดไปเมื่อติดตั้งเสร็จ</div></div>';}
  if(t.stage===IP_LAST){docs+='<div class="dr-card"><h4>📷 ส่งมอบงาน (DC)</h4>'+ipUplBox(t.id,'after','ถ่ายภาพหลังติดตั้ง + เอกสารส่งมอบ','ภาพหลังติดตั้ง')+'</div>';
   b+='<div class="dr-card"><h4>💰 ปิดงาน (เซล)</h4>'+ipEviBox(t,'เก็บเงินครบ','เก็บเงินส่วนที่เหลือครบแล้ว')+'</div>';}
  if(t.stage===4){call+='<div class="dr-card"><h4>📞 โทรยืนยันก่อนถึง (≥10 นาที)</h4><a class="btn ok sm" href="tel:" onclick="ipLogCall('+t.id+',\'ทีม DC\');return false;">📞 โทรลูกค้า (บันทึกเวลา)</a>'+ipCallLog(t)+'</div>';}
@@ -1535,7 +1536,8 @@ function ipDCContent(t){
     +'<div class="dcv-card"><h4>🧪 ลองตัวอย่าง</h4><div style="font-size:12px;color:var(--muted);margin-bottom:10px">รูปพื้นที่ขอจากลูกค้าไว้แล้วตั้งแต่ขั้นเอกสาร ไม่ต้องถ่ายซ้ำ</div>'+ipEviBox(t,'ให้ลูกค้าลองตัวอย่าง','ให้ลูกค้าลองแผ่นตัวอย่าง (สีตัวจบ)')+'</div>';
   }
   if(t.stage===7){
-   body='<div class="dcv-card"><h4>🚧 เริ่มติดตั้งได้แล้ว</h4><div style="font-size:12.5px;color:var(--muted);line-height:1.6">ผ่านการอนุญาตจากคุณเต้ยและเซลแล้ว กดปุ่มด้านล่างเมื่อติดตั้งเสร็จ</div></div>';
+   body='<div class="dcv-card"><h4>🚧 เริ่มติดตั้งได้แล้ว</h4><div style="font-size:12.5px;color:var(--muted);line-height:1.6">ผ่านการอนุญาตจากคุณเต้ยและเซลแล้ว — ถ่ายรูปหน้างาน 1 ภาพก่อนเริ่ม แล้วกดปุ่มด้านล่างเมื่อติดตั้งเสร็จ</div></div>'
+    +'<div class="dcv-card"><h4>📷 ภาพเริ่มงาน</h4>'+ipUplBox(t.id,'before','ถ่ายรูปหน้างานก่อนเริ่มติดตั้ง','ภาพเริ่มงาน')+'</div>';
   }
   if(t.stage===IP_LAST){
    body='<div class="dcv-card"><h4>📷 ส่งมอบงาน</h4>'+ipUplBox(t.id,'after','ถ่ายภาพหลังติดตั้ง + เอกสารส่งมอบ','ภาพหลังติดตั้ง')+'</div>';
