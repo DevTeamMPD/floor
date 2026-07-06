@@ -1257,10 +1257,10 @@ function wzManual(){ wzGo(3); var sp=document.getElementById('scanPrev'); if(sp)
 /* ===== Install Pipeline module (merged) — real Supabase install_jobs ===== */
 const IP_STAGES=[
 ["จองคิว / รับออร์เดอร์","#534AB7","#EEEDFE","เซล",""],
-["ส่งเอกสาร–รับเซ็น","#185FA5","#E6F1FB","เซล","เอกสารที่ลูกค้าเซ็นกลับ"],
+["ส่งเอกสาร–รับเซ็น","#185FA5","#E6F1FB","เซล","เอกสารที่ลูกค้าเซ็นกลับ + รูปพื้นที่ 3 มุม (ขอจากลูกค้า)"],
 ["เบิกของ + อัปโหลดเอกสารเบิก","#B45309","#FDECD4","DC / คลัง","เอกสารการเบิกของ (ก่อนออกไป)"],
 ["โทรยืนยันก่อนถึง","#854F0B","#FAEEDA","DC","บันทึกการโทร (โทรก่อนถึง ≥10 นาที)"],
-["วัดพื้นที่–ลองตัวอย่าง–ถ่ายภาพ","#0F6E56","#E1F5EE","DC","รูปถ่ายพื้นที่ + จำนวนตร.ม."],
+["วัดพื้นที่–ลองตัวอย่าง","#0F6E56","#E1F5EE","DC","จำนวนตร.ม. + ให้ลูกค้าลองตัวอย่าง"],
 ["ยืนยันพื้นที่ + อนุญาตเริ่มติดตั้ง","#7C3AED","#F1EAFE","คุณเต้ย + เซล","คุณเต้ยยืนยันตร.ม. + เซลคอนเฟิร์ม + คุณเต้ยอนุญาต"],
 ["ติดตั้ง","#1A8C70","#E1F5EE","DC","เริ่มหลังได้รับอนุญาตเท่านั้น"],
 ["ตรวจ–ส่งมอบ–ปิดงาน","#15935E","#E5F4EC","DC / คุณเต้ย / เซล","ภาพหลังติดตั้ง + เก็บเงินครบ"]
@@ -1405,10 +1405,11 @@ function ipOpen(id){IP_ACTIVE_MODE='admin';IP_ACTIVE_ID=id;var t=IP_T.find(funct
   +'<div class="field"><span class="fk">ที่มา</span><span class="fv">'+(t.via==='planner'?'Planner':(t.via==='auto'?'จากออเดอร์ (อัตโนมัติ)':'สร้างเอง'))+'</span></div>'+'<div class="field"><span class="fk">วันนัดติดตั้ง</span><span class="fv">'+(t.due||'—')+'</span></div>'+'<div class="field wide"><span class="fk">ผู้รับผิดชอบ</span><span class="fv" style="max-width:60%">'+((t.assignees&&t.assignees.length)?t.assignees.join(', '):'—')+'</span></div>'+(t.tech?'<div class="field"><span class="fk">ช่างติดตั้ง</span><span class="fv">👷 '+t.tech+'</span></div>':'')+(t.accept?'<div class="field"><span class="fk">ตรวจรับงาน</span><span class="fv">'+(t.accept==='ok'?'✅ ตรวจสอบแล้ว':'⚠ มีรายการแก้ไข')+'</span></div>':'')+'</div></div>';
  var docs='',call='';
  b='<div class="dr-card" style="border-left:3px solid '+s[1]+'"><h4>ขั้นตอนนี้ (SOP)</h4><div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv"><b>'+ipRole(t.stage)+'</b></span></div>'+(ipEvi(t.stage)?'<div class="field"><span class="fk">หลักฐานที่ต้องมี</span><span class="fv" style="max-width:62%">'+ipEvi(t.stage)+'</span></div>':'')+'</div>'+b+ipDataCard(t);
- if(t.stage===2){docs+='<div class="dr-card"><h4>📄 เอกสารข้อตกลง (เซล)</h4>'+ipUplBox(t.id,'signed','อัปโหลดเอกสารที่ลูกค้าเซ็นกลับ','เอกสารเซ็นกลับ')+'</div>';}
+ if(t.stage===2){docs+='<div class="dr-card"><h4>📄 เอกสารข้อตกลง (เซล)</h4>'+ipUplBox(t.id,'signed','อัปโหลดเอกสารที่ลูกค้าเซ็นกลับ','เอกสารเซ็นกลับ')+'</div>';
+  docs+='<div class="dr-card"><h4>📷 รูปพื้นที่ (3 มุม)</h4><div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">ขอรูปพื้นที่จากลูกค้า 3 มุม (สูง/กว้าง/แปลน) แล้วอัปโหลดแทนลูกค้า ไม่ต้องรอช่างไปถ่ายหน้างาน</div><div class="grid3" style="margin-top:4px">'+ipUplBox(t.id,'ph_top','＋ มุมสูง','')+ipUplBox(t.id,'ph_wide','＋ มุมกว้าง','')+ipUplBox(t.id,'ph_plan','＋ แปลน','')+'</div></div>';}
  if(t.stage===3){docs+='<div class="dr-card"><h4>📦 เบิกของ + เอกสารการเบิก (ก่อนออกไป)</h4><div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">ช่างเบิกของออกจากคลัง แล้วอัปโหลดเอกสารการเบิกก่อนออกไปหน้างาน</div>'+ipUplBox(t.id,'issue_doc','อัปโหลดเอกสารการเบิกของ','เอกสารการเบิก')+'</div>';}
  if(t.stage===4){b+='<div class="dr-card"><h4>🗓️ ยืนยันนัด + เข้าคิวช่าง</h4><div class="fi"><label>ผลการโทร / โน้ต</label><input id="ip_note" placeholder="เช่น รับสาย นัดติดตั้งได้"></div><div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">ตั้งวันนัด/กะช่าง ที่การ์ด “ข้อมูลงาน” ด้านบน</div><button class="btn primary sm" style="width:100%" onclick="ipBook('+t.id+')">✅ ยืนยันนัด + เข้าคิวช่าง → ถัดไป</button></div>';}
- if(t.stage===5){docs+='<div class="dr-card"><h4>📷 รูปพื้นที่ (3 มุม)</h4><div class="grid3" style="margin-top:4px">'+ipUplBox(t.id,'ph_top','＋ มุมสูง','')+ipUplBox(t.id,'ph_wide','＋ มุมกว้าง','')+ipUplBox(t.id,'ph_plan','＋ แปลน','')+'</div>'+ipEviBox(t,'ให้ลูกค้าลองตัวอย่าง','ให้ลูกค้าลองแผ่นตัวอย่าง (สีตัวจบ)','margin-top:8px')+'</div>';}
+ if(t.stage===5){b+='<div class="dr-card"><h4>📐 วัดพื้นที่ + ลองตัวอย่าง</h4><div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">รูปพื้นที่ขอไว้แล้วตั้งแต่ถัง "ส่งเอกสาร" — เข้าหน้างานแค่วัดจริง + ให้ลูกค้าลองตัวอย่าง</div>'+ipEviBox(t,'ให้ลูกค้าลองตัวอย่าง','ให้ลูกค้าลองแผ่นตัวอย่าง (สีตัวจบ)')+'</div>';}
  if(t.stage===6){b+='<div class="dr-card"><h4>✅ ยืนยันพื้นที่ + อนุญาตเริ่มติดตั้ง</h4><div class="field"><span class="fk">จำนวนตร.ม.</span><span class="fv"><b>'+((t.area&&t.area.w&&t.area.l)?(t.area.w+' × '+t.area.l+' ม.'):'— ยังไม่มีข้อมูล —')+'</b></span></div>'+ipEviBox(t,'คุณเต้ยยืนยันตร.ม.','คุณเต้ยยืนยันจำนวนตร.ม. ในกลุ่ม','margin-top:10px')+ipEviBox(t,'เซลคอนเฟิร์มตร.ม.','เซลคอนเฟิร์มตร.ม. ในกลุ่ม','margin-top:8px')+ipEviBox(t,'คุณเต้ยอนุญาต','คุณเต้ยอนุญาตเริ่มติดตั้ง','margin-top:8px')+'<div style="font-size:11.5px;color:var(--red);margin-top:8px">⛔ ห้ามเริ่มติดตั้งก่อนได้รับอนุญาตครบทั้งสอง</div></div>';}
  if(t.stage===7){b+='<div class="dr-card"><h4>🚧 กำลังติดตั้ง (DC)</h4><div style="font-size:12.5px;color:var(--muted);line-height:1.6">เริ่มติดตั้งได้หลังผ่านขั้น “อนุญาต” แล้ว · กดถัดไปเมื่อติดตั้งเสร็จ</div></div>';}
  if(t.stage===IP_LAST){docs+='<div class="dr-card"><h4>📷 ส่งมอบงาน (DC)</h4>'+ipUplBox(t.id,'after','ถ่ายภาพหลังติดตั้ง + เอกสารส่งมอบ','ภาพหลังติดตั้ง')+'</div>';
@@ -1440,14 +1441,14 @@ function ipStageGate(t){
   var addr2=$('#ipf_addr'),loc2=$('#ipf_loc');
   var a2=!(addr2&&addr2.value.trim());mark(addr2,a2);if(a2)miss.push('ที่อยู่ลูกค้า');
   var lo2=!(loc2&&loc2.value.trim());mark(loc2,lo2);if(lo2)miss.push('พิกัด');
+  var phs2=[].slice.call(document.querySelectorAll(scope+' .grid3 .upl'));
+  phs2.forEach(function(p){p.style.borderColor=p.classList.contains('set')?'':'var(--red)';});
+  if(!(phs2.length===3&&phs2.every(function(p){return p.classList.contains('set');}))){miss.push('รูปพื้นที่ 3 มุม');var uf2=phs2.filter(function(p){return !p.classList.contains('set');})[0];if(uf2)els.push(uf2);}
  }
  if(t.stage===5){
   var w=$('#ipp_w'),l=$('#ipp_l');
   var wb=!(w&&parseFloat(w.value)>0);mark(w,wb);if(wb)miss.push('กว้าง (ตร.ม.)');
   var l2=!(l&&parseFloat(l.value)>0);mark(l,l2);if(l2)miss.push('ยาว (ตร.ม.)');
-  var phs=[].slice.call(document.querySelectorAll(scope+' .grid3 .upl'));
-  phs.forEach(function(p){p.style.borderColor=p.classList.contains('set')?'':'var(--red)';});
-  if(!(phs.length===3&&phs.every(function(p){return p.classList.contains('set');}))){miss.push('รูปพื้นที่ 3 มุม');var uf=phs.filter(function(p){return !p.classList.contains('set');})[0];if(uf)els.push(uf);}
   if(!wb&&!l2)t.area=Object.assign({},t.area,{w:w.value,l:l.value});
  }
  if(t.stage===4&&(!t.callLogs||!t.callLogs.length))miss.push('บันทึกการโทร');
@@ -1531,7 +1532,7 @@ function ipDCContent(t){
   }
   if(t.stage===5){
    body='<div class="dcv-card"><h4>📐 ขนาดพื้นที่ (ตร.ม.)</h4><div style="display:flex;gap:8px;align-items:center"><input id="ipp_w" style="flex:1;min-width:0" placeholder="กว้าง" value="'+((t.area&&t.area.w)||'')+'"><span>×</span><input id="ipp_l" style="flex:1;min-width:0" placeholder="ยาว" value="'+((t.area&&t.area.l)||'')+'"><button class="btn primary sm" onclick="ipRunPlan('+t.id+')">AI</button></div><div id="ipPlanOut"></div></div>'
-    +'<div class="dcv-card"><h4>📷 รูปพื้นที่ (3 มุม)</h4><div class="grid3" style="margin-top:4px">'+ipUplBox(t.id,'ph_top','＋ มุมสูง','')+ipUplBox(t.id,'ph_wide','＋ มุมกว้าง','')+ipUplBox(t.id,'ph_plan','＋ แปลน','')+'</div>'+ipEviBox(t,'ให้ลูกค้าลองตัวอย่าง','ให้ลูกค้าลองแผ่นตัวอย่าง (สีตัวจบ)','margin-top:8px')+'</div>';
+    +'<div class="dcv-card"><h4>🧪 ลองตัวอย่าง</h4><div style="font-size:12px;color:var(--muted);margin-bottom:10px">รูปพื้นที่ขอจากลูกค้าไว้แล้วตั้งแต่ขั้นเอกสาร ไม่ต้องถ่ายซ้ำ</div>'+ipEviBox(t,'ให้ลูกค้าลองตัวอย่าง','ให้ลูกค้าลองแผ่นตัวอย่าง (สีตัวจบ)')+'</div>';
   }
   if(t.stage===7){
    body='<div class="dcv-card"><h4>🚧 เริ่มติดตั้งได้แล้ว</h4><div style="font-size:12.5px;color:var(--muted);line-height:1.6">ผ่านการอนุญาตจากคุณเต้ยและเซลแล้ว กดปุ่มด้านล่างเมื่อติดตั้งเสร็จ</div></div>';
