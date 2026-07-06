@@ -93,7 +93,11 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
 .av i{width:23px;height:23px;border-radius:50%;background:var(--brand);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;margin-left:-6px;border:2px solid #fff;font-style:normal}
 .av i:first-child{margin-left:0}
 .scrim{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:40;display:none}.scrim.show{display:block}
-.drawer{position:fixed;top:50%;left:50%;transform:translate(-50%,-46%) scale(.96);width:560px;max-width:94vw;max-height:88vh;background:var(--bg);z-index:50;border-radius:16px;overflow:auto;box-shadow:0 24px 64px rgba(15,23,42,.32);opacity:0;visibility:hidden;transition:opacity .22s ease,transform .22s cubic-bezier(.4,0,.2,1)}
+.drawer{position:fixed;top:50%;left:50%;transform:translate(-50%,-46%) scale(.96);width:min(840px,94vw);max-width:94vw;max-height:90vh;background:var(--bg);z-index:50;border-radius:16px;overflow:auto;box-shadow:0 24px 64px rgba(15,23,42,.32);opacity:0;visibility:hidden;transition:opacity .22s ease,transform .22s cubic-bezier(.4,0,.2,1)}
+.field-grid{display:block}
+@media (min-width:640px){.field-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 28px}.field-grid .field.wide{grid-column:1/-1}}
+.fi-row{display:block}
+@media (min-width:640px){.fi-row{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}.fi-row .fi{margin-bottom:10px}}
 .drawer.show{opacity:1;visibility:visible;transform:translate(-50%,-50%) scale(1)}
 .dr-tabs{display:flex;gap:2px;margin-top:14px}
 .dr-tab{flex:1;padding:9px 6px;border:0;background:transparent;font-family:inherit;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
@@ -1379,8 +1383,7 @@ function ipDataCard(t){
  var prog=done.map(function(d){return '<span class="tag" style="background:'+(d[1]?'var(--green-l)':'var(--line2)')+';color:'+(d[1]?'var(--green)':'var(--gray)')+'">'+(d[1]?'✔ ':'○ ')+d[0]+'</span>';}).join(' ');
  return '<div class="dr-card"><h4>📋 ข้อมูลงาน (แก้ได้ทุกขั้น)</h4>'
   +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px">'+prog+'</div>'
-  +'<div class="fi"><label>ที่อยู่ลูกค้า</label><input id="ipf_addr" value="'+(t.addr||'')+'"></div>'
-  +'<div class="fi"><label>Location/พิกัด</label><input id="ipf_loc" value="'+(t.loc||'')+'"></div>'
+  +'<div class="fi-row"><div class="fi"><label>ที่อยู่ลูกค้า</label><input id="ipf_addr" value="'+(t.addr||'')+'"></div><div class="fi"><label>Location/พิกัด</label><input id="ipf_loc" value="'+(t.loc||'')+'"></div></div>'
   +'<div class="fi"><label>วันที่นัดติดตั้ง</label><input id="ip_due" type="date" value="'+(t.due||'')+'"></div>'
   +'<div class="fi"><label>กะช่าง</label><div style="display:flex;gap:8px;flex-wrap:wrap"><label style="'+rl+';flex:1 1 30%"><input type="radio" name="ip_shift" value="1"'+(sh==='1'?' checked':'')+'> กะ 1 · 09:00</label><label style="'+rl+';flex:1 1 30%"><input type="radio" name="ip_shift" value="2"'+(sh==='2'?' checked':'')+'> กะ 2 · 13:30</label><label style="'+rl+';flex:1 1 100%"><input type="radio" name="ip_shift" value="3"'+(sh==='3'?' checked':'')+'> ☀️ ปูทั้งวัน</label></div></div>'
   +'<div class="fi"><label>ขนาดพื้นที่ (ตร.ม.)</label><div style="display:flex;gap:8px;align-items:center"><input id="ipp_w" style="flex:1;min-width:0" placeholder="กว้าง" value="'+((t.area&&t.area.w)||'')+'"><span>×</span><input id="ipp_l" style="flex:1;min-width:0" placeholder="ยาว" value="'+((t.area&&t.area.l)||'')+'"><button class="btn primary sm" onclick="ipRunPlan('+t.id+')">AI</button></div><div id="ipPlanOut"></div></div>'
@@ -1394,12 +1397,12 @@ var IP_ACTIVE_MODE='admin',IP_ACTIVE_ID=null;
 function ipRefreshOpen(id){if(IP_ACTIVE_MODE==='dc'){var t=IP_T.find(function(x){return x.id===id;});if(t)ipOpenDC(t);}else{ipOpen(id);}}
 function ipOpen(id){IP_ACTIVE_MODE='admin';IP_ACTIVE_ID=id;var t=IP_T.find(function(x){return x.id===id;});if(!t)return;var s=IP_STAGES[t.stage-1];
  var steps='<div class="stg-track">'+IP_STAGES.map(function(_,i){var a=i<t.stage,cur=i===t.stage-1;return '<div class="stg-track-stp"><div class="stg-track-bar" style="background:'+(a?s[1]:'var(--line)')+'"></div><div class="stg-track-lbl" style="color:'+(cur?s[1]:'var(--muted)')+';font-weight:'+(cur?700:400)+'">'+(i+1)+'</div></div>';}).join('')+'</div>';
- var b='<div class="dr-card"><h4>ข้อมูล Ticket</h4>'
+ var b='<div class="dr-card"><h4>ข้อมูล Ticket</h4><div class="field-grid">'
   +'<div class="field"><span class="fk">เลขออเดอร์</span><span class="fv">'+(t.order?'#'+t.order:'<span style="color:var(--red)">ยังไม่เชื่อม</span>')+'</span></div>'
   +'<div class="field"><span class="fk">SKU</span><span class="fv">'+t.sku+'</span></div>'
-  +'<div class="field"><span class="fk">สินค้า</span><span class="fv">'+t.product+'</span></div>'
+  +'<div class="field wide"><span class="fk">สินค้า</span><span class="fv">'+t.product+'</span></div>'
   +'<div class="field"><span class="fk">ลูกค้า</span><span class="fv">'+t.customer+'</span></div>'
-  +'<div class="field"><span class="fk">ที่มา</span><span class="fv">'+(t.via==='planner'?'Planner':(t.via==='auto'?'จากออเดอร์ (อัตโนมัติ)':'สร้างเอง'))+'</span></div>'+'<div class="field"><span class="fk">วันนัดติดตั้ง</span><span class="fv">'+(t.due||'—')+'</span></div>'+'<div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv" style="max-width:60%">'+((t.assignees&&t.assignees.length)?t.assignees.join(', '):'—')+'</span></div>'+(t.tech?'<div class="field"><span class="fk">ช่างติดตั้ง</span><span class="fv">👷 '+t.tech+'</span></div>':'')+(t.accept?'<div class="field"><span class="fk">ตรวจรับงาน</span><span class="fv">'+(t.accept==='ok'?'✅ ตรวจสอบแล้ว':'⚠ มีรายการแก้ไข')+'</span></div>':'')+'</div>';
+  +'<div class="field"><span class="fk">ที่มา</span><span class="fv">'+(t.via==='planner'?'Planner':(t.via==='auto'?'จากออเดอร์ (อัตโนมัติ)':'สร้างเอง'))+'</span></div>'+'<div class="field"><span class="fk">วันนัดติดตั้ง</span><span class="fv">'+(t.due||'—')+'</span></div>'+'<div class="field wide"><span class="fk">ผู้รับผิดชอบ</span><span class="fv" style="max-width:60%">'+((t.assignees&&t.assignees.length)?t.assignees.join(', '):'—')+'</span></div>'+(t.tech?'<div class="field"><span class="fk">ช่างติดตั้ง</span><span class="fv">👷 '+t.tech+'</span></div>':'')+(t.accept?'<div class="field"><span class="fk">ตรวจรับงาน</span><span class="fv">'+(t.accept==='ok'?'✅ ตรวจสอบแล้ว':'⚠ มีรายการแก้ไข')+'</span></div>':'')+'</div></div>';
  var docs='',call='';
  b='<div class="dr-card" style="border-left:3px solid '+s[1]+'"><h4>ขั้นตอนนี้ (SOP)</h4><div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv"><b>'+ipRole(t.stage)+'</b></span></div>'+(ipEvi(t.stage)?'<div class="field"><span class="fk">หลักฐานที่ต้องมี</span><span class="fv" style="max-width:62%">'+ipEvi(t.stage)+'</span></div>':'')+'</div>'+b+ipDataCard(t);
  if(t.stage===2){docs+='<div class="dr-card"><h4>📄 เอกสารข้อตกลง (เซล)</h4>'+ipUplBox(t.id,'signed','อัปโหลดเอกสารที่ลูกค้าเซ็นกลับ','เอกสารเซ็นกลับ')+'</div>';}
