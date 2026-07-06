@@ -125,7 +125,7 @@ Floor/
 | คอลัมน์ | ชนิด | ความหมาย |
 |---------|------|----------|
 | `order_no` | text | เลขออเดอร์ (คีย์อ้างอิงหลัก, ใช้ `.eq('order_no', ...)`) |
-| `bill_no` | text | เลขบิล — **ถ้ามีบิลและ stage < 7 จะถูกดันเป็น stage 7 อัตโนมัติ** |
+| `bill_no` | text | เลขบิล (แสดงเป็น chip ใน popup — ไม่มี logic ดัน stage อัตโนมัติแล้ว, เอาออกไปตั้งแต่ 2026-07-02) |
 | `stage` | int | ถังใน Pipeline 1–8 (ดู `IP_STAGES` · `IP_LAST=8`=ปิดงาน) |
 | `status` | text | สถานะย่อยในถัง |
 | `due_date` | date | วันนัด/กำหนดส่ง |
@@ -135,14 +135,19 @@ Floor/
 | `product_skus` | array | รายการ SKU |
 | `customer_name` / `customer_code` | text | ลูกค้า |
 | `assignees` | array | ทีมช่างที่รับผิดชอบ |
+| `address` / `location` | text | ที่อยู่ลูกค้า / พิกัด (แก้ได้ทุกถัง ผ่านการ์ด "ข้อมูลงาน") |
+| `area_w` / `area_l` | numeric | ขนาดพื้นที่ (กว้าง×ยาว ตร.ม.) |
+| `call_logs` | jsonb array | ประวัติการโทร `{by, at}` |
+| `site_photos` | jsonb | ไฟล์แนบ/รูปที่อัปโหลดต่อถัง คีย์ตาม `key` ของ `ipUplBox` |
+| `confirmations` | jsonb | **(เพิ่ม 2026-07-06)** สถานะปุ่มยืนยันหลักฐาน `.evi` คีย์ตามข้อความ data-evi → `{at: เวลา}` — ทำให้ติ๊กแล้วไม่หายเมื่อเปิดตั๋วใหม่ (ก่อนหน้านี้เก็บแค่ใน DOM class ไม่ persist) |
 | `source` | text | ที่มา (`planner` / อื่นๆ) |
 | `created_via` | text | (`manual` / `auto`) |
 | `linked` | bool | เชื่อมข้อมูลแล้วหรือไม่ |
 | `updated_at` | timestamp | เวลาแก้ล่าสุด (เขียนทุกครั้งที่อัปเดต stage) |
 
 **การเขียนกลับ (write):**
-- `ipSaveStage()` → `update({stage, status, updated_at}).eq('order_no', ...)`
-- อัปเดตรายละเอียด → `update({stage, status, due_date, shift, updated_at})`
+- `ipSaveAll(t, extra)` **(เพิ่ม 2026-07-06, แทน `ipSaveStage`)** → เขียน `address/location/due_date/shift/area_w/area_l/updated_at` + `extra` (เช่น `{stage,status}`) **ในคำสั่งเดียว** — แก้บั๊กเดิมที่ `ipAdv()` (ปุ่ม "ทำขั้นนี้เสร็จ") เขียนแค่ `stage/status` ทำให้แก้ที่อยู่/พื้นที่แล้วกดไปต่อ **ข้อมูลหายเงียบๆ** เพราะไม่เคยถูกบันทึกจริง
+- `ipToggleEvi()` → `update({confirmations, updated_at})` ทุกครั้งที่ติ๊ก/ถอนติ๊กหลักฐาน
 
 ### 4.3 ตาราง `tech_queue`
 คิวนัดหมายช่าง — insert เมื่อจ่ายงานให้ทีม (`index.html:1157`):
@@ -247,7 +252,8 @@ API key อ่านจาก environment variable เท่านั้น (ไ
 
 | วันที่ | สิ่งที่ทำ | ไฟล์/ส่วนที่แตะ | ผู้ทำ |
 |--------|-----------|-----------------|-------|
-| 2026-07-06 | **รวมถัง 6+7 → เหลือ 8 ถัง** — รวม "คุณเต้ยสรุป/ยืนยันพื้นที่" (เดิมถัง 6) เข้ากับ "อนุญาตเริ่มติดตั้ง" (เดิมถัง 7) เป็นถังเดียว "ยืนยันพื้นที่ + อนุญาตเริ่มติดตั้ง" (หลักฐานครบ 3 อย่าง: คุณเต้ยยืนยันตร.ม./เซลคอนเฟิร์ม/คุณเต้ยอนุญาต ในการ์ดเดียว) เพื่อลด column บนบอร์ด (9→8) — ถัง "ติดตั้ง"/"ตรวจ–ส่งมอบ–ปิดงาน" เลื่อนเป็นถัง 7/8 · migrate DB `UPDATE install_jobs SET stage=stage-1 WHERE stage>=7` (25 แถว: stage8→7 ×6, stage9→8 ×19) | `index.html` (`IP_STAGES`, `ipOpen`), `PROJECT_DOCS.md` (§5.1), Supabase `install_jobs` | Claude |
+| 2026-07-06 | **แก้ปัญหา UX/data-integrity ที่พบจากรีวิว pipeline** — (1) **แก้ข้อมูลหายเงียบๆ**: `ipAdv()`/`ipSaveData()` ใช้ `ipSaveAll()` ร่วมกัน เขียนที่อยู่/พิกัด/นัด/กะ/พื้นที่ครบทุกครั้งที่กด "ทำขั้นนี้เสร็จ" (เดิมกดปุ่มนี้แล้วข้อมูลที่แก้ไม่ถูกบันทึกเลย) (2) **หลักฐานยืนยัน `.evi` persist ลง Supabase** คอลัมน์ใหม่ `confirmations` (`ipEviBox`/`ipToggleEvi`) — เดิมติ๊กแล้วปิด popup โดยไม่กดไปต่อ ข้อมูลหายไม่มีร่องรอย (3) **เพิ่มปุ่ม "◀ ย้อนกลับ"** (`ipBack`) ย้อนสเตจได้ 1 ขั้น พร้อม confirm (เดิมกดผิดสเตจแก้เองไม่ได้เลย) (4) แก้คำแนะนำค้าง "Pipeline Stage 3 เพื่อโทรนัด" → **Stage 4** (5) เลข "8 สเตจ"/"X สเตจ" ในหัวข้อ/Overview KPI เปลี่ยนเป็น interpolate จาก `IP_LAST` กันข้อความค้างซ้ำอีกรอบ (6) ปุ่ม "⬇ จำลองออเดอร์เข้า" (dev tool) **ซ่อนใน production** แสดงเฉพาะ `?dev=1` (7) แก้หน้าจอกระพริบตอนเปิดลิงก์แชร์ตั๋ว (เช็ค `?job=` ก่อนเรียก `go('overview')`) (8) **Accessibility**: การ์ดบอร์ด/ปุ่มยืนยันหลักฐาน กด Enter/Space ได้ (`tabindex`,`role`,`onkeydown`), input อัปโหลดไฟล์ใช้ `.visually-hidden` แทน `hidden` (อยู่ใน tab order), เพิ่ม `alt` ให้รูปที่แนบ · **ยังไม่ทำ**: drag-and-drop บนบอร์ด และการจำกัดสิทธิ์ลิงก์แชร์ตั๋ว (ต้องมีระบบ auth ก่อน) — ทิ้งไว้เป็นงานแยก | `index.html` (`ipSaveAll`,`ipSyncFields`,`ipEviBox`,`ipToggleEvi`,`ipBack`,`ipAdv`,`ipSaveData`, CSS), Supabase `install_jobs` (คอลัมน์ `confirmations`) | Claude |
+| 2026-07-06 | **รวมถัง 6+7 → เหลือ 8 ถัง** — รวม "คุณเต้ยสรุป/ยืนยันพื้นที่" (เดิมถัง 6) เข้ากับ "อนุญาตเริ่มติดตั้ง" (เดิมถัง 7) เป็นถังเดียว "ยืนยันพื้นที่ + อนุญาตเริ่มติดตั้ง" (หลักฐานครบ 3 อย่าง: คุณเต้ยยืนยันตร.ม./เซลคอนเฟิร์ม/คุณเต้ยอนุญาต ในการ์ดเดียว) เพื่อลด column บนบอร์ด (9→8) — ถัง "ติดตั้ง"/"ตรวจ–ส่งมอบ–ปิดงาน" เลื่อนเป็นถัง 7/8 · **⚠️ ต้อง migrate DB: `UPDATE install_jobs SET stage=stage-1 WHERE stage>=7` (25 แถว: stage8→7 ×6, stage9→8 ×19) — ยังไม่ได้รัน รอ confirm ก่อนรันกับข้อมูลจริง** | `index.html` (`IP_STAGES`, `ipOpen`), `PROJECT_DOCS.md` (§5.1), Supabase `install_jobs` | Claude |
 | 2026-07-06 | **ลิงก์แชร์ตั๋ว (deep-link)** — ปุ่ม "🔗 แชร์ตั๋ว" ใน popup คัดลอกลิงก์ `?job=<order>` (ส่งให้ช่างเปิดเฉพาะตั๋วนั้น) · เปิดลิงก์ `?job=` หรือ `#job=` → โหลดแล้วเปิด popup ตั๋วนั้นอัตโนมัติ (`ipShareLink`, `__pendingJob` ใน init + ohLoad) | `index.html` (`ipShareLink`, ipOpen header, init, ohLoad, `.dr-share` CSS) | Claude |
 | 2026-07-05 | **ปรับมือถือรอบใหม่ (หลังเพิ่มฟีเจอร์)** — popup กว้าง/สูงขึ้น (96vw/94vh) · แท็บ 4 อัน**ซ่อนไอคอนบนมือถือ** เหลือข้อความล้วน พอดีไม่โดนตัด · หน้า docs: inline `<code>` ยาว break ได้ (ไม่ล้น) · stepper เลข 9 อันเล็กลง · desktop ไม่กระทบ | `index.html` (mobile `<style>`, ipOpen tab markup) | Claude |
 | 2026-07-05 | **รัน migration 9 ถังสำเร็จ** (ผ่าน Supabase MCP `execute_sql`) — `UPDATE install_jobs SET stage=stage+1 WHERE stage>=3` · dist ใหม่ `{2:33,4:1,6:1,8:6,9:19}=60` · ข้อมูล prod ตรงกับโค้ด 9 ถังแล้ว · **Storage bucket ยังไม่ได้สร้าง** (ถูกบล็อก — public/anon เขียนบน PII ต้องให้คนสร้างเองใน dashboard) | Supabase `install_jobs` | Claude |
