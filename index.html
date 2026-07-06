@@ -1293,7 +1293,12 @@ function ipSaveBooking(t){if(!SB||!t.order)return;var sh=parseInt(t.shift,10)||1
 function ipNow(){return new Date().toLocaleString('th-TH',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'});}
 function ipCard(t){var via=t.via==='planner'?'<span class="tag" style="background:#FAEEDA;color:#854F0B">📋 Planner</span>':(t.via==='auto'?'<span class="tag t-auto">🔗 จากออเดอร์</span>':'<span class="tag t-man">✍ สร้างเอง</span>');var warn=(!t.linked)?' <span class="tag t-warn">รอเชื่อม</span>':'';var urgent=/ห้ามเลื่อน/.test(t.product||'')?' <span class="tag t-warn">⛔ ห้ามเลื่อน</span>':'';var due=t.due?'<div class="cu">📅 นัด '+t.due+'</div>':'';var asg=(t.assignees&&t.assignees.length)?'<div class="cu">👷 '+t.assignees.length+' คน</div>':'';
  return '<div class="cardt" tabindex="0" role="button" onclick="ipOpen('+t.id+')" onkeydown="if(event.key===\'Enter\'){this.click();}"><span class="tkn">'+t.ticket+' · #'+(''+t.order).slice(0,10)+'</span><b>'+t.product+'</b><div class="cu">👤 '+(t.customer||'-')+'</div>'+due+asg+via+warn+urgent+'</div>';}
-function ipRenderBoard(){var h='';IP_STAGES.forEach(function(s,i){var st=i+1;var items=IP_T.filter(function(t){return t.stage===st;}).sort(function(a,b){var ad=a.due||'9999-99-99',bd=b.due||'9999-99-99';return ad<bd?-1:(ad>bd?1:0);});
+function ipPool(){
+ if(!IP_ONLY_MINE)return IP_T;
+ var me=(ipWhoAmI()||'').toLowerCase();if(!me)return IP_T;
+ return IP_T.filter(function(t){return (t.assignees||[]).some(function(a){return (a||'').toLowerCase().indexOf(me)>=0;});});
+}
+function ipRenderBoard(){var h='';var pool=ipPool();IP_STAGES.forEach(function(s,i){var st=i+1;var items=pool.filter(function(t){return t.stage===st;}).sort(function(a,b){var ad=a.due||'9999-99-99',bd=b.due||'9999-99-99';return ad<bd?-1:(ad>bd?1:0);});
  h+='<div class="col"><h3><span class="dot" style="background:'+s[1]+'"></span>'+st+'. '+s[0]+'<span class="ct">'+items.length+'</span></h3>'+(items.map(ipCard).join('')||'<div style="font-size:11px;color:var(--gray);padding:8px 6px">—</div>')+'</div>';});
  var b=$('#installBoard'); if(b)b.innerHTML=h; var nb=$('#nbInst'); if(nb)nb.textContent=IP_T.length;}
 function ipCalc(w,l,rolls){var best=null;rolls.forEach(function(rw){[[w,l],[l,w]].forEach(function(o,idx){var strips=Math.ceil(o[0]/rw);var each=o[1];var mat=strips*rw*each;var used=w*l;var waste=(mat-used)/mat*100;var c={rw:rw,strips:strips,each:+each.toFixed(2),mat:+mat.toFixed(2),used:+used.toFixed(2),waste:+waste.toFixed(1),dir:idx===0?'ตามแนวกว้าง':'ตามแนวยาว'};if(!best||c.waste<best.waste)best=c;});});return best;}
@@ -1338,16 +1343,30 @@ function ipAttach(input,id,key){
   reader.readAsDataURL(f);
  });
 }
+function ipWhoAmI(){try{return localStorage.getItem('mpd_whoami')||'';}catch(e){return '';}}
+function ipSetWhoAmI(){
+ var name=window.prompt('ชื่อของคุณ (ใช้แสดงว่าใครกดยืนยัน และกรอง "ตั๋วของฉัน"):',ipWhoAmI());
+ if(name===null)return;
+ name=name.trim();
+ try{localStorage.setItem('mpd_whoami',name);}catch(e){}
+ ipRenderWhoAmI();ipRenderBoard();
+}
+function ipRenderWhoAmI(){var el=document.getElementById('ipWhoAmI');if(!el)return;var n=ipWhoAmI();el.textContent=n?('👤 '+n):'👤 ตั้งชื่อผู้ใช้';}
+let IP_ONLY_MINE=false;
+function ipToggleOnlyMine(cb){IP_ONLY_MINE=cb.checked;if(IP_ONLY_MINE&&!ipWhoAmI()){ipSetWhoAmI();if(!ipWhoAmI()){cb.checked=false;IP_ONLY_MINE=false;}}ipRenderBoard();}
 function ipEviBox(t,key,label,style){
- var on=!!(t.confirmations&&t.confirmations[key]);
- return '<div class="evi'+(on?' set':'')+'" tabindex="0" role="button"'+(style?' style="'+style+'"':'')+' data-evi="'+key+'" onclick="ipToggleEvi('+t.id+',\''+key+'\',this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}">'+label+'</div>';
+ var rec=(t.confirmations&&t.confirmations[key])||null;
+ var on=!!rec;
+ var sub=(on&&rec.by)?'<div style="font-size:10.5px;color:var(--muted);margin-top:2px">โดย '+rec.by+' · '+rec.at+'</div>':'';
+ return '<div class="evi'+(on?' set':'')+'" tabindex="0" role="button"'+(style?' style="'+style+'"':'')+' data-evi="'+key+'" onclick="ipToggleEvi('+t.id+',\''+key+'\',this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}">'+label+sub+'</div>';
 }
 function ipToggleEvi(id,key,el){
  var t=IP_T.find(function(x){return x.id===id;});if(!t)return;
  t.confirmations=t.confirmations||{};
  var on=!t.confirmations[key];
- if(on)t.confirmations[key]={at:ipNow()};else delete t.confirmations[key];
+ if(on)t.confirmations[key]={at:ipNow(),by:ipWhoAmI()||''};else delete t.confirmations[key];
  el.classList.toggle('set',on);el.style.borderColor='';
+ ipOpen(id);
  if(SB&&t.order)SB.from('install_jobs').update({confirmations:t.confirmations,updated_at:new Date().toISOString()}).eq('order_no',t.order).then(function(r){if(r.error)toast('⚠ บันทึกไม่สำเร็จ');});
 }
 function ipDataCard(t){
@@ -1473,7 +1492,7 @@ function ipRenderQueue(){var nbq=$('#nbQ');if(nbq)nbq.textContent=IP_QUEUE.lengt
   // view
   var wrap=document.querySelector('.wrap');
   var ipDevMode=/[?&]dev=1(&|$)/.test(location.search);
-  if(wrap){ wrap.insertAdjacentHTML('beforeend','<section class="view" id="v-install"><div class="toolbar" style="margin-bottom:14px;display:flex;align-items:center;gap:10px"><div style="font-size:12.5px;color:var(--muted)">งานติดตั้งจาก Supabase <span id="ipLive" style="margin-left:8px;font-weight:600">⏳ กำลังเชื่อมต่อ...</span></div><div style="flex:1"></div>'+(ipDevMode?'<button class="btn ghost sm" style="background:var(--bg);color:var(--ink2);border:1px dashed var(--line)" onclick="ipSim()">🧪 [Dev] จำลองออเดอร์เข้า</button>':'')+'</div><div class="board" id="installBoard"></div></section>'); }
+  if(wrap){ wrap.insertAdjacentHTML('beforeend','<section class="view" id="v-install"><div class="toolbar" style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-size:12.5px;color:var(--muted)">งานติดตั้งจาก Supabase <span id="ipLive" style="margin-left:8px;font-weight:600">⏳ กำลังเชื่อมต่อ...</span></div><div style="flex:1"></div><label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink2);cursor:pointer"><input type="checkbox" onchange="ipToggleOnlyMine(this)"> ตั๋วของฉัน</label><button class="btn ghost sm" id="ipWhoAmI" style="background:var(--bg);color:var(--ink2);border:1px solid var(--line)" onclick="ipSetWhoAmI()">👤 ตั้งชื่อผู้ใช้</button>'+(ipDevMode?'<button class="btn ghost sm" style="background:var(--bg);color:var(--ink2);border:1px dashed var(--line)" onclick="ipSim()">🧪 [Dev] จำลองออเดอร์เข้า</button>':'')+'</div><div class="board" id="installBoard"></div></section>'); ipRenderWhoAmI(); }
   // create modal
   document.body.insertAdjacentHTML('beforeend','<div class="modal-bg" id="ipCm"><div class="modal"><h2 style="font-size:17px;margin-bottom:14px">＋ สร้าง Ticket งานติดตั้งเอง</h2><div class="fi"><label>เลขออเดอร์ (เว้นว่างได้ — เชื่อมภายหลัง)</label><input id="ipc_order"></div><div class="fi"><label>SKU</label><input id="ipc_sku" placeholder="เช่น LDSSF002"></div><div class="fi"><label>ชื่อสินค้า</label><input id="ipc_prod"></div><div class="fi"><label>ชื่อลูกค้า</label><input id="ipc_cust"></div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px"><button class="btn ghost sm" style="background:var(--bg);color:var(--ink);border:1px solid var(--line)" onclick="ipCloseCreate()">ยกเลิก</button><button class="btn primary sm" onclick="ipDoCreate()">สร้าง</button></div></div></div>');
   // seed queue from jobs that already have an appointment date
