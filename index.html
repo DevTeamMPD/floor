@@ -1407,7 +1407,38 @@ function ipMultiAttach(input,id,key){
   reader.readAsDataURL(f);
  });
 }
-function ipWhoAmI(){try{return localStorage.getItem('mpd_whoami')||'';}catch(e){return '';}}
+var IP_AUTH_USER=null;
+function ipRefreshAuthUser(cb){
+ if(!SB||!SB.auth){IP_AUTH_USER=null;if(cb)cb();return;}
+ SB.auth.getSession().then(function(r){
+  var session=r&&r.data&&r.data.session;
+  if(!session){IP_AUTH_USER=null;if(cb)cb();return;}
+  SB.from('floor_users').select('*').eq('auth_user_id',session.user.id).then(function(fr){
+   var row=(fr&&fr.data&&fr.data[0])||null;
+   IP_AUTH_USER={id:session.user.id,email:session.user.email,name:(row&&row.name)||session.user.email,role:(row&&row.role)||null};
+   if(cb)cb();
+  });
+ });
+}
+function ipOpenLogin(){
+ if(IP_AUTH_USER){if(window.confirm('ออกจากระบบ '+(IP_AUTH_USER.name||IP_AUTH_USER.email)+' ใช่ไหม?'))ipLogout();return;}
+ var b=document.getElementById('ipLoginBody');
+ if(b)b.innerHTML='<div class="fi"><label>อีเมลที่ลงทะเบียนไว้</label><input id="ipLoginEmail" type="email" placeholder="name@mpdgroup.co"></div><button class="btn primary sm" style="width:100%" onclick="ipSendMagicLink()">ส่งลิงก์เข้าสู่ระบบ</button>';
+ var m=document.getElementById('ipLoginM');if(m)m.classList.add('show');
+}
+function ipCloseLogin(){var m=document.getElementById('ipLoginM');if(m)m.classList.remove('show');}
+function ipSendMagicLink(){
+ var email=($('#ipLoginEmail')?$('#ipLoginEmail').value:'').trim();
+ if(!email){toast('กรอกอีเมลก่อน');return;}
+ if(!SB||!SB.auth){toast('ยังไม่ได้เชื่อม Supabase');return;}
+ SB.auth.signInWithOtp({email:email,options:{emailRedirectTo:location.origin+location.pathname}}).then(function(r){
+  if(r.error){toast('⚠ ส่งลิงก์ไม่สำเร็จ: '+r.error.message);return;}
+  var b=document.getElementById('ipLoginBody');
+  if(b)b.innerHTML='<div style="text-align:center;padding:20px 10px;font-size:13px;color:var(--muted)">📧 ส่งลิงก์เข้าสู่ระบบไปที่<br><b style="color:var(--ink)">'+email+'</b><br>แล้ว เปิดอีเมลแล้วกดลิงก์เพื่อเข้าสู่ระบบ</div>';
+ });
+}
+function ipLogout(){if(!SB||!SB.auth)return;SB.auth.signOut().then(function(){ipRefreshAuthUser(function(){ipRenderWhoAmI();ipRenderBoard();toast('ออกจากระบบแล้ว');});});}
+function ipWhoAmI(){if(IP_AUTH_USER&&IP_AUTH_USER.name)return IP_AUTH_USER.name;try{return localStorage.getItem('mpd_whoami')||'';}catch(e){return '';}}
 function ipSetWhoAmI(){
  var name=window.prompt('ชื่อของคุณ (ใช้แสดงว่าใครกดยืนยัน และกรอง "ตั๋วของฉัน"):',ipWhoAmI());
  if(name===null)return;
@@ -1415,7 +1446,12 @@ function ipSetWhoAmI(){
  try{localStorage.setItem('mpd_whoami',name);}catch(e){}
  ipRenderWhoAmI();ipRenderBoard();
 }
-function ipRenderWhoAmI(){var el=document.getElementById('ipWhoAmI');if(!el)return;var n=ipWhoAmI();el.textContent=n?('👤 '+n):'👤 ตั้งชื่อผู้ใช้';}
+function ipRenderWhoAmI(){
+ var el=document.getElementById('ipWhoAmI');
+ if(el){var n=ipWhoAmI();el.textContent=n?('👤 '+n):'👤 ตั้งชื่อผู้ใช้';el.style.display=IP_AUTH_USER?'none':'';}
+ var lo=document.getElementById('ipLoginBtn');
+ if(lo)lo.textContent=IP_AUTH_USER?('✅ '+(IP_AUTH_USER.name||IP_AUTH_USER.email)+(IP_AUTH_USER.role?' ('+IP_AUTH_USER.role+')':'')+' · ออกจากระบบ'):'🔐 เข้าสู่ระบบ';
+}
 let IP_ONLY_MINE=false;
 function ipToggleOnlyMine(cb){IP_ONLY_MINE=cb.checked;if(IP_ONLY_MINE&&!ipWhoAmI()){ipSetWhoAmI();if(!ipWhoAmI()){cb.checked=false;IP_ONLY_MINE=false;}}ipRenderBoard();}
 function ipEviBox(t,key,label,style){
@@ -1647,9 +1683,12 @@ function ipRenderQueue(){var nbq=$('#nbQ');if(nbq)nbq.textContent=IP_QUEUE.lengt
   // view
   var wrap=document.querySelector('.wrap');
   var ipDevMode=/[?&]dev=1(&|$)/.test(location.search);
-  if(wrap){ wrap.insertAdjacentHTML('beforeend','<section class="view" id="v-install"><div class="toolbar" style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-size:12.5px;color:var(--muted)">งานติดตั้งจาก Supabase <span id="ipLive" style="margin-left:8px;font-weight:600">⏳ กำลังเชื่อมต่อ...</span></div><div style="flex:1"></div><label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink2);cursor:pointer"><input type="checkbox" onchange="ipToggleOnlyMine(this)"> ตั๋วของฉัน</label><button class="btn ghost sm" id="ipWhoAmI" style="background:var(--bg);color:var(--ink2);border:1px solid var(--line)" onclick="ipSetWhoAmI()">👤 ตั้งชื่อผู้ใช้</button>'+(ipDevMode?'<button class="btn ghost sm" style="background:var(--bg);color:var(--ink2);border:1px dashed var(--line)" onclick="ipSim()">🧪 [Dev] จำลองออเดอร์เข้า</button>':'')+'</div><div class="board" id="installBoard"></div></section>'); ipRenderWhoAmI(); }
+  if(wrap){ wrap.insertAdjacentHTML('beforeend','<section class="view" id="v-install"><div class="toolbar" style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-size:12.5px;color:var(--muted)">งานติดตั้งจาก Supabase <span id="ipLive" style="margin-left:8px;font-weight:600">⏳ กำลังเชื่อมต่อ...</span></div><div style="flex:1"></div><label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink2);cursor:pointer"><input type="checkbox" onchange="ipToggleOnlyMine(this)"> ตั๋วของฉัน</label><button class="btn ghost sm" id="ipWhoAmI" style="background:var(--bg);color:var(--ink2);border:1px solid var(--line)" onclick="ipSetWhoAmI()">👤 ตั้งชื่อผู้ใช้</button><button class="btn ghost sm" id="ipLoginBtn" style="background:var(--bg);color:var(--brand);border:1px solid var(--brand-l)" onclick="ipOpenLogin()">🔐 เข้าสู่ระบบ</button>'+(ipDevMode?'<button class="btn ghost sm" style="background:var(--bg);color:var(--ink2);border:1px dashed var(--line)" onclick="ipSim()">🧪 [Dev] จำลองออเดอร์เข้า</button>':'')+'</div><div class="board" id="installBoard"></div></section>'); ipRenderWhoAmI(); }
   // create modal
   document.body.insertAdjacentHTML('beforeend','<div class="modal-bg" id="ipCm"><div class="modal"><h2 style="font-size:17px;margin-bottom:14px">＋ สร้าง Ticket งานติดตั้งเอง</h2><div class="fi"><label>เลขออเดอร์ (เว้นว่างได้ — เชื่อมภายหลัง)</label><input id="ipc_order"></div><div class="fi"><label>SKU</label><input id="ipc_sku" placeholder="เช่น LDSSF002"></div><div class="fi"><label>ชื่อสินค้า</label><input id="ipc_prod"></div><div class="fi"><label>ชื่อลูกค้า</label><input id="ipc_cust"></div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px"><button class="btn ghost sm" style="background:var(--bg);color:var(--ink);border:1px solid var(--line)" onclick="ipCloseCreate()">ยกเลิก</button><button class="btn primary sm" onclick="ipDoCreate()">สร้าง</button></div></div></div>');
+  document.body.insertAdjacentHTML('beforeend','<div class="modal-bg" id="ipLoginM"><div class="modal"><h2 style="font-size:17px;margin-bottom:14px">🔐 เข้าสู่ระบบ</h2><div id="ipLoginBody"></div><div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn ghost sm" style="background:var(--bg);color:var(--ink);border:1px solid var(--line)" onclick="ipCloseLogin()">ปิด</button></div></div></div>');
+  ipRefreshAuthUser(function(){ipRenderWhoAmI();ipRenderBoard();});
+  if(SB&&SB.auth)SB.auth.onAuthStateChange(function(){ipRefreshAuthUser(function(){ipRenderWhoAmI();ipRenderBoard();ipCloseLogin();});});
   // seed queue from jobs that already have an appointment date
   IP_T.forEach(function(t){ if(t.due){ IP_QUEUE.push({job:t.ticket,order:t.order,product:t.product,date:t.due,shift:(t.shift||'1'),label:((t.shift==='2')?'13:30':'09:00'),team:(t.assignees||[]),note:'(จาก Planner)'}); } });
   VIEWS.queue=['คิวช่าง (Q ช่าง)','ตารางคิวช่างตามวัน · กะ 1 (09:00) / กะ 2 (13:30)','',''];
