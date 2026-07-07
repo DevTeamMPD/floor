@@ -1262,8 +1262,8 @@ const IP_STAGES=[
 ["โทรยืนยันก่อนถึง","#854F0B","#FAEEDA","DC","บันทึกการโทร (โทรก่อนถึง ≥10 นาที)"],
 ["วัดพื้นที่–ลองตัวอย่าง","#0F6E56","#E1F5EE","DC","จำนวนตร.ม. + ให้ลูกค้าลองตัวอย่าง"],
 ["ยืนยันพื้นที่ + อนุญาตเริ่มติดตั้ง","#7C3AED","#F1EAFE","คุณเต้ย + เซล","คุณเต้ยยืนยันตร.ม. + เซลคอนเฟิร์ม + คุณเต้ยอนุญาต"],
-["ติดตั้ง","#1A8C70","#E1F5EE","DC","ภาพเริ่มงาน 1 ภาพ (เริ่มหลังได้รับอนุญาตเท่านั้น)"],
-["ตรวจ–ส่งมอบ–ปิดงาน","#15935E","#E5F4EC","DC / คุณเต้ย / เซล","ภาพหลังติดตั้ง + เก็บเงินครบ"]
+["ติดตั้ง","#1A8C70","#E1F5EE","DC","เช็คลิสต์รูปงานปูพื้น (บังคับแค่ภาพรวม) — เริ่มหลังได้รับอนุญาตเท่านั้น"],
+["ตรวจ–ส่งมอบ–ปิดงาน","#15935E","#E5F4EC","DC / คุณเต้ย / เซล","เอกสารส่งมอบ + เก็บเงินครบ"]
 ];
 const IP_LAST=IP_STAGES.length;
 function ipRole(st){var s=IP_STAGES[st-1];return s&&s[3]?s[3]:'';}
@@ -1350,6 +1350,67 @@ function ipAttach(input,id,key){
   reader.readAsDataURL(f);
  });
 }
+const IP_INSTALL_CHECKLIST=[
+ ['การตัด','มุมบัวประตูเลื่อน','cut_doorsill'],
+ ['การตัด','มุมเสา','cut_pillar'],
+ ['การตัด','กำแพงโค้ง','cut_curve'],
+ ['การตัด','เฟอร์นิเจอร์','cut_furniture'],
+ ['การตัด','แนวกำแพง','cut_wallline'],
+ ['การเชื่อม','รอยต่อ','weld_seam'],
+ ['การเชื่อม','กรีดร่อง (วิธีร้อน)','weld_groove'],
+ ['การเชื่อม','ลงน้ำยา/เป่าเส้นเชื่อม','weld_solvent'],
+ ['การเชื่อม','รีด & ปาด','weld_roll'],
+ ['การเชื่อม','เสร็จ','weld_done'],
+ ['การจบงาน','บัวผนัง','fin_walltrim'],
+ ['การจบงาน','บัวพื้น/ตัวจบ','fin_floortrim'],
+ ['การจบงาน','ตัวจบลาดกันน้ำ','fin_waterproof'],
+ ['การจบงาน','ภาพรวม','fin_overview']
+];
+function ipInstallChecklistHtml(t){
+ var groups={};
+ IP_INSTALL_CHECKLIST.forEach(function(row){(groups[row[0]]=groups[row[0]]||[]).push(row);});
+ var out='<div style="font-size:11.5px;color:var(--muted);margin-bottom:10px">เช็คลิสต์รูปงานปูพื้น (หลักฐาน + สอนงาน) — บังคับแค่ "ภาพรวม" ที่เหลือถ่ายได้เรื่อยๆ ตามจริง</div>';
+ Object.keys(groups).forEach(function(g){
+  out+='<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">'+g+'</div>'
+   +groups[g].map(function(row){
+    var isOverview=row[2]==='fin_overview';
+    return '<div class="cl-row"><div class="cl-label">'+row[1]+(isOverview?' <span style="color:var(--red)">*</span>':'')+'</div><div class="cl-thumb">'+ipUplBox(t.id,row[2],'＋',(isOverview?'ภาพรวมงานเสร็จ':''))+'</div></div>';
+   }).join('')+'</div>';
+ });
+ return out;
+}
+function ipMultiUplBox(id,key,label,evi){
+ var t=IP_T.find(function(x){return x.id===id;});
+ var arr=(t&&t.sitePhotos&&Array.isArray(t.sitePhotos[key]))?t.sitePhotos[key]:[];
+ var thumbs=arr.map(function(f){
+  var src=f.url||f.data||'';var isImg=/^image\//.test(f.type||'');
+  return '<div class="mupl-item">'+(isImg&&src?'<img src="'+src+'" alt="'+(f.name||'')+'">':'<div style="font-size:18px">📄</div>')+'</div>';
+ }).join('');
+ return '<div class="mupl'+(arr.length?' set':'')+'"'+(evi?' data-evi="'+evi+'"':'')+'>'
+  +'<div class="mupl-grid">'+thumbs
+  +'<label class="mupl-add"><input type="file" accept="image/*,application/pdf" capture="environment" class="visually-hidden" onchange="ipMultiAttach(this,'+id+',\''+key+'\')"><span>＋</span></label>'
+  +'</div><div class="mupl-label">'+label+(arr.length?' · แนบแล้ว '+arr.length+' ไฟล์':'')+'</div></div>';
+}
+function ipMultiAttach(input,id,key){
+ var f=input.files&&input.files[0];if(!f)return;
+ var t=IP_T.find(function(x){return x.id===id;});if(!t)return;
+ var clean=f.name.replace(/[^a-zA-Z0-9._-]/g,'_');var ext=(clean.match(/\.[a-zA-Z0-9]+$/)||[''])[0];
+ var path=(t.order?String(t.order):'x')+'/'+key+'_'+(Math.random()+'').slice(2,8)+ext;
+ toast('⏳ กำลังอัปโหลด...');
+ sbUploadFile(f,path).then(function(url){
+  var reader=new FileReader();
+  reader.onload=function(e){
+   var rec={name:f.name,type:f.type};if(url)rec.url=url;else rec.data=e.target.result;
+   t.sitePhotos=t.sitePhotos||{};
+   if(!Array.isArray(t.sitePhotos[key]))t.sitePhotos[key]=[];
+   t.sitePhotos[key].push(rec);
+   if(SB&&t.order)SB.from('install_jobs').update({site_photos:t.sitePhotos}).eq('order_no',t.order).then(function(){});
+   toast(url?'☁ เพิ่มรูปแล้ว':'📎 เพิ่มรูปแล้ว (ยังไม่มี bucket — เก็บในเครื่อง)');
+   ipRefreshOpen(id);
+  };
+  reader.readAsDataURL(f);
+ });
+}
 function ipWhoAmI(){try{return localStorage.getItem('mpd_whoami')||'';}catch(e){return '';}}
 function ipSetWhoAmI(){
  var name=window.prompt('ชื่อของคุณ (ใช้แสดงว่าใครกดยืนยัน และกรอง "ตั๋วของฉัน"):',ipWhoAmI());
@@ -1379,7 +1440,7 @@ function ipToggleEvi(id,key,el){
 }
 function ipDataCard(t){
  var sh=String(t.shift||'1');var rl='display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:7px 10px;border-radius:9px;font-size:12px;cursor:pointer';
- var done=[['📄 เอกสารเซ็น',t.sitePhotos&&t.sitePhotos.signed],['📷 รูปพื้นที่',t.sitePhotos&&t.sitePhotos.ph_top&&t.sitePhotos.ph_wide&&t.sitePhotos.ph_plan],['📞 โทร',t.callLogs&&t.callLogs.length],['📅 นัด',t.due],['📐 ตร.ม.',t.area&&t.area.w&&t.area.l],['📷 ภาพหลัง',t.sitePhotos&&t.sitePhotos.after]];
+ var done=[['📄 เอกสารเซ็น',t.sitePhotos&&t.sitePhotos.signed],['📷 รูปพื้นที่',t.sitePhotos&&t.sitePhotos.ph_top&&t.sitePhotos.ph_wide&&t.sitePhotos.ph_plan],['📞 โทร',t.callLogs&&t.callLogs.length],['📅 นัด',t.due],['📐 ตร.ม.',t.area&&t.area.w&&t.area.l],['📷 ภาพรวมงาน',t.sitePhotos&&t.sitePhotos.fin_overview],['📄 เอกสารส่งมอบ',t.sitePhotos&&t.sitePhotos.after]];
  var prog=done.map(function(d){return '<span class="tag" style="background:'+(d[1]?'var(--green-l)':'var(--line2)')+';color:'+(d[1]?'var(--green)':'var(--gray)')+'">'+(d[1]?'✔ ':'○ ')+d[0]+'</span>';}).join(' ');
  return '<div class="dr-card"><h4>📋 ข้อมูลงาน (แก้ได้ทุกขั้น)</h4>'
   +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px">'+prog+'</div>'
@@ -1407,13 +1468,13 @@ function ipOpen(id){IP_ACTIVE_MODE='admin';IP_ACTIVE_ID=id;var t=IP_T.find(funct
  b='<div class="dr-card" style="border-left:3px solid '+s[1]+'"><h4>ขั้นตอนนี้ (SOP)</h4><div class="field"><span class="fk">ผู้รับผิดชอบ</span><span class="fv"><b>'+ipRole(t.stage)+'</b></span></div>'+(ipEvi(t.stage)?'<div class="field"><span class="fk">หลักฐานที่ต้องมี</span><span class="fv" style="max-width:62%">'+ipEvi(t.stage)+'</span></div>':'')+'</div>'+b+ipDataCard(t);
  if(t.stage===2){docs+='<div class="dr-card"><h4>📄 เอกสารข้อตกลง (เซล)</h4>'+ipUplBox(t.id,'signed','อัปโหลดเอกสารที่ลูกค้าเซ็นกลับ','เอกสารเซ็นกลับ')+'</div>';
   docs+='<div class="dr-card"><h4>📷 รูปพื้นที่ (3 มุม)</h4><div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">ขอรูปพื้นที่จากลูกค้า 3 มุม (สูง/กว้าง/แปลน) แล้วอัปโหลดแทนลูกค้า ไม่ต้องรอช่างไปถ่ายหน้างาน</div><div class="grid3" style="margin-top:4px">'+ipUplBox(t.id,'ph_top','＋ มุมสูง','')+ipUplBox(t.id,'ph_wide','＋ มุมกว้าง','')+ipUplBox(t.id,'ph_plan','＋ แปลน','')+'</div></div>';}
- if(t.stage===3){docs+='<div class="dr-card"><h4>📦 เบิกของ + เอกสารการเบิก (ก่อนออกไป)</h4><div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">ช่างเบิกของออกจากคลัง แล้วอัปโหลดเอกสารการเบิกก่อนออกไปหน้างาน</div>'+ipUplBox(t.id,'issue_doc','อัปโหลดเอกสารการเบิกของ','เอกสารการเบิก')+'</div>';}
+ if(t.stage===3){docs+='<div class="dr-card"><h4>📦 เบิกของ + เอกสารการเบิก (ก่อนออกไป)</h4><div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">ช่างเบิกของออกจากคลัง แล้วอัปโหลดเอกสารการเบิกก่อนออกไปหน้างาน (แนบได้หลายรูป)</div>'+ipMultiUplBox(t.id,'issue_docs','เอกสารการเบิกของ','เอกสารการเบิก')+'</div>';}
  if(t.stage===4){b+='<div class="dr-card"><h4>🗓️ ยืนยันนัด + เข้าคิวช่าง</h4><div class="fi"><label>ผลการโทร / โน้ต</label><input id="ip_note" placeholder="เช่น รับสาย นัดติดตั้งได้"></div><div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">ตั้งวันนัด/กะช่าง ที่การ์ด “ข้อมูลงาน” ด้านบน</div><button class="btn primary sm" style="width:100%" onclick="ipBook('+t.id+')">✅ ยืนยันนัด + เข้าคิวช่าง → ถัดไป</button></div>';}
  if(t.stage===5){b+='<div class="dr-card"><h4>📐 วัดพื้นที่ + ลองตัวอย่าง</h4><div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">รูปพื้นที่ขอไว้แล้วตั้งแต่ถัง "ส่งเอกสาร" — เข้าหน้างานแค่วัดจริง + ให้ลูกค้าลองตัวอย่าง</div>'+ipEviBox(t,'ให้ลูกค้าลองตัวอย่าง','ให้ลูกค้าลองแผ่นตัวอย่าง (สีตัวจบ)')+'</div>';}
  if(t.stage===6){b+='<div class="dr-card"><h4>✅ ยืนยันพื้นที่ + อนุญาตเริ่มติดตั้ง</h4><div class="field"><span class="fk">จำนวนตร.ม.</span><span class="fv"><b>'+((t.area&&t.area.w&&t.area.l)?(t.area.w+' × '+t.area.l+' ม.'):'— ยังไม่มีข้อมูล —')+'</b></span></div>'+ipEviBox(t,'คุณเต้ยยืนยันตร.ม.','คุณเต้ยยืนยันจำนวนตร.ม. ในกลุ่ม','margin-top:10px')+ipEviBox(t,'เซลคอนเฟิร์มตร.ม.','เซลคอนเฟิร์มตร.ม. ในกลุ่ม','margin-top:8px')+ipEviBox(t,'คุณเต้ยอนุญาต','คุณเต้ยอนุญาตเริ่มติดตั้ง','margin-top:8px')+'<div style="font-size:11.5px;color:var(--red);margin-top:8px">⛔ ห้ามเริ่มติดตั้งก่อนได้รับอนุญาตครบทั้งสอง</div></div>';}
- if(t.stage===7){docs+='<div class="dr-card"><h4>📷 ภาพเริ่มงาน</h4>'+ipUplBox(t.id,'before','ถ่ายรูปหน้างานก่อนเริ่มติดตั้ง','ภาพเริ่มงาน')+'</div>';
-  b+='<div class="dr-card"><h4>🚧 กำลังติดตั้ง (DC)</h4><div style="font-size:12.5px;color:var(--muted);line-height:1.6">เริ่มติดตั้งได้หลังผ่านขั้น “อนุญาต” แล้ว · ถ่ายภาพเริ่มงาน 1 ภาพก่อนลงมือ แล้วกดถัดไปเมื่อติดตั้งเสร็จ</div></div>';}
- if(t.stage===IP_LAST){docs+='<div class="dr-card"><h4>📷 ส่งมอบงาน (DC)</h4>'+ipUplBox(t.id,'after','ถ่ายภาพหลังติดตั้ง + เอกสารส่งมอบ','ภาพหลังติดตั้ง')+'</div>';
+ if(t.stage===7){docs+='<div class="dr-card"><h4>📷 เช็คลิสต์รูปงานปูพื้น</h4>'+ipInstallChecklistHtml(t)+'</div>';
+  b+='<div class="dr-card"><h4>🚧 กำลังติดตั้ง (DC)</h4><div style="font-size:12.5px;color:var(--muted);line-height:1.6">เริ่มติดตั้งได้หลังผ่านขั้น “อนุญาต” แล้ว · ถ่ายรูปเช็คลิสต์ในแท็บเอกสาร (บังคับแค่ “ภาพรวม”) แล้วกดถัดไปเมื่อติดตั้งเสร็จ</div></div>';}
+ if(t.stage===IP_LAST){docs+='<div class="dr-card"><h4>📄 เอกสารส่งมอบ (DC)</h4>'+ipUplBox(t.id,'after','อัปโหลดเอกสารส่งมอบงาน','เอกสารส่งมอบ')+'</div>';
   b+='<div class="dr-card"><h4>💰 ปิดงาน (เซล)</h4>'+ipEviBox(t,'เก็บเงินครบ','เก็บเงินส่วนที่เหลือครบแล้ว')+'</div>';}
  if(t.stage===4){call+='<div class="dr-card"><h4>📞 โทรยืนยันก่อนถึง (≥10 นาที)</h4><a class="btn ok sm" href="tel:" onclick="ipLogCall('+t.id+',\'ทีม DC\');return false;">📞 โทรลูกค้า (บันทึกเวลา)</a>'+ipCallLog(t)+'</div>';}
  else if(t.stage===6){call+='<div class="dr-card"><h4>📞 โทรลูกค้า</h4><button class="btn ok sm" onclick="ipLogCall('+t.id+',\'ทีม DC\')">📞 โทร (บันทึกเวลา)</button>'+ipCallLog(t)+'</div>';}
@@ -1453,7 +1514,7 @@ function ipStageGate(t){
   if(!wb&&!l2)t.area=Object.assign({},t.area,{w:w.value,l:l.value});
  }
  if(t.stage===4&&(!t.callLogs||!t.callLogs.length))miss.push('บันทึกการโทร');
- [].slice.call(document.querySelectorAll(scope+' .evi, '+scope+' .upl[data-evi]')).forEach(function(c){if(!c.classList.contains('set')){c.style.borderColor='var(--red)';miss.push(c.getAttribute('data-evi')||'หลักฐาน');els.push(c);}else c.style.borderColor='';});
+ [].slice.call(document.querySelectorAll(scope+' .evi, '+scope+' .upl[data-evi], '+scope+' .mupl[data-evi]')).forEach(function(c){if(!c.classList.contains('set')){c.style.borderColor='var(--red)';miss.push(c.getAttribute('data-evi')||'หลักฐาน');els.push(c);}else c.style.borderColor='';});
  /* เก็บเงินครบ ไม่แสดงในหน้า DC (ไม่ใช่หน้าที่ DC) — เช็คจากข้อมูลจริงเผื่อ DOM ไม่มีให้กด */
  if(t.stage===IP_LAST&&!(t.confirmations&&t.confirmations['เก็บเงินครบ'])&&miss.indexOf('เก็บเงินครบ')<0)miss.push('เก็บเงินครบ');
  return {miss:miss,els:els};
@@ -1518,7 +1579,7 @@ function ipDCContent(t){
  else if(!isDC){body=ipDCRoleNote(t);}
  else{
   if(t.stage===3){
-   body='<div class="dcv-card"><h4>📦 เบิกของก่อนออกไปหน้างาน</h4><div style="font-size:12px;color:var(--muted);margin-bottom:10px">อัปโหลดเอกสารการเบิกของก่อนออกจากคลัง</div>'+ipUplBox(t.id,'issue_doc','อัปโหลดเอกสารการเบิกของ','เอกสารการเบิก')+'</div>';
+   body='<div class="dcv-card"><h4>📦 เบิกของก่อนออกไปหน้างาน</h4><div style="font-size:12px;color:var(--muted);margin-bottom:10px">อัปโหลดเอกสารการเบิกของก่อนออกจากคลัง (แนบได้หลายรูป)</div>'+ipMultiUplBox(t.id,'issue_docs','เอกสารการเบิกของ','เอกสารการเบิก')+'</div>';
   }
   if(t.stage===4){
    body='<div class="dcv-card"><h4>📞 โทรยืนยันก่อนถึง (≥10 นาที)</h4><a class="btn ok sm" href="tel:" onclick="ipLogCall('+t.id+',\'ทีม DC\');return false;">📞 โทรลูกค้า (บันทึกเวลา)</a>'+ipCallLog(t)+'</div>'
@@ -1536,11 +1597,11 @@ function ipDCContent(t){
     +'<div class="dcv-card"><h4>🧪 ลองตัวอย่าง</h4><div style="font-size:12px;color:var(--muted);margin-bottom:10px">รูปพื้นที่ขอจากลูกค้าไว้แล้วตั้งแต่ขั้นเอกสาร ไม่ต้องถ่ายซ้ำ</div>'+ipEviBox(t,'ให้ลูกค้าลองตัวอย่าง','ให้ลูกค้าลองแผ่นตัวอย่าง (สีตัวจบ)')+'</div>';
   }
   if(t.stage===7){
-   body='<div class="dcv-card"><h4>🚧 เริ่มติดตั้งได้แล้ว</h4><div style="font-size:12.5px;color:var(--muted);line-height:1.6">ผ่านการอนุญาตจากคุณเต้ยและเซลแล้ว — ถ่ายรูปหน้างาน 1 ภาพก่อนเริ่ม แล้วกดปุ่มด้านล่างเมื่อติดตั้งเสร็จ</div></div>'
-    +'<div class="dcv-card"><h4>📷 ภาพเริ่มงาน</h4>'+ipUplBox(t.id,'before','ถ่ายรูปหน้างานก่อนเริ่มติดตั้ง','ภาพเริ่มงาน')+'</div>';
+   body='<div class="dcv-card"><h4>🚧 เริ่มติดตั้งได้แล้ว</h4><div style="font-size:12.5px;color:var(--muted);line-height:1.6">ผ่านการอนุญาตจากคุณเต้ยและเซลแล้ว — ถ่ายรูปเช็คลิสต์ด้านล่าง (บังคับแค่ "ภาพรวม") แล้วกดปุ่มด้านล่างเมื่อติดตั้งเสร็จ</div></div>'
+    +'<div class="dcv-card">'+ipInstallChecklistHtml(t)+'</div>';
   }
   if(t.stage===IP_LAST){
-   body='<div class="dcv-card"><h4>📷 ส่งมอบงาน</h4>'+ipUplBox(t.id,'after','ถ่ายภาพหลังติดตั้ง + เอกสารส่งมอบ','ภาพหลังติดตั้ง')+'</div>';
+   body='<div class="dcv-card"><h4>📄 เอกสารส่งมอบ</h4>'+ipUplBox(t.id,'after','อัปโหลดเอกสารส่งมอบงาน','เอกสารส่งมอบ')+'</div>';
   }
  }
  var backBtn=(isDC&&t.stage>1&&!t.done)?'<button class="btn ghost sm" style="background:var(--bg);border:1px solid var(--line);flex:0 0 auto" onclick="ipBack('+t.id+')">◀ ย้อนกลับ</button>':'';
@@ -1578,7 +1639,7 @@ function ipRenderQueue(){var nbq=$('#nbQ');if(nbq)nbq.textContent=IP_QUEUE.lengt
 (function(){
   // CSS
   var st=document.createElement('style');
-  st.textContent='.board{display:flex;gap:14px;overflow-x:auto;padding-bottom:14px;align-items:flex-start}.col{flex:0 0 240px;background:#E9EEF5;border-radius:14px;padding:10px;min-height:110px}.col h3{font-size:12.5px;font-weight:700;padding:4px 6px 10px;display:flex;align-items:center;gap:7px}.col h3 .dot{width:9px;height:9px;border-radius:50%}.col h3 .ct{margin-left:auto;background:#fff;border-radius:20px;font-size:11px;padding:1px 8px;color:var(--muted);font-weight:600}.cardt{background:#fff;border:1px solid var(--line);border-radius:11px;padding:11px 12px;margin-bottom:9px;box-shadow:var(--shadow);cursor:pointer;transition:.1s}.cardt:hover{transform:translateY(-1px);border-color:var(--brand)}.cardt .tkn{font-family:ui-monospace,monospace;font-size:11px;color:var(--brand);font-weight:700}.cardt b{display:block;font-size:13px;font-weight:600;margin:3px 0}.cardt .cu{font-size:11.5px;color:var(--muted)}.t-auto{background:var(--purple-l);color:var(--purple)}.t-man{background:var(--amber-l);color:var(--amber)}.t-warn{background:var(--red-l);color:var(--red)}.fi{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}.fi label{font-size:11.5px;color:var(--muted);font-weight:600}.fi input{padding:8px 11px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;outline:0}.aibox{background:var(--purple-l);border:1px solid #CECBF6;border-radius:12px;padding:13px 15px;margin-top:8px}.ph{aspect-ratio:1.5;background:repeating-linear-gradient(45deg,#F1F5F9,#F1F5F9 10px,#E9EEF5 10px,#E9EEF5 20px);border:1px dashed var(--line);border-radius:9px;display:flex;align-items:center;justify-content:center;color:var(--gray);font-size:11.5px;cursor:pointer}.ph.set{background:var(--green-l);border-color:var(--green);color:var(--green)}#drawer .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.callrow{display:flex;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px dashed var(--line2)}.steps{display:flex;gap:4px;margin-bottom:14px;flex-wrap:wrap}.stp{flex:1;min-width:20px;height:6px;border-radius:4px;background:var(--line)}.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.cardt:focus-visible,.evi:focus-visible,.upl:focus-within{outline:2px solid var(--brand);outline-offset:2px}#dcView{display:none;position:fixed;inset:0;z-index:9999;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch}#dcView.show{display:block}#dcView .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.dcv-wrap{max-width:520px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}.dcv-head{background:#fff;border-bottom:1px solid var(--line);padding:20px 18px 16px}.dcv-head h2{margin:10px 0 6px;font-size:18px;line-height:1.4}.dcv-line{font-size:13px;color:var(--muted);margin-top:3px}.dcv-body{flex:1;padding:16px;display:flex;flex-direction:column;gap:12px}.dcv-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px}.dcv-card h4{margin:0 0 10px;font-size:14.5px}.dcv-wait{text-align:center;color:var(--muted);padding:44px 18px;font-size:13px;line-height:1.6}.dcv-radio{display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:8px 12px;border-radius:9px;font-size:13px;cursor:pointer;flex:1 1 45%}.dcv-foot{position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line);padding:14px 16px calc(14px + env(safe-area-inset-bottom))}';
+  st.textContent='.board{display:flex;gap:14px;overflow-x:auto;padding-bottom:14px;align-items:flex-start}.col{flex:0 0 240px;background:#E9EEF5;border-radius:14px;padding:10px;min-height:110px}.col h3{font-size:12.5px;font-weight:700;padding:4px 6px 10px;display:flex;align-items:center;gap:7px}.col h3 .dot{width:9px;height:9px;border-radius:50%}.col h3 .ct{margin-left:auto;background:#fff;border-radius:20px;font-size:11px;padding:1px 8px;color:var(--muted);font-weight:600}.cardt{background:#fff;border:1px solid var(--line);border-radius:11px;padding:11px 12px;margin-bottom:9px;box-shadow:var(--shadow);cursor:pointer;transition:.1s}.cardt:hover{transform:translateY(-1px);border-color:var(--brand)}.cardt .tkn{font-family:ui-monospace,monospace;font-size:11px;color:var(--brand);font-weight:700}.cardt b{display:block;font-size:13px;font-weight:600;margin:3px 0}.cardt .cu{font-size:11.5px;color:var(--muted)}.t-auto{background:var(--purple-l);color:var(--purple)}.t-man{background:var(--amber-l);color:var(--amber)}.t-warn{background:var(--red-l);color:var(--red)}.fi{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}.fi label{font-size:11.5px;color:var(--muted);font-weight:600}.fi input{padding:8px 11px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;outline:0}.aibox{background:var(--purple-l);border:1px solid #CECBF6;border-radius:12px;padding:13px 15px;margin-top:8px}.ph{aspect-ratio:1.5;background:repeating-linear-gradient(45deg,#F1F5F9,#F1F5F9 10px,#E9EEF5 10px,#E9EEF5 20px);border:1px dashed var(--line);border-radius:9px;display:flex;align-items:center;justify-content:center;color:var(--gray);font-size:11.5px;cursor:pointer}.ph.set{background:var(--green-l);border-color:var(--green);color:var(--green)}#drawer .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.callrow{display:flex;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px dashed var(--line2)}.steps{display:flex;gap:4px;margin-bottom:14px;flex-wrap:wrap}.stp{flex:1;min-width:20px;height:6px;border-radius:4px;background:var(--line)}.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.cardt:focus-visible,.evi:focus-visible,.upl:focus-within{outline:2px solid var(--brand);outline-offset:2px}#dcView{display:none;position:fixed;inset:0;z-index:9999;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch}#dcView.show{display:block}#dcView .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.dcv-wrap{max-width:520px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}.dcv-head{background:#fff;border-bottom:1px solid var(--line);padding:20px 18px 16px}.dcv-head h2{margin:10px 0 6px;font-size:18px;line-height:1.4}.dcv-line{font-size:13px;color:var(--muted);margin-top:3px}.dcv-body{flex:1;padding:16px;display:flex;flex-direction:column;gap:12px}.dcv-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px}.dcv-card h4{margin:0 0 10px;font-size:14.5px}.dcv-wait{text-align:center;color:var(--muted);padding:44px 18px;font-size:13px;line-height:1.6}.dcv-radio{display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:8px 12px;border-radius:9px;font-size:13px;cursor:pointer;flex:1 1 45%}.dcv-foot{position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line);padding:14px 16px calc(14px + env(safe-area-inset-bottom))}.cl-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px dashed var(--line2)}.cl-row:last-child{border-bottom:0}.cl-label{font-size:12.5px;flex:1;color:var(--ink)}.cl-thumb{width:60px;flex:0 0 60px}.cl-thumb .upl{padding:4px;font-size:9px;border-radius:8px}.cl-thumb .upl-body{display:flex;align-items:center;justify-content:center;min-height:44px}.cl-thumb .upl img{max-height:44px;max-width:100%}.mupl{border:1px dashed var(--line);border-radius:10px;padding:10px;background:var(--bg)}.mupl.set{border-color:var(--green)}.mupl-grid{display:flex;flex-wrap:wrap;gap:8px}.mupl-item{width:56px;height:56px;border-radius:8px;overflow:hidden;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;background:#fff}.mupl-item img{width:100%;height:100%;object-fit:cover}.mupl-add{width:56px;height:56px;border-radius:8px;border:1px dashed var(--line);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--muted);cursor:pointer;background:#fff}.mupl-add:hover{border-color:var(--brand);color:var(--brand)}.mupl-label{font-size:11px;color:var(--muted);margin-top:8px}';
   document.head.appendChild(st);
   // nav
   VIEWS.install=['Pipeline ติดตั้ง','บอร์ดงานติดตั้ง '+IP_LAST+' สเตจ · ข้อมูลจริงจาก Supabase (install_jobs)','＋ สร้าง Ticket','ipOpenCreate()'];
