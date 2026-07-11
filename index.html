@@ -1443,7 +1443,7 @@ function ipDataCard(t){
   +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px">'+prog+'</div>'
   +'<div class="fi-row"><div class="fi"><label>ที่อยู่ลูกค้า</label><input id="ipf_addr" value="'+(t.addr||'')+'"></div><div class="fi"><label>Location/พิกัด</label><input id="ipf_loc" value="'+(t.loc||'')+'"></div></div>'
   +'<div class="fi"><label>วันที่นัดติดตั้ง</label><input id="ip_due" type="date" value="'+(t.due||'')+'"></div>'
-  +'<div class="fi"><label>กะช่าง</label><div class="dcv-radio-group"><label class="dcv-radio"><input type="radio" name="ip_shift" value="1"'+(sh==='1'?' checked':'')+'> กะ 1 · 09:00</label><label style="'+rl+';flex:1 1 30%"><input type="radio" name="ip_shift" value="2"'+(sh==='2'?' checked':'')+'> กะ 2 · 13:30</label><label style="'+rl+';flex:1 1 100%"><input type="radio" name="ip_shift" value="3"'+(sh==='3'?' checked':'')+'> ☀️ ปูทั้งวัน</label></div></div>'
+  +'<div class="fi"><label>กะช่าง</label><div class="dcv-radio-group"><label class="dcv-radio"><input type="radio" name="ip_shift" value="1"'+(sh==='1'?' checked':'')+'> กะ 1 · 09:00</label><label class="dcv-radio"><input type="radio" name="ip_shift" value="2"'+(sh==='2'?' checked':'')+'> กะ 2 · 13:30</label><label class="dcv-radio" style="flex:1 1 100%"><input type="radio" name="ip_shift" value="3"'+(sh==='3'?' checked':'')+'> ☀️ ปูทั้งวัน</label></div></div>'
   +'<div class="fi"><label>ขนาดพื้นที่ (ตร.ม.)</label><div style="display:flex;gap:8px;align-items:center"><input id="ipp_w" style="flex:1;min-width:0" placeholder="กว้าง" value="'+((t.area&&t.area.w)||'')+'"><span>×</span><input id="ipp_l" style="flex:1;min-width:0" placeholder="ยาว" value="'+((t.area&&t.area.l)||'')+'"><button class="btn primary sm" onclick="ipRunPlan('+t.id+')">AI</button></div><div id="ipPlanOut"></div></div>'
   +'<button class="btn ok" style="width:100%;margin-top:8px;padding:11px" onclick="ipSaveData('+t.id+')">💾 บันทึกข้อมูล</button></div>';
 }
@@ -1583,7 +1583,7 @@ function ipDCContent(t){
     +'<div class="dcv-card"><h4>🗓️ ยืนยันวันนัด + กะ</h4>'
     +'<div class="fi"><label>วันที่นัดติดตั้ง</label><input id="ip_due" type="date" value="'+(t.due||'')+'"></div>'
     +'<div class="fi"><label>กะช่าง</label><div style="display:flex;gap:8px;flex-wrap:wrap">'
-    +'<label class="dcv-radio"><input type="radio" name="ip_shift" value="1"'+(String(t.shift||'1')==='1'?' checked':'')+'> กะ 1 · 09:00</label>'
+    +'<div class="dcv-radio-group"><label class="dcv-radio"><input type="radio" name="ip_shift" value="1"'+(String(t.shift||'1')==='1'?' checked':'')+'> กะ 1 · 09:00</label>'
     +'<label class="dcv-radio"><input type="radio" name="ip_shift" value="2"'+(t.shift==='2'?' checked':'')+'> กะ 2 · 13:30</label>'
     +'<label class="dcv-radio" style="flex:1 1 100%"><input type="radio" name="ip_shift" value="3"'+(t.shift==='3'?' checked':'')+'> ☀️ ปูทั้งวัน</label></div></div>'
     +'<div class="fi"><label>โน้ต (ถ้ามี)</label><input id="ip_note" placeholder="เช่น รับสาย นัดติดตั้งได้"></div>'
