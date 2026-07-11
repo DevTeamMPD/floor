@@ -97,7 +97,7 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
 .field-grid{display:block}
 @media (min-width:640px){.field-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 28px}.field-grid .field.wide{grid-column:1/-1}}
 .fi-row{display:block}
-@media (min-width:640px){.fi-row{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}.fi-row .fi{margin-bottom:10px}}
+@media (min-width:640px){.fi-row{display:grid;grid-template-columns:1fr 1fr;gap:0 20px}.fi-row .fi{margin-bottom:14px}}.fi{display:flex;flex-direction:column;gap:4px;margin-bottom:14px}.fi label{font-size:11.5px;font-weight:700;color:var(--ink2);letter-spacing:.01em}.fi input,.fi select,.fi textarea{padding:10px 12px;border:1.5px solid var(--line);border-radius:9px;font-family:inherit;font-size:14px;color:var(--ink);background:var(--card);outline:0;width:100%;box-sizing:border-box;transition:.15s}.fi input:focus,.fi select:focus,.fi textarea:focus{border-color:var(--brand);background:#fff;box-shadow:0 0 0 3px rgba(37,99,235,.1)}.fi input::placeholder{color:var(--gray)}
 .drawer.show{opacity:1;visibility:visible;transform:translate(-50%,-50%) scale(1)}
 .dr-tabs{display:flex;gap:2px;margin-top:14px}
 .dr-tab{flex:1;padding:9px 6px;border:0;background:transparent;font-family:inherit;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
@@ -105,7 +105,7 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
 .dr-tab.gate-miss{color:var(--red)}
 .dr-tab.gate-miss::after{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red);margin-left:5px;vertical-align:middle}
 .dr-pane{display:none}.dr-pane.show{display:block}
-.dr-foot{position:sticky;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:13px 26px;border-radius:0 0 16px 16px}
+.dr-foot{position:sticky;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:14px 22px;border-radius:0 0 16px 16px;box-shadow:0 -2px 12px rgba(15,23,42,.06)}
 .dr-empty{text-align:center;color:var(--muted);padding:34px 10px;font-size:13px}
 .evi{display:flex;align-items:center;justify-content:center;gap:6px;text-align:center;padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:12.5px;cursor:pointer;background:var(--bg);line-height:1.4}
 .evi.set{background:var(--green-l);border-color:var(--green);color:var(--green);border-style:solid;font-weight:600}
@@ -123,10 +123,10 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
 .dr-share2:hover{background:var(--green);color:#fff}
 @media (max-width:520px){.dr-share2{top:48px;right:46px}}
 .dr-head .code,.dr-head .bill{font-size:13px}
-.dr-head h2{font-size:19px;margin:5px 0 9px;font-weight:700;padding-right:30px}
-.dr-body{padding:20px 26px}
-.dr-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 17px;margin-bottom:14px}
-.dr-card h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:11px;font-weight:700}
+.dr-head h2{font-size:18px;margin:4px 0 8px;font-weight:700;padding-right:30px;line-height:1.3}
+.dr-body{padding:18px 22px}
+.dr-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:17px 20px;margin-bottom:14px}
+.dr-card h4{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:14px;font-weight:700;padding-bottom:10px;border-bottom:1px solid var(--line2)}
 .field{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--line2);font-size:12.5px}
 .field:last-child{border:0}.field .fk{color:var(--muted)}.field .fv{font-weight:600;text-align:right;max-width:62%}
 .loc-big{display:flex;gap:10px;margin-top:4px}
@@ -147,7 +147,7 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
 .ocr-field{display:flex;flex-direction:column;gap:4px;margin-bottom:13px}
 .ocr-field label{font-size:11.5px;color:var(--muted);font-weight:600}
 .ocr-field input,.ocr-field select{padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13.5px;outline:0}
-.ocr-field input:focus,.ocr-field select:focus{border-color:var(--brand)}
+.ocr-field input:focus,.ocr-field select:focus{border-color:var(--brand)}.dcv-radio{display:inline-flex;align-items:center;gap:7px;border:1.5px solid var(--line);padding:9px 14px;border-radius:9px;font-size:13.5px;cursor:pointer;background:var(--card);flex:1;justify-content:center;transition:.15s;font-weight:500;color:var(--ink2)}.dcv-radio:has(input:checked){background:var(--brand-l);border-color:var(--brand);color:var(--brand);font-weight:700}.dcv-radio input[type=radio]{width:0;height:0;opacity:0;position:absolute}.dcv-radio-group{display:flex;gap:8px;flex-wrap:wrap}
 .ocr-badge{display:inline-flex;align-items:center;gap:6px;background:var(--green-l);color:var(--green);font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;align-self:flex-start;margin-top:2px}
 .empty{text-align:center;padding:42px 20px;color:var(--muted)}.empty .big{font-size:40px;margin-bottom:10px;opacity:.5}
 .appr{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:var(--shadow);display:flex;gap:16px;align-items:flex-start}
@@ -431,10 +431,10 @@ body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--ink);font
         .dr-pane{padding:18px 0 24px;display:none}
         .dr-pane.act{display:block}
         /* Stage track */
-        .stg-track{display:flex;gap:3px;margin-top:10px}
+        .stg-track{display:flex;gap:2px;margin-top:12px;margin-bottom:2px}
         .stg-track-stp{flex:1;text-align:center}
-        .stg-track-bar{height:4px;border-radius:2px;margin-bottom:3px}
-        .stg-track-lbl{font-size:9px}
+        .stg-track-bar{height:5px;border-radius:3px;margin-bottom:4px}
+        .stg-track-lbl{font-size:9.5px;font-weight:600}
         /* Fields */
         .oh-field{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line2);font-size:13px;align-items:flex-start}
         .oh-fk{color:var(--muted);min-width:100px;font-size:12.5px;flex-shrink:0}
@@ -1436,16 +1436,16 @@ function ipToggleEvi(id,key,el){
  if(SB&&t.order)SB.from('install_jobs').update({confirmations:t.confirmations,updated_at:new Date().toISOString()}).eq('order_no',t.order).then(function(r){if(r.error)toast('⚠ บันทึกไม่สำเร็จ');});
 }
 function ipDataCard(t){
- var sh=String(t.shift||'1');var rl='display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:7px 10px;border-radius:9px;font-size:12px;cursor:pointer';
+ var sh=String(t.shift||'1');var rl='';
  var done=[['📄 เอกสารเซ็น',t.sitePhotos&&t.sitePhotos.signed],['📷 รูปพื้นที่',t.sitePhotos&&t.sitePhotos.ph_top&&t.sitePhotos.ph_wide&&t.sitePhotos.ph_plan],['📞 โทร',t.callLogs&&t.callLogs.length],['📅 นัด',t.due],['📐 ตร.ม.',t.area&&t.area.w&&t.area.l],['📷 ภาพรวมงาน',t.sitePhotos&&t.sitePhotos.fin_overview],['📄 เอกสารส่งมอบ',t.sitePhotos&&t.sitePhotos.after]];
  var prog=done.map(function(d){return '<span class="tag" style="background:'+(d[1]?'var(--green-l)':'var(--line2)')+';color:'+(d[1]?'var(--green)':'var(--gray)')+'">'+(d[1]?'✔ ':'○ ')+d[0]+'</span>';}).join(' ');
  return '<div class="dr-card"><h4>📋 ข้อมูลงาน (แก้ได้ทุกขั้น)</h4>'
   +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px">'+prog+'</div>'
   +'<div class="fi-row"><div class="fi"><label>ที่อยู่ลูกค้า</label><input id="ipf_addr" value="'+(t.addr||'')+'"></div><div class="fi"><label>Location/พิกัด</label><input id="ipf_loc" value="'+(t.loc||'')+'"></div></div>'
   +'<div class="fi"><label>วันที่นัดติดตั้ง</label><input id="ip_due" type="date" value="'+(t.due||'')+'"></div>'
-  +'<div class="fi"><label>กะช่าง</label><div style="display:flex;gap:8px;flex-wrap:wrap"><label style="'+rl+';flex:1 1 30%"><input type="radio" name="ip_shift" value="1"'+(sh==='1'?' checked':'')+'> กะ 1 · 09:00</label><label style="'+rl+';flex:1 1 30%"><input type="radio" name="ip_shift" value="2"'+(sh==='2'?' checked':'')+'> กะ 2 · 13:30</label><label style="'+rl+';flex:1 1 100%"><input type="radio" name="ip_shift" value="3"'+(sh==='3'?' checked':'')+'> ☀️ ปูทั้งวัน</label></div></div>'
+  +'<div class="fi"><label>กะช่าง</label><div class="dcv-radio-group"><label class="dcv-radio"><input type="radio" name="ip_shift" value="1"'+(sh==='1'?' checked':'')+'> กะ 1 · 09:00</label><label style="'+rl+';flex:1 1 30%"><input type="radio" name="ip_shift" value="2"'+(sh==='2'?' checked':'')+'> กะ 2 · 13:30</label><label style="'+rl+';flex:1 1 100%"><input type="radio" name="ip_shift" value="3"'+(sh==='3'?' checked':'')+'> ☀️ ปูทั้งวัน</label></div></div>'
   +'<div class="fi"><label>ขนาดพื้นที่ (ตร.ม.)</label><div style="display:flex;gap:8px;align-items:center"><input id="ipp_w" style="flex:1;min-width:0" placeholder="กว้าง" value="'+((t.area&&t.area.w)||'')+'"><span>×</span><input id="ipp_l" style="flex:1;min-width:0" placeholder="ยาว" value="'+((t.area&&t.area.l)||'')+'"><button class="btn primary sm" onclick="ipRunPlan('+t.id+')">AI</button></div><div id="ipPlanOut"></div></div>'
-  +'<button class="btn ok sm" style="width:100%;margin-top:4px" onclick="ipSaveData('+t.id+')">💾 บันทึกข้อมูล</button></div>';
+  +'<button class="btn ok" style="width:100%;margin-top:8px;padding:11px" onclick="ipSaveData('+t.id+')">💾 บันทึกข้อมูล</button></div>';
 }
 function ipSaveData(id){var t=IP_T.find(function(x){return x.id===id;});
  ipSyncFields(t);
