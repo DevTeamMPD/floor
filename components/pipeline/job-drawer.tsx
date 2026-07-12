@@ -12,7 +12,6 @@ interface Props {
   onRefresh: () => void;
 }
 
-// Static fields — customer/phone/addr are editable in the contact section below
 const FIELD_ROWS = [
   { label: "สินค้า", key: "product" as const },
   { label: "SKU", key: "sku" as const },
@@ -30,7 +29,15 @@ const SHIFT_OPTIONS = [
 
 const BUCKET = "job-photos";
 
-// ─── Survey types ─────────────────────────────────────────────────────────────
+// ─── Room types (PDF section 2) ────────────────────────────────────────────────
+const ROOM_TYPES = [
+  { id: "bedroom", label: "ห้องนอน" },
+  { id: "living", label: "ห้องนั่งเล่น" },
+  { id: "corridor", label: "โถงทางเดิน" },
+  { id: "pet_room", label: "ห้องเลี้ยงสัตว์" },
+];
+
+// ─── Survey types ──────────────────────────────────────────────────────────────
 const CUT_TYPES = [
   { id: "corner_moulding", label: "มุมบัว / ประตูเลื่อน" },
   { id: "pillar_corner", label: "มุมเสา" },
@@ -64,7 +71,36 @@ interface SurveyData {
   savedAt?: string;
 }
 
-// ─── QC types ─────────────────────────────────────────────────────────────────
+// ─── Pre-install checklist (PDF section 4) ────────────────────────────────────
+const PRE_INSTALL_ITEMS = [
+  { id: 1, label: "จำนวนสินค้า / จำนวนแผ่นครบตามรายการ" },
+  { id: 2, label: "สี / รุ่น / ลวดลายตรงตามที่ลูกค้าสั่งซื้อ" },
+  { id: 3, label: "สินค้าไม่มีรอยชำรุด แตกหัก หรือเสียหายก่อนติดตั้ง" },
+  { id: 4, label: "พื้นที่หน้างานพร้อมสำหรับการติดตั้ง" },
+  { id: 5, label: "ลูกค้ารับทราบแนวทาง / รูปแบบการติดตั้ง" },
+];
+interface PreInstallData {
+  checks: Record<number, boolean>;
+  notes: string;
+  savedAt?: string;
+}
+
+// ─── Handover checklist (PDF section 5) ──────────────────────────────────────
+const HANDOVER_ITEMS = [
+  { id: 1, label: "ติดตั้งครบตามพื้นที่ที่ตกลง" },
+  { id: 2, label: "งานติดตั้งเรียบร้อย แนบสนิท และพร้อมใช้งาน" },
+  { id: 3, label: "พื้นที่หน้างานได้รับการเก็บความเรียบร้อยหลังติดตั้ง" },
+  { id: 4, label: "ลูกค้าได้รับคำแนะนำการดูแลรักษาเบื้องต้น" },
+  { id: 5, label: "ลูกค้าตรวจรับงานเรียบร้อย" },
+];
+interface HandoverData {
+  checks: Record<number, boolean>;
+  actualAreaSqm: string;
+  notes: string;
+  savedAt?: string;
+}
+
+// ─── QC types ──────────────────────────────────────────────────────────────────
 const QC_ITEMS = [
   { id: 1, label: "ช่องว่างขอบแผ่นกับผนัง/บัว/เสา/เฟอร์นิเจอร์", spec: "≤ 1 mm" },
   { id: 2, label: "รอยต่อชนก่อนเชื่อม", spec: "≤ 0.3 mm" },
@@ -90,7 +126,7 @@ interface QCData {
   savedAt?: string;
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Component ─────────────────────────────────────────────────────────────────
 export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const supabase = createClient();
   const jobNo = job.jobNo ?? "";
@@ -99,7 +135,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const completionFileInputRef = useRef<HTMLInputElement>(null);
 
-  // ─── Contact/appointment draft state ──────────────────────────────────────
+  // ─── Contact / appointment / room type ────────────────────────────────────
   const [contactDraft, setContactDraft] = useState({
     customer_name: job.customer ?? "",
     phone: job.phone ?? "",
@@ -107,56 +143,100 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     location_url: job.locationUrl ?? "",
     appt_shift: job.apptShift ?? "",
   });
+  const [roomTypes, setRoomTypes] = useState<string[]>([]);
+  const [roomTypesLoaded, setRoomTypesLoaded] = useState(false);
 
-  // ─── Survey state ──────────────────────────────────────────────────────────
+  // ─── Survey ────────────────────────────────────────────────────────────────
   const [survey, setSurvey] = useState<SurveyData>({
     cutTypes: [], weldType: "", finishTypes: [],
     floorCondition: "", wetZone: false, areaSqm: "", notes: "",
   });
   const [surveyLoaded, setSurveyLoaded] = useState(false);
 
-  // ─── QC state ──────────────────────────────────────────────────────────────
+  // ─── Pre-install ───────────────────────────────────────────────────────────
+  const [preInstall, setPreInstall] = useState<PreInstallData>({ checks: {}, notes: "" });
+  const [preInstallLoaded, setPreInstallLoaded] = useState(false);
+
+  // ─── QC ────────────────────────────────────────────────────────────────────
   const [qcResults, setQcResults] = useState<Record<number, QCResult>>({});
   const [qcInspector, setQcInspector] = useState("");
   const [qcNotes, setQcNotes] = useState("");
   const [qcLoaded, setQcLoaded] = useState(false);
 
-  // ─── Photos state ──────────────────────────────────────────────────────────
+  // ─── Handover ──────────────────────────────────────────────────────────────
+  const [handover, setHandover] = useState<HandoverData>({ checks: {}, actualAreaSqm: "", notes: "" });
+  const [handoverLoaded, setHandoverLoaded] = useState(false);
+
+  // ─── Photos ────────────────────────────────────────────────────────────────
   const [photoPaths, setPhotoPaths] = useState<string[]>(job.sitePhotos ?? []);
   const [completionPhotoPaths, setCompletionPhotoPaths] = useState<string[]>(job.completionPhotos ?? []);
   const [uploading, setUploading] = useState(false);
 
-  // lazy load survey/qc
+  // Load room_type on mount
+  useEffect(() => { loadRoomTypes(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Lazy load per tab
   useEffect(() => {
     if (tab === "survey" && !surveyLoaded) loadSurvey();
-    if (tab === "qc" && !qcLoaded) loadQC();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+    if (tab === "qc") {
+      if (!qcLoaded) loadQC();
+      if (!preInstallLoaded) loadPreInstall();
+    }
+    if (tab === "close" && !handoverLoaded) loadHandover();
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadRoomTypes() {
+    if (roomTypesLoaded) return;
+    try {
+      const { data } = await supabase
+        .from("install_jobs").select("room_type").eq("job_no", jobNo).single();
+      if (data?.room_type) setRoomTypes(data.room_type as string[]);
+    } catch { }
+    setRoomTypesLoaded(true);
+  }
 
   async function loadSurvey() {
     try {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("install_jobs").select("survey_data").eq("job_no", jobNo).single();
-      if (!error && data?.survey_data) setSurvey(JSON.parse(data.survey_data));
-    } catch { /* column not yet migrated */ }
+      if (data?.survey_data) setSurvey(JSON.parse(data.survey_data));
+    } catch { }
     setSurveyLoaded(true);
+  }
+
+  async function loadPreInstall() {
+    try {
+      const { data } = await supabase
+        .from("install_jobs").select("pre_install_data").eq("job_no", jobNo).single();
+      if (data?.pre_install_data) setPreInstall(JSON.parse(data.pre_install_data));
+    } catch { }
+    setPreInstallLoaded(true);
   }
 
   async function loadQC() {
     try {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("install_jobs").select("qc_data").eq("job_no", jobNo).single();
-      if (!error && data?.qc_data) {
+      if (data?.qc_data) {
         const p: QCData = JSON.parse(data.qc_data);
         setQcResults(p.results ?? {});
         setQcInspector(p.inspector ?? "");
         setQcNotes(p.notes ?? "");
       }
-    } catch { /* column not yet migrated */ }
+    } catch { }
     setQcLoaded(true);
   }
 
-  // ─── Save contact/appointment info ─────────────────────────────────────────
+  async function loadHandover() {
+    try {
+      const { data } = await supabase
+        .from("install_jobs").select("handover_data").eq("job_no", jobNo).single();
+      if (data?.handover_data) setHandover(JSON.parse(data.handover_data));
+    } catch { }
+    setHandoverLoaded(true);
+  }
+
+  // ─── Save contact ──────────────────────────────────────────────────────────
   async function saveContact() {
     setSaving(true);
     try {
@@ -168,6 +248,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
           address: contactDraft.address,
           location_url: contactDraft.location_url || null,
           appt_shift: contactDraft.appt_shift || null,
+          room_type: roomTypes.length ? roomTypes : null,
         })
         .eq("job_no", jobNo);
       if (error) throw error;
@@ -194,6 +275,20 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     setSaving(false);
   }
 
+  async function savePreInstall() {
+    setSaving(true);
+    try {
+      const payload: PreInstallData = { ...preInstall, savedAt: new Date().toISOString() };
+      const { error } = await supabase
+        .from("install_jobs").update({ pre_install_data: JSON.stringify(payload) }).eq("job_no", jobNo);
+      if (error) throw error;
+      toast.success("บันทึกรายการตรวจเช็คแล้ว");
+    } catch (e: unknown) {
+      toast.error("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
+    }
+    setSaving(false);
+  }
+
   async function saveQC() {
     setSaving(true);
     try {
@@ -203,6 +298,20 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       if (error) throw error;
       toast.success("บันทึก QC แล้ว");
       onRefresh();
+    } catch (e: unknown) {
+      toast.error("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
+    }
+    setSaving(false);
+  }
+
+  async function saveHandover() {
+    setSaving(true);
+    try {
+      const payload: HandoverData = { ...handover, savedAt: new Date().toISOString() };
+      const { error } = await supabase
+        .from("install_jobs").update({ handover_data: JSON.stringify(payload) }).eq("job_no", jobNo);
+      if (error) throw error;
+      toast.success("บันทึกรายการส่งมอบแล้ว");
     } catch (e: unknown) {
       toast.error("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
     }
@@ -244,7 +353,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     onRefresh();
   }
 
-  // ─── Completion photos ─────────────────────────────────────────────────────
   async function uploadCompletionPhotos(files: FileList) {
     setUploading(true);
     const newPaths = [...completionPhotoPaths];
@@ -275,7 +383,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     onRefresh();
   }
 
-  // ─── Advance stage ─────────────────────────────────────────────────────────
   async function advanceStage() {
     if (job.stage >= 7) return;
     const { error } = await supabase
@@ -285,7 +392,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     onRefresh();
   }
 
-  // ─── Close job ─────────────────────────────────────────────────────────────
   async function closeJob() {
     const token = ipGenToken();
     const { error } = await supabase
@@ -300,10 +406,13 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     onRefresh(); onClose();
   }
 
-  // ─── QC stats ──────────────────────────────────────────────────────────────
+  // ─── Computed ──────────────────────────────────────────────────────────────
   const qcAnswered = Object.values(qcResults).filter(Boolean).length;
   const qcPass    = Object.values(qcResults).filter((v) => v === "pass").length;
   const qcFail    = Object.values(qcResults).filter((v) => v === "fail").length;
+  const preInstallCheckedCount = Object.values(preInstall.checks).filter(Boolean).length;
+  const handoverCheckedCount = Object.values(handover.checks).filter(Boolean).length;
+  const allHandoverChecked = handoverCheckedCount === HANDOVER_ITEMS.length;
 
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
@@ -350,7 +459,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
               {t === "info" ? "ข้อมูล"
                : t === "stages" ? "สเตจ"
                : t === "survey" ? "สำรวจ"
-               : t === "qc" ? "QC"
+               : t === "qc" ? `QC${preInstallCheckedCount > 0 ? ` ✓${preInstallCheckedCount}` : ""}`
                : t === "photos" ? `รูป${photoPaths.length ? ` (${photoPaths.length})` : ""}`
                : `ปิดงาน${completionPhotoPaths.length ? ` 📷${completionPhotoPaths.length}` : ""}`}
             </button>
@@ -363,7 +472,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
           {/* ── INFO ── */}
           {tab === "info" && (
             <div className="space-y-4">
-              {/* Static job info */}
               <table className="w-full text-sm">
                 <tbody>
                   {FIELD_ROWS.map(({ label, key, format }) => {
@@ -380,7 +488,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 </tbody>
               </table>
 
-              {/* Photo prompt banner — stage 2 */}
               {job.stage === 2 && (
                 <button
                   onClick={() => setTab("photos")}
@@ -395,7 +502,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 </button>
               )}
 
-              {/* Editable contact + appointment section */}
               <div className="border border-slate-200 rounded-xl p-3 space-y-3">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">📞 ข้อมูลติดต่อ / นัดหมาย</p>
 
@@ -446,6 +552,31 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                         📍 เปิด
                       </a>
                     )}
+                  </div>
+                </div>
+
+                {/* Room type — PDF section 2 */}
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1.5">🏠 ประเภทพื้นที่ติดตั้ง</label>
+                  <div className="flex flex-wrap gap-2">
+                    {ROOM_TYPES.map(({ id, label }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() =>
+                          setRoomTypes((prev) =>
+                            prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]
+                          )
+                        }
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                          roomTypes.includes(id)
+                            ? "bg-blue-600 text-white border-blue-600"
+                            : "bg-white text-gray-600 border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
@@ -603,59 +734,101 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
           {/* ── QC ── */}
           {tab === "qc" && (
-            <div className="space-y-4">
-              <div className="text-xs text-gray-500 bg-blue-50 border border-blue-200 rounded p-2">
-                เกณฑ์ตรวจรับงาน 15 ข้อ ตาม SOP — ใช้ที่ขั้นตอน ตรวจสอบงาน (Stage 6)
-              </div>
-              <div className="flex gap-3 text-xs">
-                <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-600">ตอบแล้ว {qcAnswered}/15</span>
-                <span className="px-2 py-1 rounded-full bg-green-100 text-green-700">ผ่าน {qcPass}</span>
-                <span className="px-2 py-1 rounded-full bg-red-100 text-red-700">ไม่ผ่าน {qcFail}</span>
-              </div>
-              <div className="space-y-2">
-                {QC_ITEMS.map(({ id, label, spec }) => (
-                  <div key={id} className="border rounded-lg p-3 space-y-1.5">
-                    <p className="text-sm font-medium text-gray-800"><span className="text-gray-400 mr-1">{id}.</span>{label}</p>
-                    <p className="text-xs text-gray-500">{spec}</p>
-                    <div className="flex gap-2">
-                      {(["pass", "fail", "na"] as QCResult[]).map((v) => (
-                        <button key={v as string}
-                          onClick={() => setQcResults((r) => ({ ...r, [id]: r[id] === v ? null : v }))}
-                          className={`flex-1 py-1 rounded text-xs font-medium transition-colors border ${
-                            qcResults[id] === v
-                              ? v === "pass" ? "bg-green-500 text-white border-green-500"
-                                : v === "fail" ? "bg-red-500 text-white border-red-500"
-                                : "bg-gray-400 text-white border-gray-400"
-                              : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
-                          }`}>
-                          {v === "pass" ? "ผ่าน" : v === "fail" ? "ไม่ผ่าน" : "N/A"}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">ผู้ตรวจ</label>
-                <input type="text" placeholder="ชื่อผู้ตรวจ"
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={qcInspector} onChange={(e) => setQcInspector(e.target.value)} />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">หมายเหตุ QC</label>
-                <textarea rows={3} placeholder="ประเด็นที่พบ / ข้อสังเกต..."
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                  value={qcNotes} onChange={(e) => setQcNotes(e.target.value)} />
-              </div>
-              {qcFail > 0 && (
-                <div className="text-xs bg-red-50 border border-red-200 rounded p-2 text-red-700">
-                  ⚠️ มี {qcFail} รายการที่ยังไม่ผ่าน — กรุณาแก้ไขก่อนปิดงาน
+            <div className="space-y-5">
+
+              {/* Pre-install checklist — PDF section 4 */}
+              <div className="border border-amber-200 rounded-xl p-3 space-y-3 bg-amber-50">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">✅ ตรวจเช็คก่อนเริ่มติดตั้ง</p>
+                  <span className="text-xs text-amber-600 font-medium">{preInstallCheckedCount}/{PRE_INSTALL_ITEMS.length}</span>
                 </div>
-              )}
-              <button onClick={saveQC} disabled={saving}
-                className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
-                {saving ? "กำลังบันทึก..." : "💾 บันทึก QC"}
-              </button>
+                <div className="space-y-2">
+                  {PRE_INSTALL_ITEMS.map(({ id, label }) => (
+                    <label key={id} className="flex items-start gap-3 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 w-4 h-4 accent-amber-600 shrink-0"
+                        checked={!!preInstall.checks[id]}
+                        onChange={(e) =>
+                          setPreInstall((p) => ({ ...p, checks: { ...p.checks, [id]: e.target.checked } }))
+                        }
+                      />
+                      <span className={`text-sm ${preInstall.checks[id] ? "line-through text-gray-400" : "text-gray-800"}`}>
+                        {id}. {label}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">หมายเหตุก่อนติดตั้ง</label>
+                  <textarea rows={2} placeholder="บันทึกประเด็นที่พบ..."
+                    className="w-full border border-amber-200 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none"
+                    value={preInstall.notes} onChange={(e) => setPreInstall((p) => ({ ...p, notes: e.target.value }))} />
+                </div>
+                {preInstall.savedAt && (
+                  <p className="text-xs text-gray-400">บันทึกล่าสุด {new Date(preInstall.savedAt).toLocaleString("th-TH")}</p>
+                )}
+                <button onClick={savePreInstall} disabled={saving}
+                  className="w-full bg-amber-500 text-white rounded-lg py-2 text-sm font-medium hover:bg-amber-600 disabled:opacity-50 transition-colors">
+                  {saving ? "กำลังบันทึก..." : "💾 บันทึกรายการตรวจเช็ค"}
+                </button>
+              </div>
+
+              {/* SOP QC */}
+              <div className="space-y-4">
+                <div className="text-xs text-gray-500 bg-blue-50 border border-blue-200 rounded p-2">
+                  เกณฑ์ตรวจรับงาน 15 ข้อ ตาม SOP — ใช้ที่ขั้นตอน ตรวจสอบงาน (Stage 6)
+                </div>
+                <div className="flex gap-3 text-xs">
+                  <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-600">ตอบแล้ว {qcAnswered}/15</span>
+                  <span className="px-2 py-1 rounded-full bg-green-100 text-green-700">ผ่าน {qcPass}</span>
+                  <span className="px-2 py-1 rounded-full bg-red-100 text-red-700">ไม่ผ่าน {qcFail}</span>
+                </div>
+                <div className="space-y-2">
+                  {QC_ITEMS.map(({ id, label, spec }) => (
+                    <div key={id} className="border rounded-lg p-3 space-y-1.5">
+                      <p className="text-sm font-medium text-gray-800"><span className="text-gray-400 mr-1">{id}.</span>{label}</p>
+                      <p className="text-xs text-gray-500">{spec}</p>
+                      <div className="flex gap-2">
+                        {(["pass", "fail", "na"] as QCResult[]).map((v) => (
+                          <button key={v as string}
+                            onClick={() => setQcResults((r) => ({ ...r, [id]: r[id] === v ? null : v }))}
+                            className={`flex-1 py-1 rounded text-xs font-medium transition-colors border ${
+                              qcResults[id] === v
+                                ? v === "pass" ? "bg-green-500 text-white border-green-500"
+                                  : v === "fail" ? "bg-red-500 text-white border-red-500"
+                                  : "bg-gray-400 text-white border-gray-400"
+                                : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
+                            }`}>
+                            {v === "pass" ? "ผ่าน" : v === "fail" ? "ไม่ผ่าน" : "N/A"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">ผู้ตรวจ</label>
+                  <input type="text" placeholder="ชื่อผู้ตรวจ"
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={qcInspector} onChange={(e) => setQcInspector(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">หมายเหตุ QC</label>
+                  <textarea rows={3} placeholder="ประเด็นที่พบ / ข้อสังเกต..."
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                    value={qcNotes} onChange={(e) => setQcNotes(e.target.value)} />
+                </div>
+                {qcFail > 0 && (
+                  <div className="text-xs bg-red-50 border border-red-200 rounded p-2 text-red-700">
+                    ⚠️ มี {qcFail} รายการที่ยังไม่ผ่าน — กรุณาแก้ไขก่อนปิดงาน
+                  </div>
+                )}
+                <button onClick={saveQC} disabled={saving}
+                  className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                  {saving ? "กำลังบันทึก..." : "💾 บันทึก QC"}
+                </button>
+              </div>
             </div>
           )}
 
@@ -663,22 +836,12 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
           {tab === "photos" && (
             <div className="space-y-4">
               <div className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded p-2">
-                อัปโหลดรูปหน้างาน / สภาพพื้น / งานสำเร็จ — เก็บไว้ใน Supabase Storage
+                อัปโหลดรูปหน้างาน / สภาพพื้น — เก็บไว้ใน Supabase Storage
               </div>
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => e.target.files && uploadPhotos(e.target.files)}
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                className="w-full border-2 border-dashed border-blue-300 rounded-lg py-6 text-sm text-blue-600 font-medium hover:bg-blue-50 disabled:opacity-50 transition-colors"
-              >
+              <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden"
+                onChange={(e) => e.target.files && uploadPhotos(e.target.files)} />
+              <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+                className="w-full border-2 border-dashed border-blue-300 rounded-lg py-6 text-sm text-blue-600 font-medium hover:bg-blue-50 disabled:opacity-50 transition-colors">
                 {uploading ? (
                   <span className="flex items-center justify-center gap-2">
                     <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
@@ -687,11 +850,8 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                     </svg>
                     กำลังอัปโหลด...
                   </span>
-                ) : (
-                  <>📷 แตะรูปเพื่ออัปโหลด</>
-                )}
+                ) : <>📷 แตะรูปเพื่ออัปโหลด</>}
               </button>
-
               {photoPaths.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-8">ยังไม่มีรูป</p>
               ) : (
@@ -699,18 +859,9 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                   {photoPaths.map((path) => (
                     <div key={path} className="relative group">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={getPublicUrl(path)}
-                        alt="รูปหน้างาน"
-                        className="w-full h-40 object-cover rounded-lg border"
-                        loading="lazy"
-                      />
-                      <button
-                        onClick={() => deletePhoto(path)}
-                        className="absolute top-1.5 right-1.5 bg-red-500 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
-                      >
-                        ✕
-                      </button>
+                      <img src={getPublicUrl(path)} alt="รูปหน้างาน" className="w-full h-40 object-cover rounded-lg border" loading="lazy" />
+                      <button onClick={() => deletePhoto(path)}
+                        className="absolute top-1.5 right-1.5 bg-red-500 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow">✕</button>
                     </div>
                   ))}
                 </div>
@@ -727,25 +878,59 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 </div>
               )}
 
+              {/* Handover checklist — PDF section 5 */}
+              <div className="border border-green-200 rounded-xl p-3 space-y-3 bg-green-50">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">📋 รายการส่งมอบงาน</p>
+                  <span className="text-xs text-green-600 font-medium">{handoverCheckedCount}/{HANDOVER_ITEMS.length}</span>
+                </div>
+                <div className="space-y-2">
+                  {HANDOVER_ITEMS.map(({ id, label }) => (
+                    <label key={id} className="flex items-start gap-3 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 w-4 h-4 accent-green-600 shrink-0"
+                        checked={!!handover.checks[id]}
+                        onChange={(e) =>
+                          setHandover((h) => ({ ...h, checks: { ...h.checks, [id]: e.target.checked } }))
+                        }
+                      />
+                      <span className={`text-sm ${handover.checks[id] ? "line-through text-gray-400" : "text-gray-800"}`}>
+                        {id}. {label}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">พื้นที่ติดตั้งจริง (ตรม.)</label>
+                  <input type="number" min="0" step="0.1" placeholder="เช่น 22"
+                    className="w-full border border-green-200 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                    value={handover.actualAreaSqm}
+                    onChange={(e) => setHandover((h) => ({ ...h, actualAreaSqm: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">หมายเหตุการส่งมอบ</label>
+                  <textarea rows={2} placeholder="รายละเอียดข้อแก้ไข / หมายเหตุเพิ่มเติม..."
+                    className="w-full border border-green-200 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 resize-none"
+                    value={handover.notes} onChange={(e) => setHandover((h) => ({ ...h, notes: e.target.value }))} />
+                </div>
+                {handover.savedAt && (
+                  <p className="text-xs text-gray-400">บันทึกล่าสุด {new Date(handover.savedAt).toLocaleString("th-TH")}</p>
+                )}
+                <button onClick={saveHandover} disabled={saving}
+                  className="w-full bg-green-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition-colors">
+                  {saving ? "กำลังบันทึก..." : "💾 บันทึกรายการส่งมอบ"}
+                </button>
+              </div>
+
               {/* Completion photos */}
               <div className="border border-slate-200 rounded-xl p-3 space-y-3">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">📸 รูปงานเสร็จสิ้น</p>
                 <p className="text-xs text-gray-500">ถ่ายรูปหลังงานเสร็จ — ลูกค้าจะเห็นผ่านลิงก์ประเมิน</p>
-
-                <input
-                  ref={completionFileInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => e.target.files && uploadCompletionPhotos(e.target.files)}
-                />
-                <button
-                  onClick={() => completionFileInputRef.current?.click()}
-                  disabled={uploading}
-                  className="w-full border-2 border-dashed border-green-300 rounded-lg py-4 text-sm text-green-700 font-medium hover:bg-green-50 disabled:opacity-50 transition-colors"
-                >
+                <input ref={completionFileInputRef} type="file" accept="image/*" capture="environment" multiple className="hidden"
+                  onChange={(e) => e.target.files && uploadCompletionPhotos(e.target.files)} />
+                <button onClick={() => completionFileInputRef.current?.click()} disabled={uploading}
+                  className="w-full border-2 border-dashed border-green-300 rounded-lg py-4 text-sm text-green-700 font-medium hover:bg-green-50 disabled:opacity-50 transition-colors">
                   {uploading ? (
                     <span className="flex items-center justify-center gap-2">
                       <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
@@ -758,29 +943,25 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                     <>📷 ถ่ายรูป / เลือกรูปงานเสร็จ{completionPhotoPaths.length ? ` (${completionPhotoPaths.length})` : ""}</>
                   )}
                 </button>
-
                 {completionPhotoPaths.length > 0 && (
                   <div className="grid grid-cols-2 gap-2">
                     {completionPhotoPaths.map((path) => (
                       <div key={path} className="relative group">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={getPublicUrl(path)}
-                          alt="รูปงานเสร็จ"
-                          className="w-full h-32 object-cover rounded-lg border"
-                          loading="lazy"
-                        />
-                        <button
-                          onClick={() => deleteCompletionPhoto(path)}
-                          className="absolute top-1.5 right-1.5 bg-red-500 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
-                        >
-                          ✕
-                        </button>
+                        <img src={getPublicUrl(path)} alt="รูปงานเสร็จ" className="w-full h-32 object-cover rounded-lg border" loading="lazy" />
+                        <button onClick={() => deleteCompletionPhoto(path)}
+                          className="absolute top-1.5 right-1.5 bg-red-500 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow">✕</button>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
+
+              {!allHandoverChecked && (
+                <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2 text-amber-700">
+                  ⚠️ ยังมีรายการส่งมอบที่ยังไม่เช็ค ({HANDOVER_ITEMS.length - handoverCheckedCount} รายการ)
+                </div>
+              )}
 
               <div className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3 space-y-1">
                 <p>การปิดงานจะ:</p>
