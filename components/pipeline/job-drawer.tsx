@@ -147,6 +147,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     address: job.addr ?? "",
     location_url: job.locationUrl ?? "",
     appt_shift: job.apptShift ?? "",
+    apptDate: job.apptDate ?? "",
   });
   const [roomTypes, setRoomTypes] = useState<string[]>([]);
   const [roomTypesLoaded, setRoomTypesLoaded] = useState(false);
@@ -233,7 +234,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
         .from("install_jobs").select("handover_data").eq("job_no", jobNo).single();
       if (data?.handover_data) {
         const parsed = JSON.parse(data.handover_data);
-        // migrate old format (qtyRequisitioned/qtyActualUsed) to new materials array
         if (!parsed.materials) parsed.materials = [{ ...EMPTY_MATERIAL }];
         setHandover(parsed);
       }
@@ -252,6 +252,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
           address: contactDraft.address,
           location_url: contactDraft.location_url || null,
           appt_shift: contactDraft.appt_shift || null,
+          appt_date: contactDraft.apptDate || null,
           room_type: roomTypes.length ? roomTypes : null,
         })
         .eq("job_no", jobNo);
@@ -338,7 +339,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     setHandover((h) => ({ ...h, materials: h.materials.filter((_, i) => i !== idx) }));
   }
 
-  // Calculate total area used from materials
   const totalMaterialAreaSqm = handover.materials.reduce((sum, m) => {
     const w = Number(m.widthCm);
     const l = Number(m.lengthCm);
@@ -441,7 +441,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const handoverCheckedCount = Object.values(handover.checks).filter(Boolean).length;
   const allHandoverChecked = handoverCheckedCount === HANDOVER_ITEMS.length;
 
-  // Helper: toggle button style
   function toggleBtn(active: boolean) {
     return `px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
       active ? "bg-green-600 text-white border-green-600" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
@@ -460,7 +459,16 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
             <p className="text-xs text-gray-500">{job.ticket ?? job.order ?? "—"}</p>
             <p className="font-semibold text-gray-900 leading-tight">{job.customer}</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => window.open(`/job-order/${jobNo}`, "_blank")}
+              className="text-gray-400 hover:text-blue-600 text-sm px-2 py-1 rounded hover:bg-blue-50 transition-colors"
+              title="พิมพ์ใบงาน"
+            >
+              🖨️
+            </button>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
+          </div>
         </div>
 
         {/* Stage badge */}
@@ -502,7 +510,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
         {/* Tab content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
 
-          {/* ── INFO ── */}
+          {/* INFO */}
           {tab === "info" && (
             <div className="space-y-4">
               <table className="w-full text-sm">
@@ -637,6 +645,16 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                   </div>
                 </div>
 
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">📅 วันที่นัดหมาย</label>
+                  <input
+                    type="date"
+                    value={contactDraft.apptDate}
+                    onChange={(e) => setContactDraft((d) => ({ ...d, apptDate: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </div>
+
                 <button
                   onClick={saveContact}
                   disabled={saving}
@@ -648,7 +666,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
             </div>
           )}
 
-          {/* ── STAGES ── */}
+          {/* STAGES */}
           {tab === "stages" && (
             <div className="space-y-3">
               <ol className="space-y-1">
@@ -676,7 +694,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
             </div>
           )}
 
-          {/* ── SURVEY ── */}
+          {/* SURVEY */}
           {tab === "survey" && (
             <div className="space-y-5">
               <p className="text-xs text-gray-500 bg-amber-50 border border-amber-200 rounded p-2">
@@ -764,10 +782,9 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
             </div>
           )}
 
-          {/* ── QC ── */}
+          {/* QC */}
           {tab === "qc" && (
             <div className="space-y-5">
-              {/* Pre-install checklist */}
               <div className="border border-amber-200 rounded-xl p-3 space-y-3 bg-amber-50">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">✅ ตรวจเช็คก่อนเริ่มติดตั้ง</p>
@@ -805,7 +822,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 </button>
               </div>
 
-              {/* SOP QC */}
               <div className="space-y-4">
                 <div className="text-xs text-gray-500 bg-blue-50 border border-blue-200 rounded p-2">
                   เกณฑ์ตรวจรับงาน 15 ข้อ ตาม SOP
@@ -863,7 +879,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
             </div>
           )}
 
-          {/* ── PHOTOS ── */}
+          {/* PHOTOS */}
           {tab === "photos" && (
             <div className="space-y-4">
               <div className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded p-2">
@@ -900,7 +916,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
             </div>
           )}
 
-          {/* ── CLOSE ── */}
+          {/* CLOSE */}
           {tab === "close" && (
             <div className="space-y-4">
               {qcFail > 0 && (
@@ -909,7 +925,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 </div>
               )}
 
-              {/* Handover checklist */}
               <div className="border border-green-200 rounded-xl p-3 space-y-3 bg-green-50">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">📋 รายการส่งมอบงาน</p>
@@ -933,7 +948,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                   ))}
                 </div>
 
-                {/* Area */}
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">พื้นที่ติดตั้งจริง (ตรม.)</label>
                   <input type="number" min="0" step="0.1" placeholder="เช่น 22"
@@ -942,7 +956,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                     onChange={(e) => setHandover((h) => ({ ...h, actualAreaSqm: e.target.value }))} />
                 </div>
 
-                {/* Material requisition */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-semibold text-green-700">📦 รายการเบิกสินค้า</p>
@@ -963,7 +976,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                         )}
                       </div>
 
-                      {/* Thickness */}
                       <div>
                         <p className="text-xs text-gray-500 mb-1">ความหนา</p>
                         <div className="flex gap-1.5">
@@ -977,7 +989,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                         </div>
                       </div>
 
-                      {/* Color */}
                       <div>
                         <p className="text-xs text-gray-500 mb-1">สี</p>
                         <div className="flex gap-1.5">
@@ -994,7 +1005,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                         </div>
                       </div>
 
-                      {/* Width + Length */}
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <p className="text-xs text-gray-500 mb-1">ความกว้าง</p>
@@ -1017,7 +1027,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                         </div>
                       </div>
 
-                      {/* Qty */}
                       <div>
                         <p className="text-xs text-gray-500 mb-1">จำนวน (ม้วน)</p>
                         <input type="number" min="1" step="1" placeholder="1"
@@ -1026,7 +1035,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                           onChange={(e) => updateMaterial(idx, { qty: e.target.value })} />
                       </div>
 
-                      {/* Area preview */}
                       {mat.widthCm && mat.lengthCm && (
                         <p className="text-xs text-green-600">
                           ≈ {((Number(mat.widthCm) * Number(mat.lengthCm) * (Number(mat.qty) || 1)) / 10000).toFixed(2)} ตรม.
@@ -1056,7 +1064,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 </button>
               </div>
 
-              {/* Completion photos */}
               <div className="border border-slate-200 rounded-xl p-3 space-y-3">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">📸 รูปงานเสร็จสิ้น</p>
                 <input ref={completionFileInputRef} type="file" accept="image/*" capture="environment" multiple className="hidden"
