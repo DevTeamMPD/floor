@@ -7,9 +7,11 @@ import JobCard from "./job-card";
 import JobDrawer from "./job-drawer";
 import CreateOrderModal from "./create-order-modal";
 
+// install_jobs PK is job_no (text) — there is NO id column in the DB.
+// id here is set to job_no so React keys and any legacy references still work.
 function mapRow(row: Record<string, unknown>): InstallJob {
   return {
-    id: String(row.id),
+    id: row.job_no as string,
     ticket: row.ticket_no as string,
     order: row.order_no as string,
     bill: row.bill_no as string,
@@ -155,7 +157,7 @@ export default function PipelineBoard() {
                 <div className="bg-slate-50 rounded-b-lg p-2 space-y-2 min-h-[120px]">
                   {col.items.map((job) => (
                     <JobCard
-                      key={job.id}
+                      key={job.jobNo}
                       job={job}
                       onClick={() => setSelectedJob(job)}
                     />
