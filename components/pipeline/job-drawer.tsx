@@ -97,6 +97,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const [tab, setTab] = useState<"info" | "stages" | "survey" | "qc" | "photos" | "close">("info");
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const completionFileInputRef = useRef<HTMLInputElement>(null);
 
   // ─── Contact/appointment draft state ──────────────────────────────────────
   const [contactDraft, setContactDraft] = useState({
@@ -122,6 +123,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
   // ─── Photos state ──────────────────────────────────────────────────────────
   const [photoPaths, setPhotoPaths] = useState<string[]>(job.sitePhotos ?? []);
+  const [completionPhotoPaths, setCompletionPhotoPaths] = useState<string[]>(job.completionPhotos ?? []);
   const [uploading, setUploading] = useState(false);
 
   // lazy load survey/qc
@@ -242,6 +244,37 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     onRefresh();
   }
 
+  // ─── Completion photos ─────────────────────────────────────────────────────
+  async function uploadCompletionPhotos(files: FileList) {
+    setUploading(true);
+    const newPaths = [...completionPhotoPaths];
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) continue;
+      const ext = file.name.split(".").pop() ?? "jpg";
+      const path = `${jobNo}/completion/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error } = await supabase.storage.from(BUCKET).upload(path, file, { upsert: false });
+      if (error) { toast.error(`อัปโหลดไม่สำเร็จ: ${file.name}`); continue; }
+      newPaths.push(path);
+    }
+    const { error: dbErr } = await supabase
+      .from("install_jobs").update({ completion_photos: newPaths }).eq("job_no", jobNo);
+    if (dbErr) { toast.error("บันทึกไม่สำเร็จ"); }
+    else { setCompletionPhotoPaths(newPaths); toast.success(`อัปโหลดแล้ว ${newPaths.length - completionPhotoPaths.length} รูป`); onRefresh(); }
+    setUploading(false);
+  }
+
+  async function deleteCompletionPhoto(path: string) {
+    const { error } = await supabase.storage.from(BUCKET).remove([path]);
+    if (error) { toast.error("ลบไม่สำเร็จ"); return; }
+    const newPaths = completionPhotoPaths.filter((p) => p !== path);
+    const { error: dbErr } = await supabase
+      .from("install_jobs").update({ completion_photos: newPaths }).eq("job_no", jobNo);
+    if (dbErr) { toast.error("อัปเดต DB ไม่สำเร็จ"); return; }
+    setCompletionPhotoPaths(newPaths);
+    toast.success("ลบรูปแล้ว");
+    onRefresh();
+  }
+
   // ─── Advance stage ─────────────────────────────────────────────────────────
   async function advanceStage() {
     if (job.stage >= 7) return;
@@ -261,7 +294,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       .eq("job_no", jobNo);
     if (error) { toast.error("ปิดงานไม่สำเร็จ"); return; }
     await supabase.from("job_evals").insert({ install_job_id: jobNo, token });
-    const link = `${window.location.origin}/eval/${token}`;
+    const link = `${window.location.origin}/eval?t=${token}`;
     await navigator.clipboard.writeText(link).catch(() => {});
     toast.success("ปิดงานแล้ว — ลิงก์ประเมินคัดลอกแล้ว");
     onRefresh(); onClose();
@@ -319,7 +352,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                : t === "survey" ? "สำรวจ"
                : t === "qc" ? "QC"
                : t === "photos" ? `รูป${photoPaths.length ? ` (${photoPaths.length})` : ""}`
-               : "ปิดงาน"}
+               : `ปิดงาน${completionPhotoPaths.length ? ` 📷${completionPhotoPaths.length}` : ""}`}
             </button>
           ))}
         </div>
@@ -693,6 +726,62 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                   ⚠️ มี {qcFail} รายการ QC ที่ยังไม่ผ่าน — แนะนำแก้ไขก่อนปิดงาน
                 </div>
               )}
+
+              {/* Completion photos */}
+              <div className="border border-slate-200 rounded-xl p-3 space-y-3">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">📸 รูปงานเสร็จสิ้น</p>
+                <p className="text-xs text-gray-500">ถ่ายรูปหลังงานเสร็จ — ลูกค้าจะเห็นผ่านลิงก์ประเมิน</p>
+
+                <input
+                  ref={completionFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => e.target.files && uploadCompletionPhotos(e.target.files)}
+                />
+                <button
+                  onClick={() => completionFileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="w-full border-2 border-dashed border-green-300 rounded-lg py-4 text-sm text-green-700 font-medium hover:bg-green-50 disabled:opacity-50 transition-colors"
+                >
+                  {uploading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                      </svg>
+                      กำลังอัปโหลด...
+                    </span>
+                  ) : (
+                    <>📷 ถ่ายรูป / เลือกรูปงานเสร็จ{completionPhotoPaths.length ? ` (${completionPhotoPaths.length})` : ""}</>
+                  )}
+                </button>
+
+                {completionPhotoPaths.length > 0 && (
+                  <div className="grid grid-cols-2 gap-2">
+                    {completionPhotoPaths.map((path) => (
+                      <div key={path} className="relative group">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={getPublicUrl(path)}
+                          alt="รูปงานเสร็จ"
+                          className="w-full h-32 object-cover rounded-lg border"
+                          loading="lazy"
+                        />
+                        <button
+                          onClick={() => deleteCompletionPhoto(path)}
+                          className="absolute top-1.5 right-1.5 bg-red-500 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3 space-y-1">
                 <p>การปิดงานจะ:</p>
                 <ul className="list-disc list-inside space-y-0.5 text-gray-700">

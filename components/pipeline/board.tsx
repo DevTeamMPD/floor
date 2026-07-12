@@ -30,6 +30,7 @@ function mapRow(row: Record<string, unknown>): InstallJob {
     docs: row.docs as string[],
     confirmations: row.confirmations as string[],
     sitePhotos: row.site_photos as string[],
+    completionPhotos: row.completion_photos as string[],
     area: row.area as string,
     addr: row.address as string,
     loc: row.location as string,

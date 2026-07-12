@@ -17,6 +17,8 @@ const ISSUE_TYPES = [
   "ทิ้งขยะไม่เก็บ", "พฤติกรรมไม่เหมาะสม", "อื่นๆ",
 ];
 
+const BUCKET = "job-photos";
+
 function Stars({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <div className="flex gap-1">
@@ -42,7 +44,9 @@ function EvalForm() {
   const supabase = createClient();
 
   const [state, setState] = useState<"loading" | "ready" | "done" | "invalid">("loading");
+  const [jobNo, setJobNo] = useState<string>("");
   const [job, setJob] = useState<{ id: string; customer: string; product: string } | null>(null);
+  const [completionPhotos, setCompletionPhotos] = useState<string[]>([]);
   const [scores, setScores] = useState<Record<string, number>>({});
   const [issueType, setIssueType] = useState("");
   const [comment, setComment] = useState("");
@@ -52,20 +56,27 @@ function EvalForm() {
     if (!token) { setState("invalid"); return; }
     supabase
       .from("job_evals")
-      .select("install_job_id, submitted_at, install_jobs(customer_name, product_name)")
+      .select("install_job_id, submitted_at, install_jobs(customer_name, product_name, completion_photos)")
       .eq("token", token)
       .single()
       .then(({ data, error }) => {
         if (error || !data) { setState("invalid"); return; }
         if (data.submitted_at) { setState("done"); return; }
+        const jId = String(data.install_job_id);
+        setJobNo(jId);
         setJob({
-          id: String(data.install_job_id),
+          id: jId,
           customer: (data as any).install_jobs?.customer_name ?? "",
           product: (data as any).install_jobs?.product_name ?? "",
         });
+        setCompletionPhotos((data as any).install_jobs?.completion_photos ?? []);
         setState("ready");
       });
   }, [token]);
+
+  function getPublicUrl(path: string): string {
+    return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -89,7 +100,7 @@ function EvalForm() {
     await supabase
       .from("install_jobs")
       .update({ eval_score: overall })
-      .eq("id", job.id);
+      .eq("job_no", jobNo);
     setState("done");
   }
 
@@ -107,6 +118,27 @@ function EvalForm() {
           <h1 className="text-xl font-semibold">ประเมินผลงานติดตั้ง</h1>
           <p className="text-slate-500 text-sm mt-1">{job?.customer} — {job?.product}</p>
         </div>
+
+        {/* Completion photos */}
+        {completionPhotos.length > 0 && (
+          <div className="mb-6">
+            <p className="text-sm font-medium text-slate-700 mb-2">📸 รูปงานเสร็จสิ้น</p>
+            <div className="grid grid-cols-2 gap-2">
+              {completionPhotos.map((path) => (
+                <a key={path} href={getPublicUrl(path)} target="_blank" rel="noopener noreferrer">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={getPublicUrl(path)}
+                    alt="รูปงานเสร็จ"
+                    className="w-full h-32 object-cover rounded-lg border hover:opacity-90 transition-opacity"
+                    loading="lazy"
+                  />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-5">
           {SECTIONS.map((sec) => (
             <div key={sec.key}>

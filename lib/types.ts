@@ -54,6 +54,7 @@ export interface InstallJob {
   docs?: string[];
   confirmations?: string[];
   sitePhotos?: string[];
+  completionPhotos?: string[];
   area?: string;
   addr?: string;
   loc?: string;
