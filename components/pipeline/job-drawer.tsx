@@ -29,7 +29,6 @@ const SHIFT_OPTIONS = [
 
 const BUCKET = "job-photos";
 
-// ─── Room types (PDF section 2) ────────────────────────────────────────────────
 const ROOM_TYPES = [
   { id: "bedroom", label: "ห้องนอน" },
   { id: "living", label: "ห้องนั่งเล่น" },
@@ -37,7 +36,6 @@ const ROOM_TYPES = [
   { id: "pet_room", label: "ห้องเลี้ยงสัตว์" },
 ];
 
-// ─── Survey types ──────────────────────────────────────────────────────────────
 const CUT_TYPES = [
   { id: "corner_moulding", label: "มุมบัว / ประตูเลื่อน" },
   { id: "pillar_corner", label: "มุมเสา" },
@@ -71,7 +69,6 @@ interface SurveyData {
   savedAt?: string;
 }
 
-// ─── Pre-install checklist (PDF section 4) ────────────────────────────────────
 const PRE_INSTALL_ITEMS = [
   { id: 1, label: "จำนวนสินค้า / จำนวนแผ่นครบตามรายการ" },
   { id: 2, label: "สี / รุ่น / ลวดลายตรงตามที่ลูกค้าสั่งซื้อ" },
@@ -85,7 +82,6 @@ interface PreInstallData {
   savedAt?: string;
 }
 
-// ─── Handover checklist (PDF section 5) ──────────────────────────────────────
 const HANDOVER_ITEMS = [
   { id: 1, label: "ติดตั้งครบตามพื้นที่ที่ตกลง" },
   { id: 2, label: "งานติดตั้งเรียบร้อย แนบสนิท และพร้อมใช้งาน" },
@@ -96,11 +92,12 @@ const HANDOVER_ITEMS = [
 interface HandoverData {
   checks: Record<number, boolean>;
   actualAreaSqm: string;
+  qtyRequisitioned: string;
+  qtyActualUsed: string;
   notes: string;
   savedAt?: string;
 }
 
-// ─── QC types ──────────────────────────────────────────────────────────────────
 const QC_ITEMS = [
   { id: 1, label: "ช่องว่างขอบแผ่นกับผนัง/บัว/เสา/เฟอร์นิเจอร์", spec: "≤ 1 mm" },
   { id: 2, label: "รอยต่อชนก่อนเชื่อม", spec: "≤ 0.3 mm" },
@@ -126,7 +123,6 @@ interface QCData {
   savedAt?: string;
 }
 
-// ─── Component ─────────────────────────────────────────────────────────────────
 export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const supabase = createClient();
   const jobNo = job.jobNo ?? "";
@@ -135,7 +131,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const completionFileInputRef = useRef<HTMLInputElement>(null);
 
-  // ─── Contact / appointment / room type ────────────────────────────────────
   const [contactDraft, setContactDraft] = useState({
     customer_name: job.customer ?? "",
     phone: job.phone ?? "",
@@ -146,36 +141,31 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const [roomTypes, setRoomTypes] = useState<string[]>([]);
   const [roomTypesLoaded, setRoomTypesLoaded] = useState(false);
 
-  // ─── Survey ────────────────────────────────────────────────────────────────
   const [survey, setSurvey] = useState<SurveyData>({
     cutTypes: [], weldType: "", finishTypes: [],
     floorCondition: "", wetZone: false, areaSqm: "", notes: "",
   });
   const [surveyLoaded, setSurveyLoaded] = useState(false);
 
-  // ─── Pre-install ───────────────────────────────────────────────────────────
   const [preInstall, setPreInstall] = useState<PreInstallData>({ checks: {}, notes: "" });
   const [preInstallLoaded, setPreInstallLoaded] = useState(false);
 
-  // ─── QC ────────────────────────────────────────────────────────────────────
   const [qcResults, setQcResults] = useState<Record<number, QCResult>>({});
   const [qcInspector, setQcInspector] = useState("");
   const [qcNotes, setQcNotes] = useState("");
   const [qcLoaded, setQcLoaded] = useState(false);
 
-  // ─── Handover ──────────────────────────────────────────────────────────────
-  const [handover, setHandover] = useState<HandoverData>({ checks: {}, actualAreaSqm: "", notes: "" });
+  const [handover, setHandover] = useState<HandoverData>({
+    checks: {}, actualAreaSqm: "", qtyRequisitioned: "", qtyActualUsed: "", notes: "",
+  });
   const [handoverLoaded, setHandoverLoaded] = useState(false);
 
-  // ─── Photos ────────────────────────────────────────────────────────────────
   const [photoPaths, setPhotoPaths] = useState<string[]>(job.sitePhotos ?? []);
   const [completionPhotoPaths, setCompletionPhotoPaths] = useState<string[]>(job.completionPhotos ?? []);
   const [uploading, setUploading] = useState(false);
 
-  // Load room_type on mount
   useEffect(() => { loadRoomTypes(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Lazy load per tab
   useEffect(() => {
     if (tab === "survey" && !surveyLoaded) loadSurvey();
     if (tab === "qc") {
@@ -236,7 +226,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     setHandoverLoaded(true);
   }
 
-  // ─── Save contact ──────────────────────────────────────────────────────────
   async function saveContact() {
     setSaving(true);
     try {
@@ -318,7 +307,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     setSaving(false);
   }
 
-  // ─── Photos ────────────────────────────────────────────────────────────────
   function getPublicUrl(path: string): string {
     return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
   }
@@ -406,15 +394,16 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     onRefresh(); onClose();
   }
 
-  // ─── Computed ──────────────────────────────────────────────────────────────
   const qcAnswered = Object.values(qcResults).filter(Boolean).length;
   const qcPass    = Object.values(qcResults).filter((v) => v === "pass").length;
   const qcFail    = Object.values(qcResults).filter((v) => v === "fail").length;
   const preInstallCheckedCount = Object.values(preInstall.checks).filter(Boolean).length;
   const handoverCheckedCount = Object.values(handover.checks).filter(Boolean).length;
   const allHandoverChecked = handoverCheckedCount === HANDOVER_ITEMS.length;
+  const qtyDiff = handover.qtyRequisitioned && handover.qtyActualUsed
+    ? Number(handover.qtyRequisitioned) - Number(handover.qtyActualUsed)
+    : null;
 
-  // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
       <div
@@ -555,7 +544,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                   </div>
                 </div>
 
-                {/* Room type — PDF section 2 */}
                 <div>
                   <label className="text-xs text-gray-500 block mb-1.5">🏠 ประเภทพื้นที่ติดตั้ง</label>
                   <div className="flex flex-wrap gap-2">
@@ -735,8 +723,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
           {/* ── QC ── */}
           {tab === "qc" && (
             <div className="space-y-5">
-
-              {/* Pre-install checklist — PDF section 4 */}
+              {/* Pre-install checklist */}
               <div className="border border-amber-200 rounded-xl p-3 space-y-3 bg-amber-50">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">✅ ตรวจเช็คก่อนเริ่มติดตั้ง</p>
@@ -777,7 +764,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
               {/* SOP QC */}
               <div className="space-y-4">
                 <div className="text-xs text-gray-500 bg-blue-50 border border-blue-200 rounded p-2">
-                  เกณฑ์ตรวจรับงาน 15 ข้อ ตาม SOP — ใช้ที่ขั้นตอน ตรวจสอบงาน (Stage 6)
+                  เกณฑ์ตรวจรับงาน 15 ข้อ ตาม SOP
                 </div>
                 <div className="flex gap-3 text-xs">
                   <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-600">ตอบแล้ว {qcAnswered}/15</span>
@@ -878,7 +865,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 </div>
               )}
 
-              {/* Handover checklist — PDF section 5 */}
+              {/* Handover checklist */}
               <div className="border border-green-200 rounded-xl p-3 space-y-3 bg-green-50">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">📋 รายการส่งมอบงาน</p>
@@ -901,13 +888,46 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                     </label>
                   ))}
                 </div>
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">พื้นที่ติดตั้งจริง (ตรม.)</label>
-                  <input type="number" min="0" step="0.1" placeholder="เช่น 22"
-                    className="w-full border border-green-200 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-                    value={handover.actualAreaSqm}
-                    onChange={(e) => setHandover((h) => ({ ...h, actualAreaSqm: e.target.value }))} />
+
+                {/* Area & quantity fields */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">พื้นที่ติดตั้งจริง (ตรม.)</label>
+                    <input type="number" min="0" step="0.1" placeholder="เช่น 22"
+                      className="w-full border border-green-200 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                      value={handover.actualAreaSqm}
+                      onChange={(e) => setHandover((h) => ({ ...h, actualAreaSqm: e.target.value }))} />
+                  </div>
+                  <div />
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">จำนวนที่เบิกไปใช้ (แผ่น)</label>
+                    <input type="number" min="0" step="1" placeholder="เช่น 50"
+                      className="w-full border border-green-200 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                      value={handover.qtyRequisitioned}
+                      onChange={(e) => setHandover((h) => ({ ...h, qtyRequisitioned: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 block mb-1">จำนวนที่ใช้จริง (แผ่น)</label>
+                    <input type="number" min="0" step="1" placeholder="เช่น 47"
+                      className="w-full border border-green-200 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                      value={handover.qtyActualUsed}
+                      onChange={(e) => setHandover((h) => ({ ...h, qtyActualUsed: e.target.value }))} />
+                  </div>
                 </div>
+
+                {/* Surplus/deficit indicator */}
+                {qtyDiff !== null && (
+                  <div className={`text-xs rounded px-2 py-1.5 font-medium ${
+                    qtyDiff > 0 ? "bg-blue-50 text-blue-700 border border-blue-200"
+                    : qtyDiff < 0 ? "bg-red-50 text-red-700 border border-red-200"
+                    : "bg-gray-50 text-gray-600 border border-gray-200"
+                  }`}>
+                    {qtyDiff > 0 ? `➡️ คืนคลัง ${qtyDiff} แผ่น`
+                      : qtyDiff < 0 ? `⚠️ ใช้เกิน ${Math.abs(qtyDiff)} แผ่น`
+                      : "✅ ใช้ครบพอดี"}
+                  </div>
+                )}
+
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">หมายเหตุการส่งมอบ</label>
                   <textarea rows={2} placeholder="รายละเอียดข้อแก้ไข / หมายเหตุเพิ่มเติม..."
@@ -926,7 +946,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
               {/* Completion photos */}
               <div className="border border-slate-200 rounded-xl p-3 space-y-3">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">📸 รูปงานเสร็จสิ้น</p>
-                <p className="text-xs text-gray-500">ถ่ายรูปหลังงานเสร็จ — ลูกค้าจะเห็นผ่านลิงก์ประเมิน</p>
                 <input ref={completionFileInputRef} type="file" accept="image/*" capture="environment" multiple className="hidden"
                   onChange={(e) => e.target.files && uploadCompletionPhotos(e.target.files)} />
                 <button onClick={() => completionFileInputRef.current?.click()} disabled={uploading}
