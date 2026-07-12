@@ -5,8 +5,9 @@ import { createClient } from "@/lib/supabase/client";
 import { IP_STAGES } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
+// NOTE: The DB PK is job_no (text). There is no id column in install_jobs.
 interface JobDoc {
-  id: string;
+  job_no: string;
   order_no: string | null;
   ticket_no: string | null;
   customer_name: string | null;
@@ -35,7 +36,7 @@ function PrintModal({ job, onClose }: { job: JobDoc; onClose: () => void }) {
               {isComplete ? "ใบส่งงาน" : "ใบสั่งงาน"}
             </div>
             <h2 className="text-xl font-bold text-slate-800">
-              {job.order_no ?? job.ticket_no ?? job.id.slice(0, 8)}
+              {job.order_no ?? job.ticket_no ?? job.job_no}
             </h2>
           </div>
           <div className="flex items-center gap-2">
@@ -96,7 +97,7 @@ export default function DocumentsPage() {
   useEffect(() => {
     supabase
       .from("install_jobs")
-      .select("id,order_no,ticket_no,customer_name,product_name,stage,order_date,due_date,phone,address,closed_at,created_at")
+      .select("job_no,order_no,ticket_no,customer_name,product_name,stage,order_date,due_date,phone,address,closed_at,created_at")
       .order("created_at", { ascending: false })
       .then(({ data }) => {
         setJobs((data ?? []) as JobDoc[]);
@@ -133,7 +134,7 @@ export default function DocumentsPage() {
       >
         <td className="px-4 py-3">
           <div className="font-mono text-xs text-blue-700">
-            {job.order_no ?? job.ticket_no ?? job.id.slice(0, 8)}
+            {job.order_no ?? job.ticket_no ?? job.job_no}
           </div>
           <div className="text-[10px] text-slate-400 mt-0.5">
             {isComplete ? "ใบส่งงาน" : "ใบสั่งงาน"}
@@ -178,7 +179,7 @@ export default function DocumentsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {rows.map((j) => <DocRow key={j.id} job={j} />)}
+              {rows.map((j) => <DocRow key={j.job_no} job={j} />)}
             </tbody>
           </table>
         </div>

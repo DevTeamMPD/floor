@@ -6,9 +6,12 @@ import { IP_STAGES } from "@/lib/types";
 import type { InstallJob } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
+// NOTE: The DB PK is job_no (text). There is no id column.
+// id is set = job_no here so React keys work correctly.
 function mapRow(row: Record<string, unknown>): InstallJob {
   return {
-    id: String(row.id),
+    id: row.job_no as string,
+    jobNo: row.job_no as string,
     ticket: row.ticket_no as string,
     order: row.order_no as string,
     product: row.product_name as string,
@@ -126,7 +129,7 @@ export default function QueuePage() {
                       const stg = IP_STAGES.find((s) => s.id === j.stage);
                       const overdue = j.due && j.due < todayStr;
                       return (
-                        <tr key={j.id} className="hover:bg-blue-50/30 transition-colors">
+                        <tr key={j.jobNo} className="hover:bg-blue-50/30 transition-colors">
                           <td className="px-4 py-3 font-medium">{j.customer ?? "—"}</td>
                           <td className="px-4 py-3 text-slate-500 max-w-[200px] truncate">{j.product ?? "—"}</td>
                           <td className="px-4 py-3">

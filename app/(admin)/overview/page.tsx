@@ -5,8 +5,9 @@ import { createClient } from "@/lib/supabase/client";
 import { IP_STAGES } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
+// NOTE: The DB PK is job_no (text). There is no id column in install_jobs.
 interface JobRow {
-  id: string;
+  job_no: string;
   stage: number;
   eval_score: number | null;
   closed_at: string | null;
@@ -26,7 +27,7 @@ export default function OverviewPage() {
   useEffect(() => {
     supabase
       .from("install_jobs")
-      .select("id,stage,eval_score,closed_at,order_date,customer_name,product_name,order_no,due_date,created_at")
+      .select("job_no,stage,eval_score,closed_at,order_date,customer_name,product_name,order_no,due_date,created_at")
       .order("created_at", { ascending: false })
       .then(({ data }) => {
         setJobs((data ?? []) as JobRow[]);
@@ -139,7 +140,7 @@ export default function OverviewPage() {
               {recentAdded.map((j) => {
                 const stg = IP_STAGES.find((s) => s.id === j.stage);
                 return (
-                  <tr key={j.id} className="hover:bg-slate-50">
+                  <tr key={j.job_no} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-medium">{j.customer_name ?? "—"}</td>
                     <td className="px-4 py-3 text-slate-500 max-w-[180px] truncate">{j.product_name ?? "—"}</td>
                     <td className="px-4 py-3">
