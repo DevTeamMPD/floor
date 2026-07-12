@@ -12,10 +12,8 @@ interface Props {
   onRefresh: () => void;
 }
 
+// Static fields — customer/phone/addr are editable in the contact section below
 const FIELD_ROWS = [
-  { label: "ลูกค้า", key: "customer" as const },
-  { label: "เบอร์โทร", key: "phone" as const },
-  { label: "ที่อยู่", key: "addr" as const },
   { label: "สินค้า", key: "product" as const },
   { label: "SKU", key: "sku" as const },
   { label: "ออเดอร์", key: "order" as const },
@@ -23,6 +21,12 @@ const FIELD_ROWS = [
   { label: "วันที่สั่ง", key: "date" as const, format: true },
   { label: "กำหนดเสร็จ", key: "due" as const, format: true },
 ];
+
+const SHIFT_OPTIONS = [
+  { value: "morning", label: "🌅 เช้า" },
+  { value: "afternoon", label: "☀️ บ่าย" },
+  { value: "allday", label: "🌞 ทั้งวัน" },
+] as const;
 
 const BUCKET = "job-photos";
 
@@ -94,6 +98,15 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ─── Contact/appointment draft state ──────────────────────────────────────
+  const [contactDraft, setContactDraft] = useState({
+    customer_name: job.customer ?? "",
+    phone: job.phone ?? "",
+    address: job.addr ?? "",
+    location_url: job.locationUrl ?? "",
+    appt_shift: job.apptShift ?? "",
+  });
+
   // ─── Survey state ──────────────────────────────────────────────────────────
   const [survey, setSurvey] = useState<SurveyData>({
     cutTypes: [], weldType: "", finishTypes: [],
@@ -139,6 +152,29 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       }
     } catch { /* column not yet migrated */ }
     setQcLoaded(true);
+  }
+
+  // ─── Save contact/appointment info ─────────────────────────────────────────
+  async function saveContact() {
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from("install_jobs")
+        .update({
+          customer_name: contactDraft.customer_name,
+          phone: contactDraft.phone,
+          address: contactDraft.address,
+          location_url: contactDraft.location_url || null,
+          appt_shift: contactDraft.appt_shift || null,
+        })
+        .eq("job_no", jobNo);
+      if (error) throw error;
+      toast.success("บันทึกข้อมูลแล้ว");
+      onRefresh();
+    } catch (e: unknown) {
+      toast.error("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
+    }
+    setSaving(false);
   }
 
   async function saveSurvey() {
@@ -187,7 +223,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       if (error) { toast.error(`อัปโหลดไม่สำเร็จ: ${file.name}`); continue; }
       newPaths.push(path);
     }
-    // save paths to DB
     const { error: dbErr } = await supabase
       .from("install_jobs").update({ site_photos: newPaths }).eq("job_no", jobNo);
     if (dbErr) { toast.error("บันทึกไม่สำเร็จ"); }
@@ -258,6 +293,15 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
           <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
             {IP_STAGES[job.stage - 1]?.name ?? `Stage ${job.stage}`}
           </span>
+          {job.apptShift && (
+            <span className={`ml-2 inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
+              job.apptShift === "morning" ? "bg-orange-100 text-orange-700"
+              : job.apptShift === "afternoon" ? "bg-yellow-100 text-yellow-700"
+              : "bg-green-100 text-green-700"
+            }`}>
+              {job.apptShift === "morning" ? "🌅 เช้า" : job.apptShift === "afternoon" ? "☀️ บ่าย" : "🌞 ทั้งวัน"}
+            </span>
+          )}
         </div>
 
         {/* Tabs */}
@@ -285,21 +329,127 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
           {/* ── INFO ── */}
           {tab === "info" && (
-            <table className="w-full text-sm">
-              <tbody>
-                {FIELD_ROWS.map(({ label, key, format }) => {
-                  const val = job[key as keyof InstallJob] as string | number | undefined;
-                  return (
-                    <tr key={key} className="border-b last:border-0">
-                      <td className="py-2 pr-4 text-gray-500 w-28 shrink-0">{label}</td>
-                      <td className="py-2 font-medium text-gray-900 break-words">
-                        {format && typeof val === "string" ? formatDate(val) : (val ?? "—")}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="space-y-4">
+              {/* Static job info */}
+              <table className="w-full text-sm">
+                <tbody>
+                  {FIELD_ROWS.map(({ label, key, format }) => {
+                    const val = job[key as keyof InstallJob] as string | number | undefined;
+                    return (
+                      <tr key={key} className="border-b last:border-0">
+                        <td className="py-2 pr-4 text-gray-500 w-28 shrink-0">{label}</td>
+                        <td className="py-2 font-medium text-gray-900 break-words">
+                          {format && typeof val === "string" ? formatDate(val) : (val ?? "—")}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {/* Photo prompt banner — stage 2 */}
+              {job.stage === 2 && (
+                <button
+                  onClick={() => setTab("photos")}
+                  className="w-full flex items-center gap-3 border border-blue-200 bg-blue-50 rounded-xl p-3 hover:bg-blue-100 transition-colors text-left"
+                >
+                  <span className="text-2xl">📷</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-blue-800">แนบรูปพื้นที่บ้านลูกค้า</p>
+                    <p className="text-xs text-blue-600">ให้ช่างรู้ลักษณะพื้นก่อนเข้างาน{photoPaths.length > 0 ? ` — มี ${photoPaths.length} รูปแล้ว` : " — ยังไม่มีรูป"}</p>
+                  </div>
+                  <span className="text-blue-400 text-lg">›</span>
+                </button>
+              )}
+
+              {/* Editable contact + appointment section */}
+              <div className="border border-slate-200 rounded-xl p-3 space-y-3">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">📞 ข้อมูลติดต่อ / นัดหมาย</p>
+
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">ชื่อลูกค้า</label>
+                  <input
+                    value={contactDraft.customer_name}
+                    onChange={(e) => setContactDraft((d) => ({ ...d, customer_name: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">เบอร์โทร</label>
+                  <input
+                    value={contactDraft.phone}
+                    onChange={(e) => setContactDraft((d) => ({ ...d, phone: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">ที่อยู่ติดตั้ง</label>
+                  <textarea
+                    rows={2}
+                    value={contactDraft.address}
+                    onChange={(e) => setContactDraft((d) => ({ ...d, address: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">📍 Google Maps URL</label>
+                  <div className="flex gap-2">
+                    <input
+                      value={contactDraft.location_url}
+                      onChange={(e) => setContactDraft((d) => ({ ...d, location_url: e.target.value }))}
+                      placeholder="https://maps.app.goo.gl/..."
+                      className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    />
+                    {contactDraft.location_url && (
+                      <a
+                        href={contactDraft.location_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-2 bg-green-100 text-green-700 rounded-lg text-xs font-medium hover:bg-green-200 whitespace-nowrap flex items-center"
+                      >
+                        📍 เปิด
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">🕐 กะนัดหมาย</label>
+                  <div className="flex gap-2">
+                    {SHIFT_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() =>
+                          setContactDraft((d) => ({
+                            ...d,
+                            appt_shift: d.appt_shift === opt.value ? "" : opt.value,
+                          }))
+                        }
+                        className={`flex-1 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                          contactDraft.appt_shift === opt.value
+                            ? "bg-blue-600 text-white border-blue-600"
+                            : "bg-white text-gray-600 border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={saveContact}
+                  disabled={saving}
+                  className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  {saving ? "กำลังบันทึก…" : "💾 บันทึกข้อมูล"}
+                </button>
+              </div>
+            </div>
           )}
 
           {/* ── STAGES ── */}
@@ -483,7 +633,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 อัปโหลดรูปหน้างาน / สภาพพื้น / งานสำเร็จ — เก็บไว้ใน Supabase Storage
               </div>
 
-              {/* Upload button */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -510,7 +659,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 )}
               </button>
 
-              {/* Photo grid */}
               {photoPaths.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-8">ยังไม่มีรูป</p>
               ) : (

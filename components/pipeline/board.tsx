@@ -41,6 +41,8 @@ function mapRow(row: Record<string, unknown>): InstallJob {
     closedAt: row.closed_at as string,
     closedBy: row.closed_by as string,
     orderSource: row.order_source as InstallJob["orderSource"],
+    locationUrl: row.location_url as string,
+    apptShift: row.appt_shift as InstallJob["apptShift"],
   };
 }
 

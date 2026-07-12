@@ -64,4 +64,6 @@ export interface InstallJob {
   closedAt?: string;
   closedBy?: string;
   orderSource?: OrderSource;
+  locationUrl?: string;
+  apptShift?: "morning" | "afternoon" | "allday";
 }

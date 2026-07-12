@@ -10,6 +10,12 @@ interface Props {
 
 const SOURCES = ["manual", "shopee", "lazada", "tiktok", "jst", "web"];
 
+const SHIFT_OPTIONS = [
+  { value: "morning", label: "🌅 เช้า" },
+  { value: "afternoon", label: "☀️ บ่าย" },
+  { value: "allday", label: "🌞 ทั้งวัน" },
+] as const;
+
 export default function CreateOrderModal({ onClose, onCreated }: Props) {
   const supabase = createClient();
   const [form, setForm] = useState({
@@ -21,6 +27,8 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
     customer_name: "",
     phone: "",
     address: "",
+    location_url: "",
+    appt_shift: "",
   });
   const [checking, setChecking] = useState(false);
   const [exists, setExists] = useState(false);
@@ -34,7 +42,7 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
       setChecking(true);
       const { data } = await supabase
         .from("install_jobs")
-        .select("id")
+        .select("job_no")
         .eq("order_no", form.order_no)
         .single();
       setExists(!!data);
@@ -46,19 +54,30 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
     setForm((f) => ({ ...f, [k]: v }));
   }
 
+  function toggleShift(v: string) {
+    setForm((f) => ({ ...f, appt_shift: f.appt_shift === v ? "" : v }));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     try {
+      const payload = {
+        ...form,
+        location_url: form.location_url || null,
+        appt_shift: form.appt_shift || null,
+        stage: 1,
+        status: "Active",
+      };
       if (exists) {
         await supabase
           .from("install_jobs")
-          .update({ ...form, stage: 1, status: "Active" })
+          .update(payload)
           .eq("order_no", form.order_no);
       } else {
         await supabase
           .from("install_jobs")
-          .insert({ ...form, stage: 1, status: "Active" });
+          .insert(payload);
       }
       onCreated();
     } finally {
@@ -69,7 +88,7 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 z-10">
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 z-10 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-lg font-semibold">สร้างออเดอร์ใหม่</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
@@ -167,6 +186,38 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
               rows={2}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
+          </div>
+
+          {/* Location URL */}
+          <div>
+            <label className="text-xs font-medium text-slate-600 block mb-1">📍 Google Maps URL</label>
+            <input
+              value={form.location_url}
+              onChange={(e) => set("location_url", e.target.value)}
+              placeholder="https://maps.app.goo.gl/..."
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
+
+          {/* Appointment shift */}
+          <div>
+            <label className="text-xs font-medium text-slate-600 block mb-1">🕐 กะนัดหมาย</label>
+            <div className="flex gap-2">
+              {SHIFT_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => toggleShift(opt.value)}
+                  className={`flex-1 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                    form.appt_shift === opt.value
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <button
