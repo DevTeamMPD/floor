@@ -8,7 +8,8 @@ import { formatDate } from "@/lib/utils";
 
 function mapRow(row: Record<string, unknown>): InstallJob {
   return {
-    id: String(row.id),
+    id: row.job_no as string,
+    jobNo: row.job_no as string,
     ticket: row.ticket_no as string,
     order: row.order_no as string,
     product: row.product_name as string,
@@ -93,7 +94,7 @@ export default function JobsPage() {
             {filtered.map((j) => {
               const stg = IP_STAGES.find((s) => s.id === j.stage);
               return (
-                <tr key={j.id} className="hover:bg-slate-50">
+                <tr key={j.jobNo} className="hover:bg-slate-50">
                   <td className="px-4 py-3 font-mono text-xs">{j.order ?? "—"}</td>
                   <td className="px-4 py-3">{j.customer ?? "—"}</td>
                   <td className="px-4 py-3 text-slate-600">{j.product ?? "—"}</td>
