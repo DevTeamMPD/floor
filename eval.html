@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>ประเมินความพึงพอใจ — MPD Group</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F1F5F9;min-height:100vh;display:flex;justify-content:center;padding:16px}
+  .wrap{width:100%;max-width:480px}
+  .card{background:#fff;border-radius:16px;box-shadow:0 2px 16px rgba(0,0,0,0.08);padding:24px;margin-bottom:16px}
+  .logo{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+  .logo-icon{width:40px;height:40px;background:#2563EB;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px;letter-spacing:-1px}
+  .logo-text{font-size:18px;font-weight:700;color:#1E3A8A}
+  .subtitle{font-size:14px;color:#64748B;margin-top:4px}
+  h2{font-size:20px;font-weight:700;color:#1E293B;margin-bottom:4px}
+  .section-label{font-size:14px;font-weight:600;color:#334155;margin-bottom:8px;display:block}
+  .stars-group{margin-bottom:18px}
+  .stars-row{display:flex;gap:4px;margin-top:6px}
+  .star{font-size:32px;cursor:pointer;transition:transform 0.12s;user-select:none;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;border-radius:8px}
+  .star:hover{transform:scale(1.15)}
+  .star.filled{color:#F59E0B}
+  .star.empty{color:#E2E8F0}
+  textarea{width:100%;border:1.5px solid #E2E8F0;border-radius:10px;padding:12px;font-size:14px;resize:vertical;min-height:90px;outline:none;transition:border-color 0.2s;font-family:inherit}
+  textarea:focus{border-color:#2563EB}
+  select{width:100%;border:1.5px solid #E2E8F0;border-radius:10px;padding:11px 12px;font-size:14px;outline:none;transition:border-color 0.2s;background:#fff;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+  select:focus{border-color:#2563EB}
+  .field{margin-bottom:14px}
+  .fi-label{font-size:13px;font-weight:600;color:#475569;margin-bottom:6px;display:block}
+  .issue-box{background:#FFF7ED;border:1.5px solid #FED7AA;border-radius:10px;padding:14px;margin-top:14px;display:none}
+  .issue-box .fi-label{color:#92400E}
+  .btn-submit{width:100%;padding:15px;background:#2563EB;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;transition:background 0.15s,transform 0.1s;margin-top:8px}
+  .btn-submit:hover{background:#1D4ED8}
+  .btn-submit:active{transform:scale(0.98)}
+  .btn-submit:disabled{background:#94A3B8;cursor:not-allowed}
+  .msg-card{text-align:center;padding:40px 24px}
+  .msg-icon{font-size:56px;margin-bottom:12px}
+  .msg-title{font-size:20px;font-weight:700;color:#1E293B;margin-bottom:8px}
+  .msg-sub{font-size:14px;color:#64748B;line-height:1.6}
+  .thank-card{background:linear-gradient(135deg,#EFF6FF,#F0FDF4);border:1.5px solid #BFDBFE;border-radius:16px;padding:28px 24px;text-align:center}
+  .thank-icon{font-size:52px;margin-bottom:12px}
+  .thank-title{font-size:19px;font-weight:700;color:#1D4ED8;margin-bottom:8px}
+  .thank-sub{font-size:14px;color:#334155;line-height:1.7}
+  .alert-sub{font-size:14px;color:#DC2626;font-weight:600;margin-top:10px}
+  #loading{text-align:center;padding:60px 20px;color:#64748B;font-size:15px}
+  .spinner{display:inline-block;width:28px;height:28px;border:3px solid #E2E8F0;border-top-color:#2563EB;border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:10px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="loading"><div class="spinner"></div><br>กำลังโหลด...</div>
+  <div id="app" style="display:none"></div>
+</div>
+
+<script>
+const SUPA_URL = 'https://nroyacasuchqniaiuirk.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5yb3lhY2FzdWNocW5pYWl1aXJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY1MjkxNjYsImV4cCI6MjA2MjEwNTE2Nn0.7YqtGbIbj1-J2vqpgfHdpHZA8L3NpZOVJnOiRqLhRvg';
+
+var TOKEN = null;
+var EVAL_ROW = null;
+var scores = {score_overall:0,score_install:0,score_product:0,score_timing:0,score_cleanup:0};
+
+function supa(path, method, body){
+  return fetch(SUPA_URL+'/rest/v1/'+path, {
+    method: method||'GET',
+    headers:{
+      'apikey': SUPA_KEY,
+      'Authorization': 'Bearer '+SUPA_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': method==='POST'?'return=representation':'return=representation'
+    },
+    body: body ? JSON.stringify(body) : undefined
+  }).then(function(r){return r.json();});
+}
+
+function supaGet(path){
+  return fetch(SUPA_URL+'/rest/v1/'+path, {
+    headers:{
+      'apikey': SUPA_KEY,
+      'Authorization': 'Bearer '+SUPA_KEY,
+      'Content-Type': 'application/json'
+    }
+  }).then(function(r){return r.json();});
+}
+
+function supaPatch(path, body){
+  return fetch(SUPA_URL+'/rest/v1/'+path, {
+    method: 'PATCH',
+    headers:{
+      'apikey': SUPA_KEY,
+      'Authorization': 'Bearer '+SUPA_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    },
+    body: JSON.stringify(body)
+  }).then(function(r){return r.json();});
+}
+
+function getToken(){
+  var params = new URLSearchParams(window.location.search);
+  return params.get('t');
+}
+
+function showApp(html){
+  document.getElementById('loading').style.display='none';
+  var app=document.getElementById('app');
+  app.style.display='';
+  app.innerHTML=html;
+}
+
+function headerHTML(){
+  return '<div class="card"><div class="logo"><div class="logo-icon">MPD</div><div><div class="logo-text">MPD Group</div><div class="subtitle">ขอบคุณที่ใช้บริการ</div></div></div></div>';
+}
+
+function renderStars(key, label){
+  var stars='';
+  for(var i=1;i<=5;i++){
+    stars+='<span class="star empty" data-key="'+key+'" data-val="'+i+'" onclick="setScore(\''+key+'\','+i+')" onmouseover="hoverStars(\''+key+'\','+i+')" onmouseout="resetStars(\''+key+'\')">★</span>';
+  }
+  return '<div class="stars-group"><span class="section-label">'+label+'</span><div class="stars-row" id="stars_'+key+'">'+stars+'</div></div>';
+}
+
+function setScore(key, val){
+  scores[key]=val;
+  updateStarDisplay(key,val);
+  // Show/hide issue box
+  if(key==='score_overall'){
+    var box=document.getElementById('issue_box');
+    if(box) box.style.display = val<=3 ? 'block':'none';
+  }
+}
+
+function hoverStars(key, val){
+  var row=document.getElementById('stars_'+key);
+  if(!row) return;
+  var stars=row.querySelectorAll('.star');
+  stars.forEach(function(s,i){
+    s.style.color = i<val ? '#F59E0B':'#E2E8F0';
+  });
+}
+
+function resetStars(key){
+  updateStarDisplay(key, scores[key]);
+}
+
+function updateStarDisplay(key, val){
+  var row=document.getElementById('stars_'+key);
+  if(!row) return;
+  var stars=row.querySelectorAll('.star');
+  stars.forEach(function(s,i){
+    s.style.color = i<val ? '#F59E0B':'#E2E8F0';
+    s.className = 'star '+(i<val?'filled':'empty');
+  });
+}
+
+function showForm(){
+  var html = headerHTML();
+  html += '<div class="card">';
+  html += '<h2>ประเมินความพึงพอใจ</h2>';
+  html += '<p style="font-size:13px;color:#64748B;margin:6px 0 20px">กรุณาให้คะแนนบริการของเรา (1 = น้อย, 5 = มากที่สุด)</p>';
+  html += renderStars('score_overall','⭐ ความพึงพอใจโดยรวม');
+  html += renderStars('score_install','🔧 คุณภาพงานติดตั้ง');
+  html += renderStars('score_product','🎨 สินค้าตรงตามที่เลือก');
+  html += renderStars('score_timing','⏰ ตรงเวลา / แจ้งล่วงหน้า');
+  html += renderStars('score_cleanup','🧹 ความเรียบร้อยหลังงาน');
+  html += '<div class="field"><label class="fi-label" for="comment">ความคิดเห็นเพิ่มเติม (ถ้ามี)</label><textarea id="comment" placeholder="แสดงความคิดเห็น..."></textarea></div>';
+  html += '<div class="issue-box" id="issue_box"><label class="fi-label" for="issue_type">ประเภทปัญหา</label><select id="issue_type"><option value="">-- เลือกประเภทปัญหา --</option><option value="warranty">รับประกัน / ซ่อม</option><option value="ncr">สินค้าบกพร่อง (NCR)</option><option value="other">อื่นๆ</option></select></div>';
+  html += '<button class="btn-submit" id="btn_submit" onclick="submitEval()">ส่งการประเมิน</button>';
+  html += '</div>';
+  showApp(html);
+}
+
+function submitEval(){
+  var allScored = scores.score_overall>0 && scores.score_install>0 && scores.score_product>0 && scores.score_timing>0 && scores.score_cleanup>0;
+  if(!allScored){
+    alert('กรุณาให้คะแนนทุกหัวข้อก่อนส่ง');
+    return;
+  }
+  var btn=document.getElementById('btn_submit');
+  btn.disabled=true;
+  btn.textContent='กำลังส่ง...';
+
+  var comment=document.getElementById('comment').value||'';
+  var issueEl=document.getElementById('issue_type');
+  var issue_type = issueEl ? issueEl.value : '';
+  var overall = scores.score_overall;
+
+  var body = {
+    score_overall: scores.score_overall,
+    score_install: scores.score_install,
+    score_product: scores.score_product,
+    score_timing: scores.score_timing,
+    score_cleanup: scores.score_cleanup,
+    comment: comment,
+    issue_type: issue_type||null,
+    submitted_at: new Date().toISOString()
+  };
+
+  supaPatch('job_evals?token=eq.'+encodeURIComponent(TOKEN)+'&submitted_at=is.null', body)
+    .then(function(res){
+      if(Array.isArray(res) && res.length===0){
+        // Nothing updated — already submitted or invalid
+        showApp(headerHTML()+'<div class="card"><div class="msg-card"><div class="msg-icon">⚠️</div><div class="msg-title">ไม่สามารถส่งข้อมูลได้</div><div class="msg-sub">ลิงก์นี้อาจถูกใช้แล้วหรือหมดอายุ</div></div></div>');
+        return;
+      }
+      // Success
+      var html = headerHTML();
+      html += '<div class="thank-card">';
+      html += '<div class="thank-icon">⭐</div>';
+      html += '<div class="thank-title">ขอบคุณสำหรับ Feedback ของท่าน!</div>';
+      html += '<div class="thank-sub">MPD Group จะนำข้อมูลนี้ไปพัฒนาบริการให้ดียิ่งขึ้น</div>';
+      if(overall<=3){
+        html += '<div class="alert-sub">ทีมงานจะติดต่อกลับภายใน 24 ชั่วโมง</div>';
+      }
+      html += '</div>';
+      showApp(html);
+    })
+    .catch(function(err){
+      btn.disabled=false;
+      btn.textContent='ส่งการประเมิน';
+      alert('เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
+    });
+}
+
+// Init
+(function(){
+  TOKEN = getToken();
+  if(!TOKEN){
+    showApp(headerHTML()+'<div class="card"><div class="msg-card"><div class="msg-icon">❌</div><div class="msg-title">ลิงก์นี้ไม่ถูกต้องหรือถูกใช้แล้ว</div><div class="msg-sub">กรุณาตรวจสอบลิงก์ที่ได้รับ</div></div></div>');
+    return;
+  }
+  supaGet('job_evals?token=eq.'+encodeURIComponent(TOKEN)+'&select=*')
+    .then(function(rows){
+      if(!Array.isArray(rows)||rows.length===0){
+        showApp(headerHTML()+'<div class="card"><div class="msg-card"><div class="msg-icon">❌</div><div class="msg-title">ลิงก์นี้ไม่ถูกต้องหรือถูกใช้แล้ว</div><div class="msg-sub">กรุณาตรวจสอบลิงก์ที่ได้รับ</div></div></div>');
+        return;
+      }
+      EVAL_ROW=rows[0];
+      if(EVAL_ROW.submitted_at){
+        showApp(headerHTML()+'<div class="card"><div class="msg-card"><div class="msg-icon">✅</div><div class="msg-title">ท่านได้ส่งข้อมูลแล้ว</div><div class="msg-sub">ขอบคุณครับ</div></div></div>');
+        return;
+      }
+      showForm();
+    })
+    .catch(function(){
+      showApp(headerHTML()+'<div class="card"><div class="msg-card"><div class="msg-icon">⚠️</div><div class="msg-title">เกิดข้อผิดพลาด</div><div class="msg-sub">กรุณาลองใหม่อีกครั้ง</div></div></div>');
+    });
+})();
+</script>
+</body>
+</html>

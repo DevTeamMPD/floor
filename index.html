@@ -1445,7 +1445,7 @@ function ipDataCard(t){
   +'<div class="fi"><label>วันที่นัดติดตั้ง</label><input id="ip_due" type="date" value="'+(t.due||'')+'"></div>'
   +'<div class="fi"><label>กะช่าง</label><div class="dcv-radio-group"><label class="dcv-radio"><input type="radio" name="ip_shift" value="1"'+(sh==='1'?' checked':'')+'> กะ 1 · 09:00</label><label class="dcv-radio"><input type="radio" name="ip_shift" value="2"'+(sh==='2'?' checked':'')+'> กะ 2 · 13:30</label><label class="dcv-radio" style="flex:1 1 100%"><input type="radio" name="ip_shift" value="3"'+(sh==='3'?' checked':'')+'> ☀️ ปูทั้งวัน</label></div></div>'
   +'<div class="fi"><label>ขนาดพื้นที่ (ตร.ม.)</label><div style="display:flex;gap:8px;align-items:center"><input id="ipp_w" style="flex:1;min-width:0" placeholder="กว้าง" value="'+((t.area&&t.area.w)||'')+'"><span>×</span><input id="ipp_l" style="flex:1;min-width:0" placeholder="ยาว" value="'+((t.area&&t.area.l)||'')+'"><button class="btn primary sm" onclick="ipRunPlan('+t.id+')">AI</button></div><div id="ipPlanOut"></div></div>'
-  +'<button class="btn ok" style="width:100%;margin-top:8px;padding:11px" onclick="ipSaveData('+t.id+')">💾 บันทึกข้อมูล</button></div>';
+  +'<button class="btn ok" style="width:100%;margin-top:8px;padding:11px" onclick="ipSaveData('+t.id+')">💾 บันทึกข้อมูล</button></div>'+(t.stage>=5?'<div class="dr-card" style="border-color:#15935E;background:#F0FDF4;margin-top:12px"><h4 style="color:#15935E">✅ ปิดงาน + ส่ง Eval</h4><p style="font-size:12px;color:#334155;margin:6px 0 10px">เมื่อปิดงาน ระบบจะสร้าง link ประเมินผลและส่งให้ลูกค้า</p><button class="btn ok" style="width:100%;background:#15935E;border-color:#15935E" onclick="ipCloseJob('+t.id+')">🔒 ปิดงานและส่งลิงก์ประเมิน</button></div>':'');
 }
 function ipSaveData(id){var t=IP_T.find(function(x){return x.id===id;});
  ipSyncFields(t);
@@ -1624,6 +1624,45 @@ function ipSim(){
   var t=un[0];t.order='EXT-SH-'+Math.floor(10000+Math.random()*89999);
   t.linked=true;t.via='auto';ipRenderBoard();
   toast('⬇ [Dev] ออเดอร์ #'+t.order+' เข้าจาก Shopee → auto-merged กับ '+t.ticket);
+}
+function ipGenToken(){
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){
+    var r=Math.random()*16|0,v=c==='x'?r:(r&0x3|0x8);return v.toString(16);
+  });
+}
+function ipCloseJob(id){
+  var t=IP_T.find(function(x){return x.id===id;});
+  if(!t||!SB){toast('⚠ ไม่พบงานหรือไม่ได้เชื่อม');return;}
+  var by=localStorage.getItem('mpd_whoami')||'ทีมงาน';
+  var token=ipGenToken();
+  var now=new Date().toISOString();
+  // 1. Update install_job: stage=7, closed_at, closed_by, eval_token
+  SB.from('install_jobs').update({
+    stage:7, status:'Completed',
+    closed_at:now, closed_by:by,
+    eval_token:token, eval_sent_at:now,
+    updated_at:now
+  }).eq('order_no',t.order).then(function(r){
+    if(r.error){toast('⚠ ปิดงานไม่สำเร็จ: '+r.error.message);return;}
+    // 2. Insert job_evals row with token
+    SB.from('job_evals').insert({
+      job_id:t.order, token:token
+    }).then(function(r2){
+      if(r2.error){toast('⚠ สร้าง eval token ไม่สำเร็จ');return;}
+      var link=location.origin+'/eval?t='+token;
+      t.stage=7;t.status='Completed';
+      ipRenderBoard();
+      // Show eval link in a modal/toast
+      var msg='✅ ปิดงานแล้ว! ลิงก์ประเมิน:
+'+link;
+      if(confirm(msg+'
+
+คัดลอกลิงก์ไปยังคลิปบอร์ด?')){
+        navigator.clipboard.writeText(link).then(function(){toast('📋 คัดลอกลิงก์แล้ว');}).catch(function(){toast('ลิงก์: '+link);});
+      }
+      setTimeout(function(){closeDrawer();ohLoad();},500);
+    });
+  });
 }
 function ipBook(id){var t=IP_T.find(function(x){return x.id===id;});var due=$('#ip_due')?$('#ip_due').value:'';if(!due){toast('เลือกวันนัดก่อน');return;}
  var shEl=document.querySelector('input[name=ip_shift]:checked');var sh=shEl?shEl.value:'1';var label=sh==='3'?'ทั้งวัน':(sh==='2'?'13:30':'09:00');
