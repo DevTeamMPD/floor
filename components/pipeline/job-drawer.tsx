@@ -89,11 +89,21 @@ const HANDOVER_ITEMS = [
   { id: 4, label: "ลูกค้าได้รับคำแนะนำการดูแลรักษาเบื้องต้น" },
   { id: 5, label: "ลูกค้าตรวจรับงานเรียบร้อย" },
 ];
+
+interface MaterialItem {
+  thickness: "0.6" | "1.6" | "";
+  color: "beige" | "whitebuzz" | "";
+  widthCm: "110" | "140" | "";
+  lengthCm: string;
+  qty: string;
+}
+
+const EMPTY_MATERIAL: MaterialItem = { thickness: "", color: "", widthCm: "", lengthCm: "", qty: "" };
+
 interface HandoverData {
   checks: Record<number, boolean>;
   actualAreaSqm: string;
-  qtyRequisitioned: string;
-  qtyActualUsed: string;
+  materials: MaterialItem[];
   notes: string;
   savedAt?: string;
 }
@@ -156,7 +166,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const [qcLoaded, setQcLoaded] = useState(false);
 
   const [handover, setHandover] = useState<HandoverData>({
-    checks: {}, actualAreaSqm: "", qtyRequisitioned: "", qtyActualUsed: "", notes: "",
+    checks: {}, actualAreaSqm: "", materials: [{ ...EMPTY_MATERIAL }], notes: "",
   });
   const [handoverLoaded, setHandoverLoaded] = useState(false);
 
@@ -221,7 +231,12 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     try {
       const { data } = await supabase
         .from("install_jobs").select("handover_data").eq("job_no", jobNo).single();
-      if (data?.handover_data) setHandover(JSON.parse(data.handover_data));
+      if (data?.handover_data) {
+        const parsed = JSON.parse(data.handover_data);
+        // migrate old format (qtyRequisitioned/qtyActualUsed) to new materials array
+        if (!parsed.materials) parsed.materials = [{ ...EMPTY_MATERIAL }];
+        setHandover(parsed);
+      }
     } catch { }
     setHandoverLoaded(true);
   }
@@ -306,6 +321,31 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     }
     setSaving(false);
   }
+
+  function updateMaterial(idx: number, patch: Partial<MaterialItem>) {
+    setHandover((h) => {
+      const mats = [...h.materials];
+      mats[idx] = { ...mats[idx], ...patch };
+      return { ...h, materials: mats };
+    });
+  }
+
+  function addMaterialRow() {
+    setHandover((h) => ({ ...h, materials: [...h.materials, { ...EMPTY_MATERIAL }] }));
+  }
+
+  function removeMaterialRow(idx: number) {
+    setHandover((h) => ({ ...h, materials: h.materials.filter((_, i) => i !== idx) }));
+  }
+
+  // Calculate total area used from materials
+  const totalMaterialAreaSqm = handover.materials.reduce((sum, m) => {
+    const w = Number(m.widthCm);
+    const l = Number(m.lengthCm);
+    const q = Number(m.qty) || 1;
+    if (w > 0 && l > 0) return sum + (w * l * q) / 10000;
+    return sum;
+  }, 0);
 
   function getPublicUrl(path: string): string {
     return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
@@ -400,9 +440,13 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const preInstallCheckedCount = Object.values(preInstall.checks).filter(Boolean).length;
   const handoverCheckedCount = Object.values(handover.checks).filter(Boolean).length;
   const allHandoverChecked = handoverCheckedCount === HANDOVER_ITEMS.length;
-  const qtyDiff = handover.qtyRequisitioned && handover.qtyActualUsed
-    ? Number(handover.qtyRequisitioned) - Number(handover.qtyActualUsed)
-    : null;
+
+  // Helper: toggle button style
+  function toggleBtn(active: boolean) {
+    return `px-2.5 py-1 rounded text-xs font-medium border transition-colors ${
+      active ? "bg-green-600 text-white border-green-600" : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
+    }`;
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
@@ -889,44 +933,113 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                   ))}
                 </div>
 
-                {/* Area & quantity fields */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-1">พื้นที่ติดตั้งจริง (ตรม.)</label>
-                    <input type="number" min="0" step="0.1" placeholder="เช่น 22"
-                      className="w-full border border-green-200 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-                      value={handover.actualAreaSqm}
-                      onChange={(e) => setHandover((h) => ({ ...h, actualAreaSqm: e.target.value }))} />
-                  </div>
-                  <div />
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-1">จำนวนที่เบิกไปใช้ (แผ่น)</label>
-                    <input type="number" min="0" step="1" placeholder="เช่น 50"
-                      className="w-full border border-green-200 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-                      value={handover.qtyRequisitioned}
-                      onChange={(e) => setHandover((h) => ({ ...h, qtyRequisitioned: e.target.value }))} />
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-500 block mb-1">จำนวนที่ใช้จริง (แผ่น)</label>
-                    <input type="number" min="0" step="1" placeholder="เช่น 47"
-                      className="w-full border border-green-200 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-                      value={handover.qtyActualUsed}
-                      onChange={(e) => setHandover((h) => ({ ...h, qtyActualUsed: e.target.value }))} />
-                  </div>
+                {/* Area */}
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">พื้นที่ติดตั้งจริง (ตรม.)</label>
+                  <input type="number" min="0" step="0.1" placeholder="เช่น 22"
+                    className="w-full border border-green-200 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+                    value={handover.actualAreaSqm}
+                    onChange={(e) => setHandover((h) => ({ ...h, actualAreaSqm: e.target.value }))} />
                 </div>
 
-                {/* Surplus/deficit indicator */}
-                {qtyDiff !== null && (
-                  <div className={`text-xs rounded px-2 py-1.5 font-medium ${
-                    qtyDiff > 0 ? "bg-blue-50 text-blue-700 border border-blue-200"
-                    : qtyDiff < 0 ? "bg-red-50 text-red-700 border border-red-200"
-                    : "bg-gray-50 text-gray-600 border border-gray-200"
-                  }`}>
-                    {qtyDiff > 0 ? `➡️ คืนคลัง ${qtyDiff} แผ่น`
-                      : qtyDiff < 0 ? `⚠️ ใช้เกิน ${Math.abs(qtyDiff)} แผ่น`
-                      : "✅ ใช้ครบพอดี"}
+                {/* Material requisition */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-green-700">📦 รายการเบิกสินค้า</p>
+                    {totalMaterialAreaSqm > 0 && (
+                      <span className="text-xs text-green-600 font-medium">
+                        รวม {totalMaterialAreaSqm.toFixed(2)} ตรม.
+                      </span>
+                    )}
                   </div>
-                )}
+
+                  {handover.materials.map((mat, idx) => (
+                    <div key={idx} className="bg-white border border-green-200 rounded-lg p-2.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-gray-400">รายการ {idx + 1}</span>
+                        {handover.materials.length > 1 && (
+                          <button onClick={() => removeMaterialRow(idx)}
+                            className="text-red-400 hover:text-red-600 text-xs">✕ ลบ</button>
+                        )}
+                      </div>
+
+                      {/* Thickness */}
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">ความหนา</p>
+                        <div className="flex gap-1.5">
+                          {(["0.6", "1.6"] as const).map((t) => (
+                            <button key={t} type="button"
+                              onClick={() => updateMaterial(idx, { thickness: mat.thickness === t ? "" : t })}
+                              className={toggleBtn(mat.thickness === t)}>
+                              {t} cm
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Color */}
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">สี</p>
+                        <div className="flex gap-1.5">
+                          <button type="button"
+                            onClick={() => updateMaterial(idx, { color: mat.color === "beige" ? "" : "beige" })}
+                            className={toggleBtn(mat.color === "beige")}>
+                            Beige
+                          </button>
+                          <button type="button"
+                            onClick={() => updateMaterial(idx, { color: mat.color === "whitebuzz" ? "" : "whitebuzz" })}
+                            className={toggleBtn(mat.color === "whitebuzz")}>
+                            Whitebuzz
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Width + Length */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">ความกว้าง</p>
+                          <div className="flex gap-1.5">
+                            {(["110", "140"] as const).map((w) => (
+                              <button key={w} type="button"
+                                onClick={() => updateMaterial(idx, { widthCm: mat.widthCm === w ? "" : w })}
+                                className={toggleBtn(mat.widthCm === w)}>
+                                {w} cm
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">ความยาว (cm)</p>
+                          <input type="number" min="0" step="1" placeholder="เช่น 1000"
+                            className="w-full border border-green-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-green-400"
+                            value={mat.lengthCm}
+                            onChange={(e) => updateMaterial(idx, { lengthCm: e.target.value })} />
+                        </div>
+                      </div>
+
+                      {/* Qty */}
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">จำนวน (ม้วน)</p>
+                        <input type="number" min="1" step="1" placeholder="1"
+                          className="w-24 border border-green-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-green-400"
+                          value={mat.qty}
+                          onChange={(e) => updateMaterial(idx, { qty: e.target.value })} />
+                      </div>
+
+                      {/* Area preview */}
+                      {mat.widthCm && mat.lengthCm && (
+                        <p className="text-xs text-green-600">
+                          ≈ {((Number(mat.widthCm) * Number(mat.lengthCm) * (Number(mat.qty) || 1)) / 10000).toFixed(2)} ตรม.
+                        </p>
+                      )}
+                    </div>
+                  ))}
+
+                  <button type="button" onClick={addMaterialRow}
+                    className="w-full border border-dashed border-green-300 text-green-600 rounded-lg py-2 text-xs font-medium hover:bg-green-50 transition-colors">
+                    + เพิ่มรายการ
+                  </button>
+                </div>
 
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">หมายเหตุการส่งมอบ</label>
