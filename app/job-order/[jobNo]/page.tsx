@@ -160,12 +160,12 @@ export default function JobOrderPage({ params }: { params: Promise<{ jobNo: stri
             <div className="text-right space-y-1">
               <p className="text-xs text-gray-400">เลขที่ใบงาน</p>
               <p className="text-xl font-bold text-blue-700">{job.job_no as string}</p>
-              {job.appt_date && (
+              {!!(job.appt_date) && (
                 <div className="mt-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-right">
                   <p className="text-xs text-blue-500 font-medium">📅 วันที่นัดหมาย</p>
                   <p className="text-sm font-bold text-blue-800">{formatThaiDate(job.appt_date as string)}</p>
-                  {job.appt_shift && (
-                    <p className="text-xs text-blue-600">{SHIFT_LABELS[job.appt_shift as string] ?? job.appt_shift}</p>
+                  {!!(job.appt_shift) && (
+                    <p className="text-xs text-blue-600">{SHIFT_LABELS[job.appt_shift as string] ?? (job.appt_shift as string)}</p>
                   )}
                 </div>
               )}
@@ -187,7 +187,7 @@ export default function JobOrderPage({ params }: { params: Promise<{ jobNo: stri
                 <p className="text-xs text-gray-400">ที่อยู่ติดตั้ง</p>
                 <p className="font-semibold">{(job.address as string) || "—"}</p>
               </div>
-              {job.location_url && (
+              {!!(job.location_url) && (
                 <div className="col-span-2">
                   <p className="text-xs text-gray-400">Google Maps</p>
                   <p className="text-blue-600 text-xs break-all">{job.location_url as string}</p>
