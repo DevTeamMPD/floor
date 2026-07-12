@@ -3,12 +3,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV = [
-  { href: "/pipeline", icon: "📌", label: "Pipeline" },
-  { href: "/jobs",     icon: "💼", label: "งานทั้งหมด" },
-  { href: "/queue",   icon: "🕑", label: "คิวงาน" },
-  { href: "/service", icon: "🛠", label: "บริการ" },
+  { href: "/pipeline",   icon: "📌", label: "Pipeline" },
+  { href: "/jobs",       icon: "💼", label: "งานทั้งหมด" },
+  { href: "/queue",     icon: "🕑", label: "คิวงาน" },
+  { href: "/service",   icon: "🛠", label: "บริการ" },
+  { href: "/inventory", icon: "📦", label: "คลังวัสดุ" },
+  { href: "/bom",       icon: "📐", label: "BOQ / BOM" },
+  { href: "/purchase-orders", icon: "🛒", label: "ใบสั่งซื้อ" },
   { href: "/documents", icon: "📄", label: "เอกสาร" },
-  { href: "/docs",    icon: "📖", label: "คู่มือ" },
+  { href: "/docs",      icon: "📖", label: "คู่มือ" },
 ];
 
 export default function Sidebar() {
@@ -22,7 +25,7 @@ export default function Sidebar() {
         <div className="text-white font-bold text-lg tracking-tight">🏛 MPD Workspace</div>
         <div className="text-slate-400 text-xs mt-0.5">ระบบติดตามงานติดตั้ง</div>
       </div>
-      <nav className="flex-1 px-2 space-y-0.5">
+      <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto">
         {NAV.map((n) => {
           const active = path === n.href || path.startsWith(n.href + "/");
           return (
