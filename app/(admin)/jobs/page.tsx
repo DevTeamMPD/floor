@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = 'force-dynamic';
 import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { InstallJob } from "@/lib/types";
@@ -83,7 +84,7 @@ export default function JobsPage() {
         <table className="w-full text-sm">
           <thead className="bg-slate-50">
             <tr>
-              {["ออเดอร์", "ลูกค้า", "สินค้า", "สต้าเจอร์", "วันที่สั่ง", "คะแนน"].map((h) => (
+              {["ออเดอร์", "ลูกค้า", "สินค้า", "สเตจ", "วันที่สั่ง", "คะแนน"].map((h) => (
                 <th key={h} className="text-left px-4 py-3 font-medium text-slate-500">{h}</th>
               ))}
             </tr>
