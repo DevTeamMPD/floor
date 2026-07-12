@@ -13,9 +13,18 @@ interface Material {
   qty_on_hand: number;
 }
 
+interface ChildBom {
+  id: string;
+  product_sku: string;
+  name: string | null;
+  version: number;
+}
+
 interface BomItem {
   id?: string;
+  itemType: 'material' | 'sub';
   material_id: string;
+  child_bom_id: string;
   qty_type: 'fixed' | 'per_sqm' | 'per_unit';
   qty: number;
   waste_factor: number;
@@ -24,6 +33,7 @@ interface BomItem {
   note: string;
   // joined
   material?: Material;
+  child_bom?: ChildBom;
 }
 
 interface Bom {
@@ -38,13 +48,22 @@ interface Bom {
 }
 
 type Tab = 'manager' | 'simulator';
-type SimMode = 'area' | 'quantity';
 
 const QTY_TYPE_LABEL: Record<string, string> = {
   per_sqm:  'ต่อ ตร.ม.',
   per_unit: 'ต่อชิ้น',
   fixed:    'คงที่',
 };
+
+interface ExplodedRow {
+  material: Material;
+  needed: number;
+  stock: number;
+  short: number;
+  cost: number;
+  depth: number;
+  sourceLabel: string;
+}
 
 export default function BomPage() {
   const supabase = createClient();
@@ -55,6 +74,7 @@ export default function BomPage() {
   const [selectedBom, setSelectedBom] = useState<Bom | null>(null);
   const [showAddBom, setShowAddBom] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
 
   // BOM form
   const [bomForm, setBomForm] = useState({ product_sku: '', name: '', bom_type: 'area' as 'area' | 'quantity' | 'mixed', notes: '' });
@@ -65,24 +85,31 @@ export default function BomPage() {
 
   // Simulator
   const [simBomId, setSimBomId] = useState('');
-  const [simMode, setSimMode] = useState<SimMode>('area');
   const [simValue, setSimValue] = useState('');
-  const [simResult, setSimResult] = useState<Array<{ material: Material; needed: number; stock: number; short: number; cost: number }>>([]);
+  const [simResult, setSimResult] = useState<ExplodedRow[]>([]);
   const [simRan, setSimRan] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     const [{ data: bomData }, { data: matData }] = await Promise.all([
-      supabase.from('boms').select('*, bom_items(*, material:materials(*))').eq('is_active', true).order('product_sku'),
+      supabase
+        .from('boms')
+        .select('*, bom_items(*, material:materials(*), child_bom:boms!bom_items_child_bom_id_fkey(id,product_sku,name,version))')
+        .order('product_sku')
+        .order('version'),
       supabase.from('materials').select('*').order('name'),
     ]);
-    setBoms(bomData ?? []);
+    const allBoms = (bomData ?? []) as Bom[];
+    setBoms(allBoms);
     setMaterials(matData ?? []);
-    if (bomData && bomData.length > 0 && !simBomId) setSimBomId(bomData[0].id);
+    const activeBoms = allBoms.filter((b) => b.is_active);
+    if (activeBoms.length > 0 && !simBomId) setSimBomId(activeBoms[0].id);
     setLoading(false);
   }, [supabase, simBomId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const displayBoms = showInactive ? boms : boms.filter((b) => b.is_active);
 
   // --- Add BOM ---
   async function saveBom() {
@@ -102,17 +129,82 @@ export default function BomPage() {
     loadData();
   }
 
+  // --- Create New Version ---
+  async function createNewVersion(bom: Bom) {
+    setSaving(true);
+    // Find max version for this product_sku
+    const maxVer = Math.max(...boms.filter((b) => b.product_sku === bom.product_sku).map((b) => b.version));
+    // Deactivate all old versions of this SKU
+    await supabase.from('boms').update({ is_active: false }).eq('product_sku', bom.product_sku);
+    // Insert new version
+    const { data: newBom, error } = await supabase.from('boms').insert({
+      product_sku: bom.product_sku,
+      name: bom.name,
+      bom_type: bom.bom_type,
+      notes: bom.notes,
+      version: maxVer + 1,
+      is_active: true,
+    }).select().single();
+    if (error || !newBom) { setSaving(false); toast.error(error?.message ?? 'เกิดข้อผิดพลาด'); return; }
+    // Copy items from old version
+    const items = bom.bom_items ?? [];
+    if (items.length > 0) {
+      await supabase.from('bom_items').insert(
+        items.map((item, idx) => ({
+          bom_id: newBom.id,
+          material_id: item.material_id || null,
+          child_bom_id: item.child_bom_id || null,
+          qty_type: item.qty_type,
+          qty: item.qty,
+          waste_factor: item.waste_factor,
+          unit: item.unit || null,
+          sort_order: idx,
+          note: item.note || null,
+        }))
+      );
+    }
+    setSaving(false);
+    toast.success(`สร้าง v${maxVer + 1} เรียบร้อย`);
+    loadData();
+  }
+
+  // --- Toggle Active ---
+  async function toggleBomActive(bom: Bom) {
+    const { error } = await supabase.from('boms').update({ is_active: !bom.is_active }).eq('id', bom.id);
+    if (error) { toast.error(error.message); return; }
+    toast.success(bom.is_active ? 'ปิดใช้งาน BOM แล้ว' : 'เปิดใช้งาน BOM แล้ว');
+    loadData();
+  }
+
   // --- Edit items ---
   function startEditItems(bom: Bom) {
     setSelectedBom(bom);
-    setDraftItems(bom.bom_items?.map((i) => ({ ...i, material_id: i.material_id ?? '', note: i.note ?? '' })) ?? []);
+    setDraftItems(
+      bom.bom_items?.map((i) => ({
+        ...i,
+        itemType: i.child_bom_id ? 'sub' : 'material',
+        material_id: i.material_id ?? '',
+        child_bom_id: i.child_bom_id ?? '',
+        note: i.note ?? '',
+      })) ?? []
+    );
     setEditingItems(true);
   }
 
-  function addDraftItem() {
+  function addDraftItem(type: 'material' | 'sub') {
     setDraftItems((prev) => [
       ...prev,
-      { material_id: materials[0]?.id ?? '', qty_type: 'per_sqm', qty: 1, waste_factor: 0.1, unit: '', sort_order: prev.length, note: '' },
+      {
+        itemType: type,
+        material_id: type === 'material' ? (materials[0]?.id ?? '') : '',
+        child_bom_id: type === 'sub' ? (boms.find((b) => b.is_active && b.id !== selectedBom?.id)?.id ?? '') : '',
+        qty_type: 'per_sqm',
+        qty: 1,
+        waste_factor: 0.1,
+        unit: '',
+        sort_order: prev.length,
+        note: '',
+      },
     ]);
   }
 
@@ -127,13 +219,13 @@ export default function BomPage() {
   async function saveItems() {
     if (!selectedBom) return;
     setSaving(true);
-    // Delete all existing items, then reinsert
     await supabase.from('bom_items').delete().eq('bom_id', selectedBom.id);
     if (draftItems.length > 0) {
       const { error } = await supabase.from('bom_items').insert(
         draftItems.map((item, idx) => ({
           bom_id: selectedBom.id,
-          material_id: item.material_id || null,
+          material_id: item.itemType === 'material' ? (item.material_id || null) : null,
+          child_bom_id: item.itemType === 'sub' ? (item.child_bom_id || null) : null,
           qty_type: item.qty_type,
           qty: item.qty,
           waste_factor: item.waste_factor,
@@ -150,28 +242,59 @@ export default function BomPage() {
     loadData();
   }
 
-  // --- Simulator ---
+  // --- Recursive Explode BOM ---
+  function explodeBom(bomId: string, multiplier: number, depth: number, sourceLabel: string, rows: Map<string, ExplodedRow>) {
+    if (depth > 5) return;
+    const bom = boms.find((b) => b.id === bomId);
+    if (!bom) return;
+    const inputVal = Number(simValue) || 1;
+    for (const item of bom.bom_items ?? []) {
+      if (item.itemType === 'sub' && item.child_bom_id) {
+        // sub-assembly: compute sub quantity, recurse
+        let subQty = 0;
+        if (item.qty_type === 'fixed') subQty = item.qty * multiplier;
+        else if (item.qty_type === 'per_sqm') subQty = item.qty * inputVal * multiplier;
+        else subQty = item.qty * inputVal * multiplier;
+        const subWithWaste = subQty * (1 + item.waste_factor);
+        explodeBom(item.child_bom_id, subWithWaste, depth + 1, item.child_bom?.name ?? item.child_bom?.product_sku ?? 'Sub', rows);
+      } else if (item.itemType === 'material' && item.material_id) {
+        const mat = materials.find((m) => m.id === item.material_id);
+        if (!mat) continue;
+        let base = 0;
+        if (item.qty_type === 'per_sqm') base = item.qty * inputVal * multiplier;
+        else if (item.qty_type === 'per_unit') base = item.qty * inputVal * multiplier;
+        else base = item.qty * multiplier;
+        const needed = base * (1 + item.waste_factor);
+        const existing = rows.get(mat.id);
+        if (existing) {
+          existing.needed += needed;
+          existing.short = Math.max(0, existing.needed - existing.stock);
+          existing.cost = existing.needed * (mat.unit_cost ?? 0);
+        } else {
+          const stock = mat.qty_on_hand;
+          rows.set(mat.id, {
+            material: mat,
+            needed,
+            stock,
+            short: Math.max(0, needed - stock),
+            cost: needed * (mat.unit_cost ?? 0),
+            depth,
+            sourceLabel,
+          });
+        }
+      }
+    }
+  }
+
   function runSimulator() {
-    const bom = boms.find((b) => b.id === simBomId);
-    if (!bom || !simValue) return;
-    const inputVal = Number(simValue);
-    const results = (bom.bom_items ?? []).map((item) => {
-      const mat = materials.find((m) => m.id === item.material_id);
-      if (!mat) return null;
-      let base = 0;
-      if (item.qty_type === 'per_sqm') base = item.qty * inputVal;
-      else if (item.qty_type === 'per_unit') base = item.qty * inputVal;
-      else base = item.qty; // fixed
-      const needed = base * (1 + item.waste_factor);
-      const stock = mat.qty_on_hand;
-      const short = Math.max(0, needed - stock);
-      const cost = needed * (mat.unit_cost ?? 0);
-      return { material: mat, needed, stock, short, cost };
-    }).filter(Boolean) as typeof simResult;
-    setSimResult(results);
+    if (!simBomId || !simValue) return;
+    const rows = new Map<string, ExplodedRow>();
+    explodeBom(simBomId, 1, 0, 'root', rows);
+    setSimResult(Array.from(rows.values()));
     setSimRan(true);
   }
 
+  const activeBoms = boms.filter((b) => b.is_active);
   const simBom = boms.find((b) => b.id === simBomId);
   const totalCost = simResult.reduce((s, r) => s + r.cost, 0);
   const hasShortage = simResult.some((r) => r.short > 0);
@@ -200,27 +323,51 @@ export default function BomPage() {
       ) : tab === 'manager' ? (
         /* ===== MANAGER TAB ===== */
         <div>
-          <div className="flex justify-end mb-4">
-            <button onClick={() => setShowAddBom(true)} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+          <div className="flex items-center gap-3 mb-4">
+            <label className="flex items-center gap-2 text-sm text-slate-500 cursor-pointer">
+              <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)}
+                className="rounded" />
+              แสดง BOM ที่ปิดใช้งาน
+            </label>
+            <button onClick={() => setShowAddBom(true)} className="ml-auto px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
               + สร้าง BOM ใหม่
             </button>
           </div>
 
-          {boms.length === 0 ? (
+          {displayBoms.length === 0 ? (
             <div className="bg-white rounded-xl border border-slate-100 p-12 text-center text-slate-300">
               <div className="text-4xl mb-3">📐</div>
               <div className="font-medium">ยังไม่มี BOM — กด + สร้าง BOM ใหม่</div>
             </div>
           ) : (
             <div className="space-y-4">
-              {boms.map((bom) => (
-                <div key={bom.id} className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+              {displayBoms.map((bom) => (
+                <div key={bom.id} className={`bg-white rounded-xl border overflow-hidden ${
+                  bom.is_active ? 'border-slate-100' : 'border-slate-200 opacity-60'
+                }`}>
                   <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-50">
                     <div>
-                      <div className="font-semibold">{bom.name ?? bom.product_sku}</div>
-                      <div className="text-xs text-slate-400">{bom.product_sku} · {bom.bom_type === 'area' ? 'คำนวณตามพื้นที่' : bom.bom_type === 'quantity' ? 'คำนวณตามจำนวน' : 'ผสม'} · v{bom.version}</div>
+                      <div className="font-semibold flex items-center gap-2">
+                        {bom.name ?? bom.product_sku}
+                        {!bom.is_active && <span className="text-xs bg-slate-100 text-slate-400 px-2 py-0.5 rounded">ปิดใช้งาน</span>}
+                      </div>
+                      <div className="text-xs text-slate-400">
+                        {bom.product_sku} · {bom.bom_type === 'area' ? 'คำนวณตามพื้นที่' : bom.bom_type === 'quantity' ? 'คำนวณตามจำนวน' : 'ผสม'} · v{bom.version}
+                      </div>
                     </div>
-                    <div className="ml-auto">
+                    <div className="ml-auto flex items-center gap-2">
+                      <button onClick={() => createNewVersion(bom)} disabled={saving}
+                        className="px-3 py-1.5 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 font-medium">
+                        🔀 New Version
+                      </button>
+                      <button onClick={() => toggleBomActive(bom)}
+                        className={`px-3 py-1.5 text-xs rounded-lg font-medium ${
+                          bom.is_active
+                            ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                            : 'bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100'
+                        }`}>
+                        {bom.is_active ? '⏸ ปิดใช้' : '▶ เปิดใช้'}
+                      </button>
                       <button onClick={() => startEditItems(bom)}
                         className="px-3 py-1.5 text-xs bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 font-medium">
                         ✏️ แก้ไข Items
@@ -233,7 +380,7 @@ export default function BomPage() {
                     <table className="w-full text-sm">
                       <thead className="bg-slate-50">
                         <tr>
-                          {['วัสดุ', 'ประเภท', 'ปริมาณ', 'Waste', 'หมายเหตุ'].map((h) => (
+                          {['ประเภท', 'วัสดุ / Sub-assembly', 'ประเภทปริมาณ', 'ปริมาณ', 'Waste', 'หมายเหตุ'].map((h) => (
                             <th key={h} className="text-left px-4 py-2 text-xs font-medium text-slate-400">{h}</th>
                           ))}
                         </tr>
@@ -241,7 +388,19 @@ export default function BomPage() {
                       <tbody className="divide-y divide-slate-50">
                         {bom.bom_items?.map((item) => (
                           <tr key={item.id}>
-                            <td className="px-4 py-2">{item.material?.name ?? '—'} <span className="text-xs text-slate-400">{item.material?.sku}</span></td>
+                            <td className="px-4 py-2">
+                              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                                item.child_bom_id ? 'bg-purple-100 text-purple-700' : 'bg-blue-50 text-blue-600'
+                              }`}>
+                                {item.child_bom_id ? '🔗 Sub' : '🧱 Mat'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2">
+                              {item.child_bom_id
+                                ? <span className="font-medium">{item.child_bom?.name ?? item.child_bom?.product_sku ?? '—'} <span className="text-xs text-slate-400">v{item.child_bom?.version}</span></span>
+                                : <span>{item.material?.name ?? '—'} <span className="text-xs text-slate-400">{item.material?.sku}</span></span>
+                              }
+                            </td>
                             <td className="px-4 py-2 text-slate-500 text-xs">{QTY_TYPE_LABEL[item.qty_type] ?? item.qty_type}</td>
                             <td className="px-4 py-2 font-mono tabular-nums">{item.qty} {item.unit || item.material?.unit || ''}</td>
                             <td className="px-4 py-2 text-slate-400 text-xs">{(item.waste_factor * 100).toFixed(0)}%</td>
@@ -263,16 +422,16 @@ export default function BomPage() {
             <h2 className="font-semibold mb-4">ตั้งค่าการจำลอง</h2>
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-medium text-slate-500 mb-1 block">เลือก BOM</label>
+                <label className="text-xs font-medium text-slate-500 mb-1 block">เลือก BOM (เฉพาะ Active)</label>
                 <select value={simBomId} onChange={(e) => { setSimBomId(e.target.value); setSimRan(false); }}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  {boms.map((b) => <option key={b.id} value={b.id}>{b.name ?? b.product_sku}</option>)}
+                  {activeBoms.map((b) => <option key={b.id} value={b.id}>{b.name ?? b.product_sku} (v{b.version})</option>)}
                 </select>
               </div>
               {simBom && (
                 <div className="text-xs text-slate-400 bg-slate-50 rounded-lg p-3">
                   {simBom.product_sku} · {simBom.bom_type === 'area' ? '📐 คำนวณตามพื้นที่ (ตร.ม.)' : '📦 คำนวณตามจำนวน'}
-                  {(simBom.bom_items?.length ?? 0) > 0 && <> · {simBom.bom_items?.length} รายการวัสดุ</>}
+                  {(simBom.bom_items?.length ?? 0) > 0 && <> · {simBom.bom_items?.length} รายการ</>}
                 </div>
               )}
               <div>
@@ -285,7 +444,7 @@ export default function BomPage() {
               </div>
               <button onClick={runSimulator} disabled={!simBomId || !simValue}
                 className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-                🧮 คำนวณ
+                🧮 คำนวณ (รวม Sub-assembly)
               </button>
             </div>
           </div>
@@ -388,19 +547,19 @@ export default function BomPage() {
       {/* ===== EDIT ITEMS MODAL ===== */}
       {editingItems && selectedBom && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setEditingItems(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="p-5 border-b border-slate-100">
-              <h2 className="font-semibold">✏️ แก้ไข BOM Items — {selectedBom.name ?? selectedBom.product_sku}</h2>
+              <h2 className="font-semibold">✏️ แก้ไข BOM Items — {selectedBom.name ?? selectedBom.product_sku} v{selectedBom.version}</h2>
               <p className="text-xs text-slate-400 mt-0.5">{selectedBom.product_sku}</p>
             </div>
             <div className="flex-1 overflow-y-auto p-5">
               {draftItems.length === 0 ? (
-                <div className="text-sm text-slate-400 text-center py-6">ยังไม่มีรายการ — กดเพิ่มวัสดุ</div>
+                <div className="text-sm text-slate-400 text-center py-6">ยังไม่มีรายการ — กดเพิ่มวัสดุหรือ Sub-assembly</div>
               ) : (
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-100">
-                      {['วัสดุ', 'ประเภท', 'ปริมาณ', 'Waste %', 'หมายเหตุ', ''].map((h) => (
+                      {['ประเภท', 'วัสดุ / Sub', 'ปริมาณ type', 'ปริมาณ', 'Waste %', 'หมายเหตุ', ''].map((h) => (
                         <th key={h} className="text-left py-2 px-2 text-xs font-medium text-slate-400">{h}</th>
                       ))}
                     </tr>
@@ -409,10 +568,26 @@ export default function BomPage() {
                     {draftItems.map((item, i) => (
                       <tr key={i}>
                         <td className="py-2 px-1">
-                          <select value={item.material_id} onChange={(e) => updateDraftItem(i, { material_id: e.target.value })}
-                            className="w-40 border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
-                            {materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                          </select>
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                            item.itemType === 'sub' ? 'bg-purple-100 text-purple-700' : 'bg-blue-50 text-blue-600'
+                          }`}>
+                            {item.itemType === 'sub' ? '🔗 Sub' : '🧱 Mat'}
+                          </span>
+                        </td>
+                        <td className="py-2 px-1">
+                          {item.itemType === 'material' ? (
+                            <select value={item.material_id} onChange={(e) => updateDraftItem(i, { material_id: e.target.value })}
+                              className="w-40 border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+                              {materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                            </select>
+                          ) : (
+                            <select value={item.child_bom_id} onChange={(e) => updateDraftItem(i, { child_bom_id: e.target.value })}
+                              className="w-40 border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-purple-500">
+                              {boms.filter((b) => b.id !== selectedBom?.id && b.is_active).map((b) => (
+                                <option key={b.id} value={b.id}>{b.name ?? b.product_sku} v{b.version}</option>
+                              ))}
+                            </select>
+                          )}
                         </td>
                         <td className="py-2 px-1">
                           <select value={item.qty_type} onChange={(e) => updateDraftItem(i, { qty_type: e.target.value as BomItem['qty_type'] })}
@@ -445,10 +620,17 @@ export default function BomPage() {
                   </tbody>
                 </table>
               )}
-              <button onClick={addDraftItem} disabled={materials.length === 0}
-                className="mt-3 px-3 py-1.5 text-sm text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 disabled:opacity-50">
-                + เพิ่มวัสดุ
-              </button>
+              <div className="flex items-center gap-2 mt-3">
+                <button onClick={() => addDraftItem('material')} disabled={materials.length === 0}
+                  className="px-3 py-1.5 text-sm text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 disabled:opacity-50">
+                  + เพิ่มวัสดุ
+                </button>
+                <button onClick={() => addDraftItem('sub')}
+                  disabled={boms.filter((b) => b.id !== selectedBom?.id && b.is_active).length === 0}
+                  className="px-3 py-1.5 text-sm text-purple-600 border border-purple-200 rounded-lg hover:bg-purple-50 disabled:opacity-50">
+                  + เพิ่ม Sub-assembly
+                </button>
+              </div>
             </div>
             <div className="flex justify-end gap-2 p-5 border-t border-slate-100">
               <button onClick={() => setEditingItems(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">ยกเลิก</button>

@@ -3,15 +3,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV = [
-  { href: "/pipeline",   icon: "📌", label: "Pipeline" },
-  { href: "/jobs",       icon: "💼", label: "งานทั้งหมด" },
-  { href: "/queue",     icon: "🕑", label: "คิวงาน" },
-  { href: "/service",   icon: "🛠", label: "บริการ" },
-  { href: "/inventory", icon: "📦", label: "คลังวัสดุ" },
-  { href: "/bom",       icon: "📐", label: "BOQ / BOM" },
+  { href: "/pipeline",        icon: "📌", label: "Pipeline" },
+  { href: "/jobs",            icon: "💼", label: "งานทั้งหมด" },
+  { href: "/queue",           icon: "🕑", label: "คิวงาน" },
+  { href: "/service",         icon: "🛠", label: "บริการ" },
+  { href: "/inventory",       icon: "📦", label: "คลังวัสดุ" },
+  { href: "/bom",             icon: "📐", label: "BOQ / BOM" },
   { href: "/purchase-orders", icon: "🛒", label: "ใบสั่งซื้อ" },
-  { href: "/documents", icon: "📄", label: "เอกสาร" },
-  { href: "/docs",      icon: "📖", label: "คู่มือ" },
+  { href: "/appointments",    icon: "📅", label: "นัดหมาย" },
+  { href: "/documents",       icon: "📄", label: "เอกสาร" },
+  { href: "/docs",            icon: "📖", label: "คู่มือ" },
 ];
 
 export default function Sidebar() {
