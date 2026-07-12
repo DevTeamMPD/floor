@@ -2,8 +2,8 @@
 import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { InstallJob } from "@/lib/types";
-import { IP_STAGES, formatDate } from "@/lib/types";
-import { formatDate as fmtDate } from "@/lib/utils";
+import { IP_STAGES } from "@/lib/types";
+import { formatDate } from "@/lib/utils";
 
 function mapRow(row: Record<string, unknown>): InstallJob {
   return {
@@ -101,7 +101,7 @@ export default function JobsPage() {
                       <span className={`tag ${stg.color}`}>{stg.icon} {stg.name}</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-slate-500">{fmtDate(j.date)}</td>
+                  <td className="px-4 py-3 text-slate-500">{formatDate(j.date)}</td>
                   <td className="px-4 py-3">
                     {j.evalScore != null ? (
                       <span className="tag s-purple">★ {j.evalScore}</span>
