@@ -58,6 +58,12 @@ const FLOOR_CONDITIONS = [
   { id: "damp", label: "มีความชื้น" },
   { id: "prep", label: "ต้องเตรียมพื้น" },
 ];
+interface ZoneDimension {
+  roomType: string;
+  widthM: string;
+  lengthM: string;
+}
+
 interface SurveyData {
   cutTypes: string[];
   weldType: string;
@@ -65,6 +71,7 @@ interface SurveyData {
   floorCondition: string;
   wetZone: boolean;
   areaSqm: string;
+  zones?: ZoneDimension[];
   notes: string;
   savedAt?: string;
 }
@@ -149,6 +156,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const [tab, setTab] = useState<"info" | "stages" | "survey" | "qc" | "photos" | "close">("info");
   const [saving, setSaving] = useState(false);
   const [contactErrors, setContactErrors] = useState<string[]>([]);
+  const [zoneDimensions, setZoneDimensions] = useState<ZoneDimension[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const completionFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -201,8 +209,22 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     if (roomTypesLoaded) return;
     try {
       const { data } = await supabase
-        .from("install_jobs").select("room_type").eq("job_no", jobNo).single();
-      if (data?.room_type) setRoomTypes(data.room_type as string[]);
+        .from("install_jobs").select("room_type, survey_data").eq("job_no", jobNo).single();
+      if (data?.room_type) {
+        const rts = data.room_type as string[];
+        setRoomTypes(rts);
+        // Init zones for any room types that don't already have a zone entry
+        if (data?.survey_data) {
+          const sd = JSON.parse(data.survey_data as string);
+          if (sd.zones && sd.zones.length > 0) {
+            setZoneDimensions(sd.zones);
+          } else {
+            setZoneDimensions(rts.map((rt) => ({ roomType: rt, widthM: "", lengthM: "" })));
+          }
+        } else {
+          setZoneDimensions(rts.map((rt) => ({ roomType: rt, widthM: "", lengthM: "" })));
+        }
+      }
     } catch { }
     setRoomTypesLoaded(true);
   }
@@ -277,6 +299,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
           appt_shift: contactDraft.appt_shift || null,
           appt_date: contactDraft.apptDate || null,
           room_type: roomTypes.length ? roomTypes : null,
+          survey_data: JSON.stringify({ ...survey, zones: zoneDimensions }),
         })
         .eq("job_no", jobNo);
       if (error) throw error;
@@ -292,7 +315,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   async function saveSurvey() {
     setSaving(true);
     try {
-      const payload: SurveyData = { ...survey, savedAt: new Date().toISOString() };
+      const payload: SurveyData = { ...survey, zones: zoneDimensions, savedAt: new Date().toISOString() };
       const { error } = await supabase
         .from("install_jobs").update({ survey_data: JSON.stringify(payload) }).eq("job_no", jobNo);
       if (error) throw error;
@@ -641,11 +664,15 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                       <button
                         key={id}
                         type="button"
-                        onClick={() =>
-                          setRoomTypes((prev) =>
-                            prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]
-                          )
-                        }
+                        onClick={() => {
+                          if (roomTypes.includes(id)) {
+                            setRoomTypes((prev) => prev.filter((r) => r !== id));
+                            setZoneDimensions((prev) => prev.filter((z) => z.roomType !== id));
+                          } else {
+                            setRoomTypes((prev) => [...prev, id]);
+                            setZoneDimensions((prev) => [...prev, { roomType: id, widthM: "", lengthM: "" }]);
+                          }
+                        }}
                         className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                           roomTypes.includes(id)
                             ? "bg-blue-600 text-white border-blue-600"
@@ -656,6 +683,78 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                       </button>
                     ))}
                   </div>
+                  {zoneDimensions.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-xs text-gray-500 font-medium">📐 ขนาดพื้นที่ (กว้างสุด × ยาวสุด)</p>
+                      {zoneDimensions.map((zone, idx) => {
+                        const area =
+                          zone.widthM && zone.lengthM
+                            ? (Number(zone.widthM) * Number(zone.lengthM)).toFixed(2)
+                            : null;
+                        return (
+                          <div key={zone.roomType} className="bg-blue-50 border border-blue-100 rounded-lg p-2.5">
+                            <p className="text-xs font-semibold text-blue-700 mb-1.5">
+                              {ROOM_TYPES.find((r) => r.id === zone.roomType)?.label ?? zone.roomType}
+                            </p>
+                            <div className="flex gap-2 items-end">
+                              <div className="flex-1">
+                                <label className="text-xs text-gray-400 block mb-0.5">กว้างสุด (ม.)</label>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  min="0"
+                                  placeholder="0.0"
+                                  value={zone.widthM}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    setZoneDimensions((prev) =>
+                                      prev.map((z, i) => (i === idx ? { ...z, widthM: v } : z))
+                                    );
+                                  }}
+                                  className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                />
+                              </div>
+                              <span className="text-gray-400 text-xs pb-2">×</span>
+                              <div className="flex-1">
+                                <label className="text-xs text-gray-400 block mb-0.5">ยาวสุด (ม.)</label>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  min="0"
+                                  placeholder="0.0"
+                                  value={zone.lengthM}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    setZoneDimensions((prev) =>
+                                      prev.map((z, i) => (i === idx ? { ...z, lengthM: v } : z))
+                                    );
+                                  }}
+                                  className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                />
+                              </div>
+                              {area && (
+                                <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-1.5 rounded whitespace-nowrap">
+                                  {area} ตร.ม.
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {zoneDimensions.length > 1 &&
+                        zoneDimensions.every((z) => z.widthM && z.lengthM) && (
+                          <p className="text-right text-xs text-gray-600">
+                            รวม:{" "}
+                            <span className="font-bold text-blue-700">
+                              {zoneDimensions
+                                .reduce((s, z) => s + Number(z.widthM) * Number(z.lengthM), 0)
+                                .toFixed(2)}{" "}
+                              ตร.ม.
+                            </span>
+                          </p>
+                        )}
+                    </div>
+                  )}
                 </div>
 
                 <div>
