@@ -10,6 +10,12 @@ interface MaterialItem {
   lengthCm: string;
   qty: string;
 }
+interface ZoneDimension {
+  roomType: string;
+  widthM: string;
+  lengthM: string;
+}
+
 interface SurveyData {
   cutTypes?: string[];
   weldType?: string;
@@ -17,6 +23,7 @@ interface SurveyData {
   floorCondition?: string;
   wetZone?: boolean;
   areaSqm?: string;
+  zones?: ZoneDimension[];
   notes?: string;
 }
 interface HandoverData {
@@ -304,6 +311,67 @@ export default function JobOrderPage({ params }: { params: Promise<{ jobNo: stri
               </div>
             </Section>
           ) : null}
+
+          {/* Zone Dimensions */}
+          {(() => {
+            const zones: ZoneDimension[] = survey.zones && survey.zones.length > 0
+              ? survey.zones
+              : roomTypes.map((rt) => ({ roomType: rt, widthM: "", lengthM: "" }));
+            if (zones.length === 0) return null;
+            const totalZoneArea = zones
+              .filter((z) => z.widthM && z.lengthM)
+              .reduce((s, z) => s + Number(z.widthM) * Number(z.lengthM), 0);
+            return (
+              <Section title="ขนาดพื้นที่ต่อห้อง (กว้างสุด × ยาวสุด)">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-gray-100 text-xs text-gray-600">
+                      <th className="border border-gray-300 px-2 py-1.5 text-left">ห้อง / พื้นที่</th>
+                      <th className="border border-gray-300 px-2 py-1.5 text-center">กว้างสุด (ม.)</th>
+                      <th className="border border-gray-300 px-2 py-1.5 text-center">ยาวสุด (ม.)</th>
+                      <th className="border border-gray-300 px-2 py-1.5 text-center">พื้นที่ (ตร.ม.)</th>
+                      <th className="border border-gray-300 px-2 py-1.5 text-center text-gray-400">วัดจริงหน้างาน ___×___</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {zones.map((zone, i) => {
+                      const area =
+                        zone.widthM && zone.lengthM
+                          ? (Number(zone.widthM) * Number(zone.lengthM)).toFixed(2)
+                          : "—";
+                      return (
+                        <tr key={i} className={i % 2 === 1 ? "bg-gray-50" : ""}>
+                          <td className="border border-gray-300 px-2 py-2 font-medium">
+                            {ROOM_LABELS[zone.roomType] ?? zone.roomType}
+                          </td>
+                          <td className="border border-gray-300 px-2 py-2 text-center">{zone.widthM || "—"}</td>
+                          <td className="border border-gray-300 px-2 py-2 text-center">{zone.lengthM || "—"}</td>
+                          <td className="border border-gray-300 px-2 py-2 text-center font-semibold text-blue-700">{area}</td>
+                          <td className="border border-gray-300 px-2 py-2 text-center text-gray-300">_____ × _____</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  {totalZoneArea > 0 && (
+                    <tfoot>
+                      <tr className="bg-blue-50 font-semibold text-xs">
+                        <td colSpan={3} className="border border-gray-300 px-2 py-1.5 text-right text-gray-600">
+                          รวมพื้นที่ประมาณการ
+                        </td>
+                        <td className="border border-gray-300 px-2 py-1.5 text-center text-blue-700">
+                          {totalZoneArea.toFixed(2)}
+                        </td>
+                        <td className="border border-gray-300 px-2 py-1.5"></td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+                <p className="text-xs text-gray-400 mt-1.5">
+                  * กว้างสุด × ยาวสุด = ขนาดห้องสูงสุด (จาก Sales) — ช่างวัดจริงและกรอกคอลัมน์ขวา
+                </p>
+              </Section>
+            );
+          })()}
 
           {/* Materials */}
           <Section title="รายการวัสดุที่เบิก">
