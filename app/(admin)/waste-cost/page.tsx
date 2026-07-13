@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { toast } from "sonner";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Zone {
@@ -104,6 +105,7 @@ export default function WasteCostPage() {
   const [search, setSearch]                 = useState("");
   const [loadingJobs, setLoadingJobs]       = useState(true);
   const [savingZone, setSavingZone]         = useState<string | null>(null);
+  const [addingZone, setAddingZone]         = useState(false);
 
   // Load material IDs once
   useEffect(() => {
@@ -128,19 +130,20 @@ export default function WasteCostPage() {
       .order("created_at", { ascending: false });
     setJobs(data ?? []);
     setLoadingJobs(false);
-  }, []);
+  }, [supabase]);
 
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
 
   // Load zones
   const fetchZones = useCallback(async (jobNo: string) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("install_job_zones")
       .select("*")
       .eq("job_no", jobNo)
       .order("created_at");
+    if (error) toast.error("โหลด zone ไม่ได้: " + error.message);
     setZones(data ?? []);
-  }, []);
+  }, [supabase]);
 
   // Load stock
   const fetchStock = useCallback(async (jobNo: string, id140: string, id110: string) => {
@@ -162,7 +165,7 @@ export default function WasteCostPage() {
       }
     });
     setStockSummary(s);
-  }, []);
+  }, [supabase]);
 
   // Reload when job selected
   useEffect(() => {
@@ -177,6 +180,7 @@ export default function WasteCostPage() {
     if (selectedJobNo && mat140Id && mat110Id) {
       fetchStock(selectedJobNo, mat140Id, mat110Id);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mat140Id, mat110Id]);
 
   // Expected from zones
@@ -197,14 +201,20 @@ export default function WasteCostPage() {
 
   // ── Zone CRUD ─────────────────────────────────────────────────────────────
   const addZone = async () => {
-    if (!selectedJobNo) return;
+    if (!selectedJobNo || addingZone) return;
+    setAddingZone(true);
     const idx = zones.length + 1;
     const { data, error } = await supabase
       .from("install_job_zones")
       .insert({ job_no: selectedJobNo, zone_name: `โซน ${idx}`, width_cm: 0, length_cm: 0 })
       .select()
       .single();
-    if (!error && data) setZones((prev) => [...prev, data]);
+    setAddingZone(false);
+    if (error) {
+      toast.error("เพิ่ม zone ไม่ได้: " + error.message);
+      return;
+    }
+    if (data) setZones((prev) => [...prev, data]);
   };
 
   const patchZone = (id: string, field: keyof Zone, value: string | number) => {
@@ -214,15 +224,17 @@ export default function WasteCostPage() {
   const saveZone = async (zone: Zone) => {
     if (zone.width_cm < 0 || zone.length_cm < 0) return;
     setSavingZone(zone.id);
-    await supabase
+    const { error } = await supabase
       .from("install_job_zones")
       .update({ zone_name: zone.zone_name, width_cm: zone.width_cm, length_cm: zone.length_cm, updated_at: new Date().toISOString() })
       .eq("id", zone.id);
     setSavingZone(null);
+    if (error) toast.error("บันทึกไม่ได้: " + error.message);
   };
 
   const deleteZone = async (id: string) => {
-    await supabase.from("install_job_zones").delete().eq("id", id);
+    const { error } = await supabase.from("install_job_zones").delete().eq("id", id);
+    if (error) { toast.error("ลบไม่ได้: " + error.message); return; }
     setZones((prev) => prev.filter((z) => z.id !== id));
   };
 
@@ -303,9 +315,10 @@ export default function WasteCostPage() {
                 <h2 className="text-sm font-semibold text-slate-700">📐 ขนาดพื้นที่แต่ละโซน</h2>
                 <button
                   onClick={addZone}
-                  className="px-3 py-1 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  disabled={addingZone}
+                  className="px-3 py-1 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  + เพิ่มโซน
+                  {addingZone ? "กำลังเพิ่ม…" : "+ เพิ่มโซน"}
                 </button>
               </div>
 
