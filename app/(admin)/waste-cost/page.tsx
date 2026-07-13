@@ -33,7 +33,8 @@ interface Job {
   product_name: string | null;
   appt_date: string | null;
   stage: number;
-  handover_data: string | null;
+  // handover_data can be: null | JSON string (TEXT col) | parsed object (JSONB col)
+  handover_data: unknown;
 }
 
 interface Material { id: string; sku: string; unit_cost: number | null; }
@@ -55,13 +56,28 @@ interface Movement {
 interface StripCalc { n140: number; n110: number; total140: number; total110: number; }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-/** Parse handover_data JSON → StockSummary (qty × lengthCm per roll) */
-function parseHandoverSummary(handover_data: string | null): StockSummary | null {
-  if (!handover_data) return null;
+/**
+ * Parse handover_data → StockSummary
+ * Handles:
+ *   - null / undefined
+ *   - JSON string  (Supabase TEXT column)
+ *   - Already-parsed object (Supabase JSONB column)
+ */
+function parseHandoverSummary(raw: unknown): StockSummary | null {
+  if (!raw) return null;
   try {
-    const h: HandoverData = JSON.parse(handover_data);
+    let h: HandoverData;
+    if (typeof raw === "string") {
+      h = JSON.parse(raw) as HandoverData;
+    } else if (typeof raw === "object") {
+      h = raw as HandoverData;
+    } else {
+      return null;
+    }
+
     const s: StockSummary = { issued_140: 0, returned_140: 0, issued_110: 0, returned_110: 0 };
     let hasData = false;
+
     for (const m of h.materials ?? []) {
       const qty = Number(m.qty ?? 0);
       const len = Number(m.lengthCm ?? 0);
@@ -79,7 +95,9 @@ function parseHandoverSummary(handover_data: string | null): StockSummary | null
       }
     }
     return hasData ? s : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 function calcStripsForZone(dimA: number, dimB: number): StripCalc {
@@ -173,14 +191,11 @@ export default function WasteCostPage() {
   const [search, setSearch] = useState("");
   const [loadingJobs, setLoadingJobs] = useState(true);
 
-  // Overview zones
   const [overviewZonesMap, setOverviewZonesMap] = useState<Record<string, Zone[]>>({});
   const [loadingOverview, setLoadingOverview] = useState(false);
 
-  // View mode
   const [viewMode, setViewMode] = useState<"overview" | "detail">("overview");
 
-  // Detail
   const [selectedJobNo, setSelectedJobNo] = useState<string | null>(null);
   const [zones, setZones] = useState<Zone[]>([]);
   const [stockSummary, setStockSummary] = useState<StockSummary | null>(null);
@@ -189,7 +204,6 @@ export default function WasteCostPage() {
   const [savingZone, setSavingZone] = useState<string | null>(null);
   const [addingZone, setAddingZone] = useState(false);
 
-  // Manual stock entry form
   const [movType, setMovType] = useState<"out" | "return">("out");
   const [movMat, setMovMat] = useState<"140" | "110">("140");
   const [movQty, setMovQty] = useState("");
@@ -206,14 +220,14 @@ export default function WasteCostPage() {
     });
   }, []);
 
-  // ── Load all jobs (including handover_data) ───────────────────────────────
+  // ── Load all jobs (with handover_data) ───────────────────────────────────
   const fetchJobs = useCallback(async () => {
     setLoadingJobs(true);
     const { data } = await supabase
       .from("install_jobs")
       .select("job_no,bill_no,order_no,customer_name,customer_phone,address,product_name,appt_date,stage,handover_data")
       .order("created_at", { ascending: false });
-    setJobs(data ?? []);
+    setJobs((data ?? []) as Job[]);
     setLoadingJobs(false);
   }, [supabase]);
 
@@ -244,14 +258,14 @@ export default function WasteCostPage() {
   const fetchStock = useCallback(async (jobNo: string, job: Job) => {
     if (!mat140 || !mat110) return;
 
-    // 1. Try handover_data first (primary source)
+    // 1. Primary: handover_data (handles TEXT string OR JSONB object)
     const handoverSummary = parseHandoverSummary(job.handover_data);
     if (handoverSummary) {
       setStockSummary(handoverSummary);
       setStockSource("handover");
     }
 
-    // 2. Always load stock_movements for manual entries / history
+    // 2. Always load stock_movements for manual override history
     const { data } = await supabase
       .from("stock_movements")
       .select("id,material_id,type,qty,note,created_at")
@@ -260,7 +274,7 @@ export default function WasteCostPage() {
       .order("created_at", { ascending: false });
     setMovements(data ?? []);
 
-    // 3. If no handover data, use stock_movements as fallback
+    // 3. Fallback to stock_movements if no handover data
     if (!handoverSummary) {
       const s: StockSummary = { issued_140: 0, returned_140: 0, issued_110: 0, returned_110: 0 };
       let hasData = false;
@@ -324,8 +338,7 @@ export default function WasteCostPage() {
   // ── Manual stock movement ─────────────────────────────────────────────────
   const saveMovement = async () => {
     if (!selectedJobNo || !movQty || Number(movQty) <= 0) {
-      toast.error("กรอกจำนวนให้ถูกต้อง (> 0)");
-      return;
+      toast.error("กรอกจำนวนให้ถูกต้อง (> 0)"); return;
     }
     const matId = movMat === "140" ? mat140?.id : mat110?.id;
     if (!matId) { toast.error("ไม่พบข้อมูลวัสดุ"); return; }
@@ -337,10 +350,9 @@ export default function WasteCostPage() {
     setSavingMov(false);
     if (error) { toast.error("บันทึกไม่ได้: " + error.message); return; }
     toast.success(`บันทึก${movType === "out" ? "เบิก" : "คืน"} RS-${movMat} ${movQty} cm แล้ว`);
-    setMovQty("");
-    setMovNote("");
+    setMovQty(""); setMovNote("");
     const job = jobs.find((j) => j.job_no === selectedJobNo);
-    if (job) fetchStock(selectedJobNo, job);
+    if (job && selectedJobNo) fetchStock(selectedJobNo, job);
   };
 
   const deleteMovement = async (id: string) => {
@@ -351,7 +363,7 @@ export default function WasteCostPage() {
     toast.success("ลบรายการแล้ว");
   };
 
-  // ── Computed: detail ──────────────────────────────────────────────────────
+  // ── Computed ──────────────────────────────────────────────────────────────
   const expected = useMemo(() => sumZones(zones), [zones]);
 
   const wasteCalc = useMemo(() => {
@@ -365,16 +377,15 @@ export default function WasteCostPage() {
     };
   }, [stockSummary, expected]);
 
-  // ── Computed: overview (stock from handover_data, no extra DB query) ──────
   const filteredJobs = useMemo(() => {
     if (!search.trim()) return jobs;
     const q = search.toLowerCase();
     return jobs.filter((j) =>
       j.job_no?.toLowerCase().includes(q) ||
-      j.bill_no?.toLowerCase().includes(q) ||
-      j.order_no?.toLowerCase().includes(q) ||
-      j.customer_name?.toLowerCase().includes(q) ||
-      j.product_name?.toLowerCase().includes(q)
+      (j.bill_no as string | null)?.toLowerCase().includes(q) ||
+      (j.order_no as string | null)?.toLowerCase().includes(q) ||
+      (j.customer_name as string | null)?.toLowerCase().includes(q) ||
+      (j.product_name as string | null)?.toLowerCase().includes(q)
     );
   }, [jobs, search]);
 
@@ -392,8 +403,14 @@ export default function WasteCostPage() {
       const expectedCost = exp.total140 * c140 + exp.total110 * c110;
       const actualCost = actual140 !== null && actual110 !== null ? actual140 * c140 + actual110 * c110 : null;
       const wasteCost = actualCost !== null ? actualCost - expectedCost : null;
-      const hasMov = mov !== null;
-      return { ...j, zoneCount: jzones.length, exp140: exp.total140, exp110: exp.total110, actual140, actual110, waste140, waste110, expectedCost: expectedCost > 0 ? expectedCost : null, actualCost, wasteCost, hasZones: jzones.length > 0, hasMov };
+      return {
+        ...j, zoneCount: jzones.length, exp140: exp.total140, exp110: exp.total110,
+        actual140, actual110, waste140, waste110,
+        expectedCost: expectedCost > 0 ? expectedCost : null,
+        actualCost, wasteCost,
+        hasZones: jzones.length > 0,
+        hasMov: mov !== null,
+      };
     });
   }, [filteredJobs, overviewZonesMap, mat140, mat110]);
 
@@ -447,12 +464,12 @@ export default function WasteCostPage() {
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <StatusDot hasZones={hasZones} hasMov={hasMov} />
                   <p className="text-xs font-semibold text-slate-800 truncate">
-                    {j.bill_no || j.job_no}
+                    {(j.bill_no as string | null) || j.job_no}
                   </p>
                 </div>
                 <p className="text-[10px] font-mono text-blue-500 mb-0.5 pl-3">{j.job_no}</p>
-                <p className="text-[11px] text-slate-500 truncate pl-3">{j.customer_name || "—"}</p>
-                <p className="text-[10px] text-slate-400 truncate pl-3">{j.product_name || "—"}</p>
+                <p className="text-[11px] text-slate-500 truncate pl-3">{(j.customer_name as string | null) || "—"}</p>
+                <p className="text-[10px] text-slate-400 truncate pl-3">{(j.product_name as string | null) || "—"}</p>
               </button>
             );
           })}
@@ -474,9 +491,7 @@ export default function WasteCostPage() {
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="text-xl font-semibold text-slate-800">📊 Dashboard ต้นทุนเศษ</h1>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  ข้อมูลเบิก-คืนดึงจาก tab ปิดงาน โดยอัตโนมัติ
-                </p>
+                <p className="text-xs text-slate-400 mt-0.5">ข้อมูลเบิก-คืนดึงจาก tab ปิดงาน โดยอัตโนมัติ</p>
               </div>
               <button onClick={loadOverview} disabled={loadingOverview}
                 className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-500 disabled:opacity-50">
@@ -484,7 +499,6 @@ export default function WasteCostPage() {
               </button>
             </div>
 
-            {/* Summary cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
                 { label: "งานทั้งหมด", val: stats.total.toString(), sub: "รายการ" },
@@ -515,7 +529,6 @@ export default function WasteCostPage() {
               ✓ ข้อมูลเบิก-คืนดึงจาก <strong>tab ปิดงาน</strong> อัตโนมัติ — ไม่ต้องกรอกซ้ำ
             </div>
 
-            {/* Main table */}
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
@@ -548,12 +561,12 @@ export default function WasteCostPage() {
                           <div className="flex items-center gap-1.5">
                             <StatusDot hasZones={r.hasZones} hasMov={r.hasMov} />
                             <div>
-                              <p className="font-semibold text-slate-800 text-[11px]">{r.bill_no || r.job_no}</p>
+                              <p className="font-semibold text-slate-800 text-[11px]">{(r.bill_no as string | null) || r.job_no}</p>
                               {r.bill_no && <p className="font-mono text-blue-500 text-[9px]">{r.job_no}</p>}
                             </div>
                           </div>
                         </td>
-                        <td className="px-3 py-2.5 text-slate-700 max-w-[120px] truncate">{r.customer_name || "—"}</td>
+                        <td className="px-3 py-2.5 text-slate-700 max-w-[120px] truncate">{(r.customer_name as string | null) || "—"}</td>
                         <td className="px-3 py-2.5 text-center">
                           {r.zoneCount > 0 ? <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono">{r.zoneCount}</span> : <span className="text-slate-300">—</span>}
                         </td>
@@ -599,7 +612,7 @@ export default function WasteCostPage() {
                   <div>
                     <p className="text-xs text-slate-400 mb-0.5">เลขบิล</p>
                     <p className="text-xl font-bold text-slate-900 leading-tight">
-                      {selectedJob?.bill_no || <span className="text-slate-400 text-sm font-normal">ไม่มีเลขบิล</span>}
+                      {(selectedJob?.bill_no as string | null) || <span className="text-slate-400 text-sm font-normal">ไม่มีเลขบิล</span>}
                     </p>
                     <p className="text-[11px] font-mono text-blue-500 mt-0.5">{selectedJob?.job_no}</p>
                   </div>
@@ -608,27 +621,27 @@ export default function WasteCostPage() {
                 <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
                   <div>
                     <p className="text-slate-400 text-[10px] mb-0.5">ลูกค้า</p>
-                    <p className="font-medium text-slate-800">{selectedJob?.customer_name || "—"}</p>
+                    <p className="font-medium text-slate-800">{(selectedJob?.customer_name as string | null) || "—"}</p>
                   </div>
                   <div>
                     <p className="text-slate-400 text-[10px] mb-0.5">เบอร์โทร</p>
-                    <p className="font-medium text-slate-800">{selectedJob?.customer_phone || "—"}</p>
+                    <p className="font-medium text-slate-800">{(selectedJob?.customer_phone as string | null) || "—"}</p>
                   </div>
                   <div>
                     <p className="text-slate-400 text-[10px] mb-0.5">ออเดอร์</p>
-                    <p className="font-mono text-blue-600">{selectedJob?.order_no || "—"}</p>
+                    <p className="font-mono text-blue-600">{(selectedJob?.order_no as string | null) || "—"}</p>
                   </div>
                   <div>
                     <p className="text-slate-400 text-[10px] mb-0.5">วันนัด</p>
-                    <p className="text-slate-800">{fmtDate(selectedJob?.appt_date ?? null)}</p>
+                    <p className="text-slate-800">{fmtDate((selectedJob?.appt_date as string | null) ?? null)}</p>
                   </div>
                   <div className="col-span-2">
                     <p className="text-slate-400 text-[10px] mb-0.5">ที่อยู่</p>
-                    <p className="text-slate-700 leading-snug">{selectedJob?.address || "—"}</p>
+                    <p className="text-slate-700 leading-snug">{(selectedJob?.address as string | null) || "—"}</p>
                   </div>
                   <div className="col-span-2">
                     <p className="text-slate-400 text-[10px] mb-0.5">สินค้า</p>
-                    <p className="text-slate-700">{selectedJob?.product_name || "—"}</p>
+                    <p className="text-slate-700">{(selectedJob?.product_name as string | null) || "—"}</p>
                   </div>
                 </div>
               </div>
@@ -713,7 +726,7 @@ export default function WasteCostPage() {
                 )}
               </div>
 
-              {/* ── Stock summary (from handover or manual) ── */}
+              {/* ── Stock section ── */}
               <div className="bg-white rounded-xl border border-slate-200 p-4">
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-sm font-semibold text-slate-700">📦 ปริมาณเบิก-คืนวัสดุ</h2>
@@ -722,13 +735,13 @@ export default function WasteCostPage() {
 
                 {stockSource === "handover" && (
                   <div className="mb-3 p-2.5 bg-emerald-50 border border-emerald-100 rounded-lg text-xs text-emerald-700">
-                    ข้อมูลดึงจาก <strong>tab ปิดงาน</strong> อัตโนมัติ — หากต้องการแก้ไขให้กลับไปแก้ใน tab ปิดงาน แล้วรีเฟรชหน้านี้
+                    ข้อมูลดึงจาก <strong>tab ปิดงาน</strong> อัตโนมัติ — แก้ไขได้ที่ tab ปิดงาน แล้วรีโหลดหน้านี้
                   </div>
                 )}
 
                 {!stockSummary ? (
                   <p className="text-xs text-slate-400 text-center py-4">
-                    ยังไม่มีข้อมูลเบิก-คืน — กรอกรายการส่งมอบใน <strong>tab ปิดงาน</strong> ก่อน
+                    ยังไม่มีข้อมูลเบิก-คืน — บันทึกรายการส่งมอบใน <strong>tab ปิดงาน</strong> ก่อน
                   </p>
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
@@ -746,7 +759,6 @@ export default function WasteCostPage() {
                   </div>
                 )}
 
-                {/* ── Manual entry (always available as override/extra) ── */}
                 <details className="mt-2">
                   <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-600 select-none py-1">
                     ✎ บันทึกรายการเพิ่มเติมด้วยตนเอง (override)
@@ -785,7 +797,6 @@ export default function WasteCostPage() {
                         {savingMov ? "บันทึก…" : movType === "out" ? "▼ บันทึกเบิก" : "↩ บันทึกคืน"}
                       </button>
                     </div>
-
                     {movements.length > 0 && (
                       <table className="w-full text-xs">
                         <thead><tr className="text-[10px] text-slate-400 border-b border-slate-100">
