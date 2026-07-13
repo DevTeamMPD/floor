@@ -9,6 +9,7 @@ const NAV = [
   { href: "/queue",           icon: "🕑", label: "คิวงาน" },
   { href: "/service",         icon: "🛠", label: "บริการ" },
   { href: "/inventory",       icon: "📦", label: "คลังวัสดุ" },
+  { href: "/waste-cost",      icon: "♻️", label: "ต้นทุนเศษ" },
   { href: "/bom",             icon: "📐", label: "BOQ / BOM" },
   { href: "/purchase-orders", icon: "🛒", label: "ใบสั่งซื้อ" },
   { href: "/appointments",    icon: "📅", label: "นัดหมาย" },
@@ -88,9 +89,7 @@ export default function Sidebar() {
           className="md:hidden fixed inset-0 z-50 flex"
           onClick={() => setMenuOpen(false)}
         >
-          {/* Backdrop */}
           <div className="absolute inset-0 bg-black/60" />
-          {/* Drawer */}
           <div
             className="relative z-10 flex flex-col h-full w-72 shadow-2xl"
             style={{ background: "#0B1120" }}
@@ -158,7 +157,6 @@ export default function Sidebar() {
             </Link>
           );
         })}
-        {/* "เพิ่มเติม" triggers the slide-out menu */}
         <button
           onClick={() => setMenuOpen(true)}
           className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-xs text-slate-500"
