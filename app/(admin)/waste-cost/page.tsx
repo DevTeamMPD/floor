@@ -5,9 +5,35 @@ import { toast } from "sonner";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Zone { id: string; job_no: string; zone_name: string; width_cm: number; length_cm: number; }
-interface Job { job_no: string; customer_name: string; product_name: string; stage: number; }
+
+interface Job {
+  job_no: string;
+  bill_no: string | null;
+  order_no: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  address: string | null;
+  product_name: string | null;
+  appt_date: string | null;
+  stage: number;
+}
+
 interface Material { id: string; sku: string; unit_cost: number | null; }
-interface StockSummary { issued_140: number; returned_140: number; issued_110: number; returned_110: number; }
+
+interface StockSummary {
+  issued_140: number; returned_140: number;
+  issued_110: number; returned_110: number;
+}
+
+interface Movement {
+  id: string;
+  material_id: string;
+  type: string;
+  qty: number;
+  note: string | null;
+  created_at: string;
+}
+
 interface StripCalc { n140: number; n110: number; total140: number; total110: number; }
 
 // ─── Algorithm ────────────────────────────────────────────────────────────────
@@ -38,6 +64,20 @@ function sumZones(zones: Zone[]) {
 
 function fmtCm(n: number) { return n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 function fmtBaht(n: number) { return "฿" + Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+function fmtDate(s: string | null) {
+  if (!s) return "—";
+  return new Date(s).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
+}
+
+const STAGE_LABEL: Record<number, { label: string; cls: string }> = {
+  1: { label: "รับงาน", cls: "bg-slate-100 text-slate-600" },
+  2: { label: "นัดงาน", cls: "bg-blue-100 text-blue-700" },
+  3: { label: "กำลังดำเนิน", cls: "bg-amber-100 text-amber-700" },
+  4: { label: "รอดำเนิน", cls: "bg-yellow-100 text-yellow-700" },
+  5: { label: "ติดตั้งแล้ว", cls: "bg-emerald-100 text-emerald-700" },
+  6: { label: "รอปิด", cls: "bg-purple-100 text-purple-700" },
+  7: { label: "ปิดงาน", cls: "bg-green-100 text-green-700" },
+};
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 function WasteBadge({ pct }: { pct: number | null }) {
@@ -59,15 +99,9 @@ function StatusDot({ hasZones, hasMov }: { hasZones: boolean; hasMov: boolean })
   return <span className="w-1.5 h-1.5 rounded-full bg-slate-200 flex-shrink-0 inline-block" title="ยังไม่มีข้อมูล" />;
 }
 
-function StatRow({ label, value, unit = "cm", bold = false }: { label: string; value: number | null; unit?: string; bold?: boolean }) {
-  return (
-    <div className={`flex justify-between items-center py-1 ${bold ? "border-t border-slate-100 mt-1" : ""}`}>
-      <span className={`text-xs ${bold ? "font-semibold text-slate-700" : "text-slate-500"}`}>{label}</span>
-      <span className={`text-xs font-mono ${bold ? "font-semibold" : ""}`}>
-        {value === null ? "—" : `${fmtCm(value)} ${unit}`}
-      </span>
-    </div>
-  );
+function StageBadge({ stage }: { stage: number }) {
+  const s = STAGE_LABEL[stage] ?? { label: `Stage ${stage}`, cls: "bg-slate-100 text-slate-600" };
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${s.cls}`}>{s.label}</span>;
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -93,8 +127,16 @@ export default function WasteCostPage() {
   const [selectedJobNo, setSelectedJobNo] = useState<string | null>(null);
   const [zones, setZones] = useState<Zone[]>([]);
   const [stockSummary, setStockSummary] = useState<StockSummary | null>(null);
+  const [movements, setMovements] = useState<Movement[]>([]);
   const [savingZone, setSavingZone] = useState<string | null>(null);
   const [addingZone, setAddingZone] = useState(false);
+
+  // Stock entry form
+  const [movType, setMovType] = useState<"out" | "return">("out");
+  const [movMat, setMovMat] = useState<"140" | "110">("140");
+  const [movQty, setMovQty] = useState("");
+  const [movNote, setMovNote] = useState("");
+  const [savingMov, setSavingMov] = useState(false);
 
   // ── Load materials ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -106,10 +148,13 @@ export default function WasteCostPage() {
     });
   }, []);
 
-  // ── Load all jobs ─────────────────────────────────────────────────────────
+  // ── Load all jobs (with extra fields) ────────────────────────────────────
   const fetchJobs = useCallback(async () => {
     setLoadingJobs(true);
-    const { data } = await supabase.from("install_jobs").select("job_no,customer_name,product_name,stage").order("created_at", { ascending: false });
+    const { data } = await supabase
+      .from("install_jobs")
+      .select("job_no,bill_no,order_no,customer_name,customer_phone,address,product_name,appt_date,stage")
+      .order("created_at", { ascending: false });
     setJobs(data ?? []);
     setLoadingJobs(false);
   }, [supabase]);
@@ -163,8 +208,13 @@ export default function WasteCostPage() {
 
   const fetchStock = useCallback(async (jobNo: string) => {
     if (!mat140 || !mat110) return;
-    const { data } = await supabase.from("stock_movements").select("type,qty,material_id")
-      .eq("ref_job_no", jobNo).in("material_id", [mat140.id, mat110.id]);
+    const { data } = await supabase
+      .from("stock_movements")
+      .select("id,material_id,type,qty,note,created_at")
+      .eq("ref_job_no", jobNo)
+      .in("material_id", [mat140.id, mat110.id])
+      .order("created_at", { ascending: false });
+
     const s: StockSummary = { issued_140: 0, returned_140: 0, issued_110: 0, returned_110: 0 };
     (data ?? []).forEach((row) => {
       const q = Number(row.qty);
@@ -177,11 +227,13 @@ export default function WasteCostPage() {
       }
     });
     setStockSummary(s);
+    setMovements(data ?? []);
   }, [mat140, mat110, supabase]);
 
   useEffect(() => {
     if (!selectedJobNo) return;
     setStockSummary(null);
+    setMovements([]);
     fetchZones(selectedJobNo);
     fetchStock(selectedJobNo);
   }, [selectedJobNo, fetchZones, fetchStock]);
@@ -217,8 +269,44 @@ export default function WasteCostPage() {
     setZones((prev) => prev.filter((z) => z.id !== id));
   };
 
+  // ── Save stock movement ───────────────────────────────────────────────────
+  const saveMovement = async () => {
+    if (!selectedJobNo || !movQty || Number(movQty) <= 0) {
+      toast.error("กรอกจำนวนให้ถูกต้อง (> 0)");
+      return;
+    }
+    const matId = movMat === "140" ? mat140?.id : mat110?.id;
+    if (!matId) { toast.error("ไม่พบข้อมูลวัสดุ"); return; }
+
+    setSavingMov(true);
+    const { error } = await supabase.from("stock_movements").insert({
+      material_id: matId,
+      type: movType,
+      qty: Number(movQty),
+      ref_job_no: selectedJobNo,
+      note: movNote.trim() || null,
+    });
+    setSavingMov(false);
+
+    if (error) { toast.error("บันทึกไม่ได้: " + error.message); return; }
+    toast.success(`บันทึก${movType === "out" ? "เบิก" : "คืน"} RS-${movMat} ${movQty} cm แล้ว`);
+    setMovQty("");
+    setMovNote("");
+    fetchStock(selectedJobNo);
+    loadOverview();
+  };
+
+  const deleteMovement = async (id: string) => {
+    const { error } = await supabase.from("stock_movements").delete().eq("id", id);
+    if (error) { toast.error("ลบไม่ได้: " + error.message); return; }
+    if (selectedJobNo) fetchStock(selectedJobNo);
+    loadOverview();
+    toast.success("ลบรายการแล้ว");
+  };
+
   // ── Computed: detail ──────────────────────────────────────────────────────
   const expected = useMemo(() => sumZones(zones), [zones]);
+
   const wasteCalc = useMemo(() => {
     if (!stockSummary || (stockSummary.issued_140 === 0 && stockSummary.issued_110 === 0)) return null;
     const actual140 = stockSummary.issued_140 - stockSummary.returned_140;
@@ -235,7 +323,11 @@ export default function WasteCostPage() {
     if (!search.trim()) return jobs;
     const q = search.toLowerCase();
     return jobs.filter((j) =>
-      j.job_no?.toLowerCase().includes(q) || j.customer_name?.toLowerCase().includes(q) || j.product_name?.toLowerCase().includes(q)
+      j.job_no?.toLowerCase().includes(q) ||
+      j.bill_no?.toLowerCase().includes(q) ||
+      j.order_no?.toLowerCase().includes(q) ||
+      j.customer_name?.toLowerCase().includes(q) ||
+      j.product_name?.toLowerCase().includes(q)
     );
   }, [jobs, search]);
 
@@ -265,14 +357,13 @@ export default function WasteCostPage() {
       total: jobs.length,
       withZones: overviewRows.filter((r) => r.hasZones).length,
       withData: overviewRows.filter((r) => r.hasMov).length,
-      totalWasteCost,
-      withCostSetup,
+      totalWasteCost, withCostSetup,
     };
   }, [overviewRows, jobs.length, mat140, mat110]);
 
   const selectedJob = jobs.find((j) => j.job_no === selectedJobNo);
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="flex h-full gap-4 min-h-0">
 
@@ -288,7 +379,7 @@ export default function WasteCostPage() {
           >
             🏠 ภาพรวมทั้งหมด
           </button>
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา…"
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา บิล / ออเดอร์ / ลูกค้า…"
             className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" />
         </div>
 
@@ -307,12 +398,17 @@ export default function WasteCostPage() {
                   selectedJobNo === j.job_no && viewMode === "detail" ? "bg-blue-50 border-l-2 border-l-blue-500" : "hover:bg-slate-50"
                 }`}
               >
+                {/* Bill no — primary identifier */}
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <StatusDot hasZones={hasZones} hasMov={hasMov} />
-                  <p className="text-[10px] font-mono text-blue-600 truncate">{j.job_no}</p>
+                  <p className="text-xs font-semibold text-slate-800 truncate">
+                    {j.bill_no || j.job_no}
+                  </p>
                 </div>
-                <p className="text-xs font-medium text-slate-800 truncate">{j.customer_name || "—"}</p>
-                <p className="text-[11px] text-slate-400 truncate">{j.product_name || "—"}</p>
+                {/* job_no secondary */}
+                <p className="text-[10px] font-mono text-blue-500 mb-0.5 pl-3">{j.job_no}</p>
+                <p className="text-[11px] text-slate-500 truncate pl-3">{j.customer_name || "—"}</p>
+                <p className="text-[10px] text-slate-400 truncate pl-3">{j.product_name || "—"}</p>
               </button>
             );
           })}
@@ -325,13 +421,12 @@ export default function WasteCostPage() {
         </div>
       </div>
 
-      {/* ── Right ── */}
+      {/* ── Right panel ── */}
       <div className="flex-1 overflow-y-auto min-h-0">
 
         {/* ===== OVERVIEW ===== */}
         {viewMode === "overview" && (
           <div className="space-y-4 pb-8">
-            {/* Header */}
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="text-xl font-semibold text-slate-800">📊 Dashboard ต้นทุนเศษ</h1>
@@ -364,10 +459,9 @@ export default function WasteCostPage() {
               ))}
             </div>
 
-            {/* Warning if no unit cost */}
             {!stats.withCostSetup && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-xs text-amber-700">
-                💡 ยังไม่ได้ตั้งราคาต้นทุนวัสดุ — ไปที่ <strong>คลังวัสดุ</strong> แล้วแก้ไข unit_cost ของ <strong>RS-140</strong> / <strong>RS-110</strong> เพื่อให้คำนวณต้นทุนเป็น ฿ ได้
+                💡 ยังไม่ได้ตั้งราคาต้นทุนวัสดุ — ไปที่ <strong>คลังวัสดุ</strong> แล้วแก้ไข unit_cost ของ <strong>RS-140</strong> / <strong>RS-110</strong>
               </div>
             )}
 
@@ -377,9 +471,17 @@ export default function WasteCostPage() {
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50 border-b border-slate-100">
                     <tr>
-                      {["Job No.", "ลูกค้า", "โซน", "ควรใช้ 140", "ควรใช้ 110", "เบิก 140", "เบิก 110", "%เศษ 140", "%เศษ 110", "ต้นทุนที่ควร", "ต้นทุนเศษ"].map((h, i) => (
-                        <th key={h} className={`px-3 py-2.5 font-medium text-slate-500 ${i >= 2 ? "text-right" : "text-left"} ${i === 7 || i === 8 ? "text-center" : ""}`}>{h}</th>
-                      ))}
+                      <th className="text-left px-3 py-2.5 font-medium text-slate-500">บิล / Job No.</th>
+                      <th className="text-left px-3 py-2.5 font-medium text-slate-500">ลูกค้า</th>
+                      <th className="text-center px-3 py-2.5 font-medium text-slate-500">โซน</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-slate-500">ควรใช้ 140</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-slate-500">ควรใช้ 110</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-slate-500">เบิก 140</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-slate-500">เบิก 110</th>
+                      <th className="text-center px-3 py-2.5 font-medium text-slate-500">%เศษ 140</th>
+                      <th className="text-center px-3 py-2.5 font-medium text-slate-500">%เศษ 110</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-slate-500">ต้นทุนที่ควร</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-slate-500">ต้นทุนเศษ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
@@ -395,11 +497,14 @@ export default function WasteCostPage() {
                         <td className="px-3 py-2.5">
                           <div className="flex items-center gap-1.5">
                             <StatusDot hasZones={r.hasZones} hasMov={r.hasMov} />
-                            <span className="font-mono text-blue-600">{r.job_no}</span>
+                            <div>
+                              <p className="font-semibold text-slate-800 text-[11px]">{r.bill_no || r.job_no}</p>
+                              {r.bill_no && <p className="font-mono text-blue-500 text-[9px]">{r.job_no}</p>}
+                            </div>
                           </div>
                         </td>
-                        <td className="px-3 py-2.5 text-slate-700 max-w-[130px] truncate">{r.customer_name || "—"}</td>
-                        <td className="px-3 py-2.5 text-right">
+                        <td className="px-3 py-2.5 text-slate-700 max-w-[120px] truncate">{r.customer_name || "—"}</td>
+                        <td className="px-3 py-2.5 text-center">
                           {r.zoneCount > 0 ? <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono">{r.zoneCount}</span> : <span className="text-slate-300">—</span>}
                         </td>
                         <td className="px-3 py-2.5 text-right font-mono text-slate-600">{r.exp140 > 0 ? fmtCm(r.exp140) : "—"}</td>
@@ -438,14 +543,49 @@ export default function WasteCostPage() {
                 ← กลับภาพรวม
               </button>
 
-              {/* Job header */}
-              <div className="bg-white rounded-xl border border-slate-200 px-5 py-4">
-                <p className="text-[11px] font-mono text-blue-500 mb-0.5">{selectedJob?.job_no}</p>
-                <h1 className="text-lg font-semibold text-slate-800">{selectedJob?.customer_name || "—"}</h1>
-                <p className="text-sm text-slate-500 mt-0.5">{selectedJob?.product_name || "—"}</p>
+              {/* ── Job info card (pipeline style) ── */}
+              <div className="bg-white rounded-xl border border-slate-200 p-4">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div>
+                    {/* Bill No — ใหญ่สุด */}
+                    <p className="text-xs text-slate-400 mb-0.5">เลขบิล</p>
+                    <p className="text-xl font-bold text-slate-900 leading-tight">
+                      {selectedJob?.bill_no || <span className="text-slate-400 text-sm font-normal">ไม่มีเลขบิล</span>}
+                    </p>
+                    <p className="text-[11px] font-mono text-blue-500 mt-0.5">{selectedJob?.job_no}</p>
+                  </div>
+                  {selectedJob && <StageBadge stage={selectedJob.stage} />}
+                </div>
+
+                <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
+                  <div>
+                    <p className="text-slate-400 text-[10px] mb-0.5">ลูกค้า</p>
+                    <p className="font-medium text-slate-800">{selectedJob?.customer_name || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400 text-[10px] mb-0.5">เบอร์โทร</p>
+                    <p className="font-medium text-slate-800">{selectedJob?.customer_phone || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400 text-[10px] mb-0.5">ออเดอร์</p>
+                    <p className="font-mono text-blue-600">{selectedJob?.order_no || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400 text-[10px] mb-0.5">วันนัด</p>
+                    <p className="text-slate-800">{fmtDate(selectedJob?.appt_date ?? null)}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-slate-400 text-[10px] mb-0.5">ที่อยู่</p>
+                    <p className="text-slate-700 leading-snug">{selectedJob?.address || "—"}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-slate-400 text-[10px] mb-0.5">สินค้า</p>
+                    <p className="text-slate-700">{selectedJob?.product_name || "—"}</p>
+                  </div>
+                </div>
               </div>
 
-              {/* Zone editor */}
+              {/* ── Zone editor ── */}
               <div className="bg-white rounded-xl border border-slate-200 p-4">
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-sm font-semibold text-slate-700">📐 ขนาดพื้นที่แต่ละโซน</h2>
@@ -456,7 +596,7 @@ export default function WasteCostPage() {
                 </div>
 
                 {zones.length === 0 ? (
-                  <div className="text-center py-8 text-slate-400">
+                  <div className="text-center py-6 text-slate-400">
                     <p className="text-sm">ยังไม่มีข้อมูล Zone</p>
                     <p className="text-xs mt-1">กด &ldquo;+ เพิ่มโซน&rdquo; แล้วกรอกขนาดพื้นที่</p>
                   </div>
@@ -476,7 +616,6 @@ export default function WasteCostPage() {
                       <tbody className="divide-y divide-slate-50">
                         {zones.map((z) => {
                           const calc = z.width_cm > 0 && z.length_cm > 0 ? calcStripsForZone(z.width_cm, z.length_cm) : null;
-                          const saving = savingZone === z.id;
                           return (
                             <tr key={z.id}>
                               <td className="py-2 pr-2">
@@ -504,7 +643,7 @@ export default function WasteCostPage() {
                                 {calc ? <span className="text-xs font-mono text-slate-700">{fmtCm(calc.total110)} cm <span className="text-slate-400">×{calc.n110}</span></span> : <span className="text-xs text-slate-300">—</span>}
                               </td>
                               <td className="py-2 text-right">
-                                {saving ? <span className="text-[10px] text-blue-400">💾</span>
+                                {savingZone === z.id ? <span className="text-[10px] text-blue-400">💾</span>
                                   : <button onClick={() => deleteZone(z.id)} className="text-slate-300 hover:text-red-500 text-xs transition-colors">✕</button>}
                               </td>
                             </tr>
@@ -526,7 +665,135 @@ export default function WasteCostPage() {
                 )}
               </div>
 
-              {/* Waste analysis */}
+              {/* ── Stock entry form ── */}
+              <div className="bg-white rounded-xl border border-slate-200 p-4">
+                <h2 className="text-sm font-semibold text-slate-700 mb-3">📦 บันทึกการเบิก-คืนวัสดุ</h2>
+
+                {/* Form row */}
+                <div className="flex flex-wrap gap-2 items-end mb-4">
+                  {/* ประเภท toggle */}
+                  <div>
+                    <p className="text-[10px] text-slate-400 mb-1">ประเภท</p>
+                    <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs">
+                      <button onClick={() => setMovType("out")}
+                        className={`px-3 py-1.5 font-medium transition-colors ${movType === "out" ? "bg-red-500 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+                        ▼ เบิก
+                      </button>
+                      <button onClick={() => setMovType("return")}
+                        className={`px-3 py-1.5 font-medium transition-colors ${movType === "return" ? "bg-blue-500 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+                        ↩ คืน
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* วัสดุ toggle */}
+                  <div>
+                    <p className="text-[10px] text-slate-400 mb-1">วัสดุ</p>
+                    <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs">
+                      <button onClick={() => setMovMat("140")}
+                        className={`px-3 py-1.5 font-medium transition-colors ${movMat === "140" ? "bg-slate-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+                        RS-140
+                      </button>
+                      <button onClick={() => setMovMat("110")}
+                        className={`px-3 py-1.5 font-medium transition-colors ${movMat === "110" ? "bg-slate-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+                        RS-110
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* จำนวน */}
+                  <div>
+                    <p className="text-[10px] text-slate-400 mb-1">จำนวน (cm)</p>
+                    <div className="flex items-center gap-1">
+                      <input type="number" min={1} value={movQty} onChange={(e) => setMovQty(e.target.value)} placeholder="0"
+                        className="w-24 px-2 py-1.5 text-xs border border-slate-200 rounded-lg text-right focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                      <span className="text-[10px] text-slate-400">cm</span>
+                    </div>
+                  </div>
+
+                  {/* หมายเหตุ */}
+                  <div className="flex-1 min-w-32">
+                    <p className="text-[10px] text-slate-400 mb-1">หมายเหตุ (ถ้ามี)</p>
+                    <input value={movNote} onChange={(e) => setMovNote(e.target.value)} placeholder="เช่น ช่างคืนสต็อก"
+                      className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                  </div>
+
+                  {/* Save */}
+                  <button onClick={saveMovement} disabled={savingMov || !movQty}
+                    className={`px-4 py-1.5 text-xs font-medium rounded-lg transition-colors disabled:opacity-50 ${
+                      movType === "out" ? "bg-red-500 hover:bg-red-600 text-white" : "bg-blue-500 hover:bg-blue-600 text-white"
+                    }`}>
+                    {savingMov ? "บันทึก…" : movType === "out" ? "▼ บันทึกเบิก" : "↩ บันทึกคืน"}
+                  </button>
+                </div>
+
+                {/* Summary row */}
+                {stockSummary && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                    {[
+                      { label: "เบิก RS-140", val: stockSummary.issued_140, cls: "text-red-600" },
+                      { label: "คืน RS-140", val: stockSummary.returned_140, cls: "text-blue-600" },
+                      { label: "เบิก RS-110", val: stockSummary.issued_110, cls: "text-red-600" },
+                      { label: "คืน RS-110", val: stockSummary.returned_110, cls: "text-blue-600" },
+                    ].map((s) => (
+                      <div key={s.label} className="bg-slate-50 rounded-lg px-3 py-2 text-center">
+                        <p className="text-[10px] text-slate-400">{s.label}</p>
+                        <p className={`text-sm font-bold font-mono ${s.cls}`}>{fmtCm(s.val)} cm</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Movement history */}
+                {movements.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-4">ยังไม่มีรายการเบิก-คืน</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-[10px] text-slate-400 uppercase tracking-wide border-b border-slate-100">
+                          <th className="pb-2 text-left font-medium">วันที่</th>
+                          <th className="pb-2 text-left font-medium">ประเภท</th>
+                          <th className="pb-2 text-left font-medium">วัสดุ</th>
+                          <th className="pb-2 text-right font-medium">จำนวน</th>
+                          <th className="pb-2 text-left font-medium">หมายเหตุ</th>
+                          <th className="pb-2"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {movements.map((m) => {
+                          const isMat140 = m.material_id === mat140?.id;
+                          return (
+                            <tr key={m.id} className="hover:bg-slate-50">
+                              <td className="py-1.5 pr-3 text-slate-500 whitespace-nowrap">
+                                {new Date(m.created_at).toLocaleDateString("th-TH", { day: "numeric", month: "short" })}
+                              </td>
+                              <td className="py-1.5 pr-3">
+                                {m.type === "out"
+                                  ? <span className="text-red-600 font-medium">▼ เบิก</span>
+                                  : <span className="text-blue-600 font-medium">↩ คืน</span>}
+                              </td>
+                              <td className="py-1.5 pr-3 font-mono text-slate-700">
+                                RS-{isMat140 ? "140" : "110"}
+                              </td>
+                              <td className="py-1.5 pr-3 text-right font-mono font-semibold">
+                                {fmtCm(Number(m.qty))} cm
+                              </td>
+                              <td className="py-1.5 pr-3 text-slate-400">{m.note || "—"}</td>
+                              <td className="py-1.5 text-right">
+                                <button onClick={() => deleteMovement(m.id)}
+                                  className="text-slate-300 hover:text-red-500 transition-colors text-xs">✕</button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Waste analysis ── */}
               {(expected.total140 > 0 || expected.total110 > 0) && (
                 <div className="bg-white rounded-xl border border-slate-200 p-4">
                   <h2 className="text-sm font-semibold text-slate-700 mb-3">📊 วิเคราะห์ต้นทุนเศษ</h2>
@@ -539,10 +806,20 @@ export default function WasteCostPage() {
                       return (
                         <div key={m.label} className="border border-slate-200 rounded-lg p-3">
                           <p className="text-xs font-semibold text-slate-500 mb-1.5">{m.label}</p>
-                          <StatRow label="ควรใช้" value={m.exp} />
-                          <StatRow label="เบิกไป" value={m.issued} />
-                          <StatRow label="คืนมา" value={m.ret} />
-                          <StatRow label="ใช้จริง" value={m.actual} bold />
+                          {[
+                            { label: "ควรใช้", val: m.exp },
+                            { label: "เบิกไป", val: m.issued },
+                            { label: "คืนมา", val: m.ret },
+                          ].map((r) => (
+                            <div key={r.label} className="flex justify-between items-center py-1">
+                              <span className="text-xs text-slate-500">{r.label}</span>
+                              <span className="text-xs font-mono">{r.val === null ? "—" : `${fmtCm(r.val)} cm`}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between items-center py-1 border-t border-slate-100 mt-1">
+                            <span className="text-xs font-semibold text-slate-700">ใช้จริง</span>
+                            <span className="text-xs font-semibold font-mono">{m.actual === null ? "—" : `${fmtCm(m.actual)} cm`}</span>
+                          </div>
                           {wasteCostVal !== null && (
                             <div className="flex justify-between items-center py-1">
                               <span className="text-xs text-slate-500">ต้นทุนเศษ</span>
@@ -559,14 +836,6 @@ export default function WasteCostPage() {
                       );
                     })}
                   </div>
-
-                  {stockSummary && stockSummary.issued_140 === 0 && stockSummary.issued_110 === 0 && (
-                    <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                      ⚠️ ยังไม่มีการบันทึกรายการเบิกวัสดุสำหรับงานนี้<br />
-                      <span className="text-amber-600">→ ไปที่ <strong>คลังวัสดุ</strong> → จ่ายออก → RS-140/RS-110 → ระบุ Job No. <strong>{selectedJobNo}</strong></span>
-                    </p>
-                  )}
-
                   <div className="mt-3 pt-3 border-t border-slate-100 flex gap-4 text-[10px] text-slate-400">
                     <span className="text-green-600 font-medium">■ ≤5%</span>
                     <span className="text-amber-600 font-medium">■ 5–15%</span>
