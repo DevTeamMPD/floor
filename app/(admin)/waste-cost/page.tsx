@@ -6,6 +6,23 @@ import { toast } from "sonner";
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Zone { id: string; job_no: string; zone_name: string; width_cm: number; length_cm: number; }
 
+interface MaterialItem {
+  thickness?: string; color?: string;
+  widthCm?: "110" | "140" | "";
+  lengthCm?: string; qty?: string;
+}
+interface ReturnItem {
+  thickness?: string; color?: string;
+  widthCm?: "110" | "140" | "";
+  lengthCm?: string; qty?: string;
+}
+interface HandoverData {
+  materials?: MaterialItem[];
+  returnItems?: ReturnItem[];
+  notes?: string;
+  savedAt?: string;
+}
+
 interface Job {
   job_no: string;
   bill_no: string | null;
@@ -16,6 +33,7 @@ interface Job {
   product_name: string | null;
   appt_date: string | null;
   stage: number;
+  handover_data: string | null;
 }
 
 interface Material { id: string; sku: string; unit_cost: number | null; }
@@ -36,7 +54,34 @@ interface Movement {
 
 interface StripCalc { n140: number; n110: number; total140: number; total110: number; }
 
-// ─── Algorithm ────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+/** Parse handover_data JSON → StockSummary (qty × lengthCm per roll) */
+function parseHandoverSummary(handover_data: string | null): StockSummary | null {
+  if (!handover_data) return null;
+  try {
+    const h: HandoverData = JSON.parse(handover_data);
+    const s: StockSummary = { issued_140: 0, returned_140: 0, issued_110: 0, returned_110: 0 };
+    let hasData = false;
+    for (const m of h.materials ?? []) {
+      const qty = Number(m.qty ?? 0);
+      const len = Number(m.lengthCm ?? 0);
+      if (qty > 0 && len > 0) {
+        if (m.widthCm === "140") { s.issued_140 += qty * len; hasData = true; }
+        if (m.widthCm === "110") { s.issued_110 += qty * len; hasData = true; }
+      }
+    }
+    for (const r of h.returnItems ?? []) {
+      const qty = Number(r.qty ?? 0);
+      const len = Number(r.lengthCm ?? 0);
+      if (qty > 0 && len > 0) {
+        if (r.widthCm === "140") { s.returned_140 += qty * len; hasData = true; }
+        if (r.widthCm === "110") { s.returned_110 += qty * len; hasData = true; }
+      }
+    }
+    return hasData ? s : null;
+  } catch { return null; }
+}
+
 function calcStripsForZone(dimA: number, dimB: number): StripCalc {
   function singleOrient(stripLen: number, cover: number): StripCalc {
     const nPairs = Math.floor(cover / 250);
@@ -104,20 +149,32 @@ function StageBadge({ stage }: { stage: number }) {
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${s.cls}`}>{s.label}</span>;
 }
 
+function SourceBadge({ source }: { source: "handover" | "manual" | "none" }) {
+  if (source === "handover") return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+      ✓ จาก tab ปิดงาน
+    </span>
+  );
+  if (source === "manual") return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+      ✎ บันทึกด้วยตนเอง
+    </span>
+  );
+  return null;
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function WasteCostPage() {
   const supabase = createClient();
 
-  // Core data
   const [jobs, setJobs] = useState<Job[]>([]);
   const [mat140, setMat140] = useState<Material | null>(null);
   const [mat110, setMat110] = useState<Material | null>(null);
   const [search, setSearch] = useState("");
   const [loadingJobs, setLoadingJobs] = useState(true);
 
-  // Overview bulk data
+  // Overview zones
   const [overviewZonesMap, setOverviewZonesMap] = useState<Record<string, Zone[]>>({});
-  const [overviewMovMap, setOverviewMovMap] = useState<Record<string, StockSummary>>({});
   const [loadingOverview, setLoadingOverview] = useState(false);
 
   // View mode
@@ -127,11 +184,12 @@ export default function WasteCostPage() {
   const [selectedJobNo, setSelectedJobNo] = useState<string | null>(null);
   const [zones, setZones] = useState<Zone[]>([]);
   const [stockSummary, setStockSummary] = useState<StockSummary | null>(null);
+  const [stockSource, setStockSource] = useState<"handover" | "manual" | "none">("none");
   const [movements, setMovements] = useState<Movement[]>([]);
   const [savingZone, setSavingZone] = useState<string | null>(null);
   const [addingZone, setAddingZone] = useState(false);
 
-  // Stock entry form
+  // Manual stock entry form
   const [movType, setMovType] = useState<"out" | "return">("out");
   const [movMat, setMovMat] = useState<"140" | "110">("140");
   const [movQty, setMovQty] = useState("");
@@ -148,12 +206,12 @@ export default function WasteCostPage() {
     });
   }, []);
 
-  // ── Load all jobs (with extra fields) ────────────────────────────────────
+  // ── Load all jobs (including handover_data) ───────────────────────────────
   const fetchJobs = useCallback(async () => {
     setLoadingJobs(true);
     const { data } = await supabase
       .from("install_jobs")
-      .select("job_no,bill_no,order_no,customer_name,customer_phone,address,product_name,appt_date,stage")
+      .select("job_no,bill_no,order_no,customer_name,customer_phone,address,product_name,appt_date,stage,handover_data")
       .order("created_at", { ascending: false });
     setJobs(data ?? []);
     setLoadingJobs(false);
@@ -161,43 +219,20 @@ export default function WasteCostPage() {
 
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
 
-  // ── Load overview (all zones + all movements) ─────────────────────────────
+  // ── Load overview zones ───────────────────────────────────────────────────
   const loadOverview = useCallback(async () => {
-    if (!mat140 || !mat110) return;
     setLoadingOverview(true);
-    const [zonesRes, movRes] = await Promise.all([
-      supabase.from("install_job_zones").select("*"),
-      supabase.from("stock_movements").select("ref_job_no,material_id,type,qty")
-        .in("material_id", [mat140.id, mat110.id])
-        .not("ref_job_no", "is", null),
-    ]);
-
+    const { data: zonesData } = await supabase.from("install_job_zones").select("*");
     const zonesMap: Record<string, Zone[]> = {};
-    (zonesRes.data ?? []).forEach((z) => {
+    (zonesData ?? []).forEach((z) => {
       if (!zonesMap[z.job_no]) zonesMap[z.job_no] = [];
       zonesMap[z.job_no].push(z);
     });
     setOverviewZonesMap(zonesMap);
-
-    const movMap: Record<string, StockSummary> = {};
-    (movRes.data ?? []).forEach((row) => {
-      if (!row.ref_job_no) return;
-      if (!movMap[row.ref_job_no]) movMap[row.ref_job_no] = { issued_140: 0, returned_140: 0, issued_110: 0, returned_110: 0 };
-      const q = Number(row.qty);
-      const s = movMap[row.ref_job_no];
-      if (row.material_id === mat140.id) {
-        if (row.type === "out") s.issued_140 += q;
-        else if (row.type === "return") s.returned_140 += q;
-      } else if (row.material_id === mat110.id) {
-        if (row.type === "out") s.issued_110 += q;
-        else if (row.type === "return") s.returned_110 += q;
-      }
-    });
-    setOverviewMovMap(movMap);
     setLoadingOverview(false);
-  }, [mat140, mat110, supabase]);
+  }, [supabase]);
 
-  useEffect(() => { if (mat140 && mat110) loadOverview(); }, [mat140, mat110, loadOverview]);
+  useEffect(() => { loadOverview(); }, [loadOverview]);
 
   // ── Load per-job detail ───────────────────────────────────────────────────
   const fetchZones = useCallback(async (jobNo: string) => {
@@ -206,37 +241,54 @@ export default function WasteCostPage() {
     setZones(data ?? []);
   }, [supabase]);
 
-  const fetchStock = useCallback(async (jobNo: string) => {
+  const fetchStock = useCallback(async (jobNo: string, job: Job) => {
     if (!mat140 || !mat110) return;
+
+    // 1. Try handover_data first (primary source)
+    const handoverSummary = parseHandoverSummary(job.handover_data);
+    if (handoverSummary) {
+      setStockSummary(handoverSummary);
+      setStockSource("handover");
+    }
+
+    // 2. Always load stock_movements for manual entries / history
     const { data } = await supabase
       .from("stock_movements")
       .select("id,material_id,type,qty,note,created_at")
       .eq("ref_job_no", jobNo)
       .in("material_id", [mat140.id, mat110.id])
       .order("created_at", { ascending: false });
-
-    const s: StockSummary = { issued_140: 0, returned_140: 0, issued_110: 0, returned_110: 0 };
-    (data ?? []).forEach((row) => {
-      const q = Number(row.qty);
-      if (row.material_id === mat140.id) {
-        if (row.type === "out") s.issued_140 += q;
-        else if (row.type === "return") s.returned_140 += q;
-      } else if (row.material_id === mat110.id) {
-        if (row.type === "out") s.issued_110 += q;
-        else if (row.type === "return") s.returned_110 += q;
-      }
-    });
-    setStockSummary(s);
     setMovements(data ?? []);
+
+    // 3. If no handover data, use stock_movements as fallback
+    if (!handoverSummary) {
+      const s: StockSummary = { issued_140: 0, returned_140: 0, issued_110: 0, returned_110: 0 };
+      let hasData = false;
+      (data ?? []).forEach((row) => {
+        const q = Number(row.qty);
+        if (row.material_id === mat140.id) {
+          if (row.type === "out") { s.issued_140 += q; hasData = true; }
+          else if (row.type === "return") { s.returned_140 += q; hasData = true; }
+        } else if (row.material_id === mat110.id) {
+          if (row.type === "out") { s.issued_110 += q; hasData = true; }
+          else if (row.type === "return") { s.returned_110 += q; hasData = true; }
+        }
+      });
+      setStockSummary(hasData ? s : null);
+      setStockSource(hasData ? "manual" : "none");
+    }
   }, [mat140, mat110, supabase]);
 
   useEffect(() => {
     if (!selectedJobNo) return;
+    const job = jobs.find((j) => j.job_no === selectedJobNo);
+    if (!job) return;
     setStockSummary(null);
     setMovements([]);
+    setStockSource("none");
     fetchZones(selectedJobNo);
-    fetchStock(selectedJobNo);
-  }, [selectedJobNo, fetchZones, fetchStock]);
+    fetchStock(selectedJobNo, job);
+  }, [selectedJobNo, jobs, fetchZones, fetchStock]);
 
   // ── Zone CRUD ─────────────────────────────────────────────────────────────
   const addZone = async () => {
@@ -257,7 +309,7 @@ export default function WasteCostPage() {
     if (zone.width_cm < 0 || zone.length_cm < 0) return;
     setSavingZone(zone.id);
     const { error } = await supabase.from("install_job_zones")
-      .update({ zone_name: zone.zone_name, width_cm: zone.width_cm, length_cm: zone.length_cm, updated_at: new Date().toISOString() })
+      .update({ zone_name: zone.zone_name, width_cm: zone.width_cm, length_cm: zone.length_cm })
       .eq("id", zone.id);
     setSavingZone(null);
     if (error) toast.error("บันทึกไม่ได้: " + error.message);
@@ -269,7 +321,7 @@ export default function WasteCostPage() {
     setZones((prev) => prev.filter((z) => z.id !== id));
   };
 
-  // ── Save stock movement ───────────────────────────────────────────────────
+  // ── Manual stock movement ─────────────────────────────────────────────────
   const saveMovement = async () => {
     if (!selectedJobNo || !movQty || Number(movQty) <= 0) {
       toast.error("กรอกจำนวนให้ถูกต้อง (> 0)");
@@ -277,30 +329,25 @@ export default function WasteCostPage() {
     }
     const matId = movMat === "140" ? mat140?.id : mat110?.id;
     if (!matId) { toast.error("ไม่พบข้อมูลวัสดุ"); return; }
-
     setSavingMov(true);
     const { error } = await supabase.from("stock_movements").insert({
-      material_id: matId,
-      type: movType,
-      qty: Number(movQty),
-      ref_job_no: selectedJobNo,
-      note: movNote.trim() || null,
+      material_id: matId, type: movType, qty: Number(movQty),
+      ref_job_no: selectedJobNo, note: movNote.trim() || null,
     });
     setSavingMov(false);
-
     if (error) { toast.error("บันทึกไม่ได้: " + error.message); return; }
     toast.success(`บันทึก${movType === "out" ? "เบิก" : "คืน"} RS-${movMat} ${movQty} cm แล้ว`);
     setMovQty("");
     setMovNote("");
-    fetchStock(selectedJobNo);
-    loadOverview();
+    const job = jobs.find((j) => j.job_no === selectedJobNo);
+    if (job) fetchStock(selectedJobNo, job);
   };
 
   const deleteMovement = async (id: string) => {
     const { error } = await supabase.from("stock_movements").delete().eq("id", id);
     if (error) { toast.error("ลบไม่ได้: " + error.message); return; }
-    if (selectedJobNo) fetchStock(selectedJobNo);
-    loadOverview();
+    const job = jobs.find((j) => j.job_no === selectedJobNo);
+    if (job && selectedJobNo) fetchStock(selectedJobNo, job);
     toast.success("ลบรายการแล้ว");
   };
 
@@ -318,7 +365,7 @@ export default function WasteCostPage() {
     };
   }, [stockSummary, expected]);
 
-  // ── Computed: overview ────────────────────────────────────────────────────
+  // ── Computed: overview (stock from handover_data, no extra DB query) ──────
   const filteredJobs = useMemo(() => {
     if (!search.trim()) return jobs;
     const q = search.toLowerCase();
@@ -336,7 +383,7 @@ export default function WasteCostPage() {
     const c110 = mat110?.unit_cost ?? 0;
     return filteredJobs.map((j) => {
       const jzones = overviewZonesMap[j.job_no] ?? [];
-      const mov = overviewMovMap[j.job_no] ?? null;
+      const mov = parseHandoverSummary(j.handover_data);
       const exp = sumZones(jzones);
       const actual140 = mov ? mov.issued_140 - mov.returned_140 : null;
       const actual110 = mov ? mov.issued_110 - mov.returned_110 : null;
@@ -345,10 +392,10 @@ export default function WasteCostPage() {
       const expectedCost = exp.total140 * c140 + exp.total110 * c110;
       const actualCost = actual140 !== null && actual110 !== null ? actual140 * c140 + actual110 * c110 : null;
       const wasteCost = actualCost !== null ? actualCost - expectedCost : null;
-      const hasMov = mov !== null && (mov.issued_140 > 0 || mov.issued_110 > 0);
+      const hasMov = mov !== null;
       return { ...j, zoneCount: jzones.length, exp140: exp.total140, exp110: exp.total110, actual140, actual110, waste140, waste110, expectedCost: expectedCost > 0 ? expectedCost : null, actualCost, wasteCost, hasZones: jzones.length > 0, hasMov };
     });
-  }, [filteredJobs, overviewZonesMap, overviewMovMap, mat140, mat110]);
+  }, [filteredJobs, overviewZonesMap, mat140, mat110]);
 
   const stats = useMemo(() => {
     const withCostSetup = !!(mat140?.unit_cost && mat110?.unit_cost);
@@ -390,22 +437,19 @@ export default function WasteCostPage() {
             <p className="text-xs text-slate-400 text-center py-8">ไม่พบงาน</p>
           ) : filteredJobs.map((j) => {
             const hasZones = (overviewZonesMap[j.job_no]?.length ?? 0) > 0;
-            const mov = overviewMovMap[j.job_no];
-            const hasMov = !!mov && (mov.issued_140 > 0 || mov.issued_110 > 0);
+            const hasMov = parseHandoverSummary(j.handover_data) !== null;
             return (
               <button key={j.job_no} onClick={() => { setSelectedJobNo(j.job_no); setViewMode("detail"); }}
                 className={`w-full text-left px-3 py-2.5 border-b border-slate-50 transition-colors ${
                   selectedJobNo === j.job_no && viewMode === "detail" ? "bg-blue-50 border-l-2 border-l-blue-500" : "hover:bg-slate-50"
                 }`}
               >
-                {/* Bill no — primary identifier */}
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <StatusDot hasZones={hasZones} hasMov={hasMov} />
                   <p className="text-xs font-semibold text-slate-800 truncate">
                     {j.bill_no || j.job_no}
                   </p>
                 </div>
-                {/* job_no secondary */}
                 <p className="text-[10px] font-mono text-blue-500 mb-0.5 pl-3">{j.job_no}</p>
                 <p className="text-[11px] text-slate-500 truncate pl-3">{j.customer_name || "—"}</p>
                 <p className="text-[10px] text-slate-400 truncate pl-3">{j.product_name || "—"}</p>
@@ -430,7 +474,9 @@ export default function WasteCostPage() {
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="text-xl font-semibold text-slate-800">📊 Dashboard ต้นทุนเศษ</h1>
-                <p className="text-xs text-slate-400 mt-0.5">เปรียบเทียบวัสดุที่ควรใช้ vs เบิกจริง ทุกงาน</p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  ข้อมูลเบิก-คืนดึงจาก tab ปิดงาน โดยอัตโนมัติ
+                </p>
               </div>
               <button onClick={loadOverview} disabled={loadingOverview}
                 className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-500 disabled:opacity-50">
@@ -443,7 +489,7 @@ export default function WasteCostPage() {
               {[
                 { label: "งานทั้งหมด", val: stats.total.toString(), sub: "รายการ" },
                 { label: "มีข้อมูลโซน", val: stats.withZones.toString(), sub: "งาน" },
-                { label: "มีข้อมูลเบิก", val: stats.withData.toString(), sub: "งาน" },
+                { label: "มีข้อมูลปิดงาน", val: stats.withData.toString(), sub: "งาน" },
                 {
                   label: "รวมต้นทุนเศษ",
                   val: stats.withCostSetup ? (stats.totalWasteCost >= 0 ? "+" : "") + fmtBaht(stats.totalWasteCost) : "—",
@@ -464,6 +510,10 @@ export default function WasteCostPage() {
                 💡 ยังไม่ได้ตั้งราคาต้นทุนวัสดุ — ไปที่ <strong>คลังวัสดุ</strong> แล้วแก้ไข unit_cost ของ <strong>RS-140</strong> / <strong>RS-110</strong>
               </div>
             )}
+
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2.5 text-xs text-emerald-700">
+              ✓ ข้อมูลเบิก-คืนดึงจาก <strong>tab ปิดงาน</strong> อัตโนมัติ — ไม่ต้องกรอกซ้ำ
+            </div>
 
             {/* Main table */}
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -543,11 +593,10 @@ export default function WasteCostPage() {
                 ← กลับภาพรวม
               </button>
 
-              {/* ── Job info card (pipeline style) ── */}
+              {/* ── Job info card ── */}
               <div className="bg-white rounded-xl border border-slate-200 p-4">
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div>
-                    {/* Bill No — ใหญ่สุด */}
                     <p className="text-xs text-slate-400 mb-0.5">เลขบิล</p>
                     <p className="text-xl font-bold text-slate-900 leading-tight">
                       {selectedJob?.bill_no || <span className="text-slate-400 text-sm font-normal">ไม่มีเลขบิล</span>}
@@ -556,7 +605,6 @@ export default function WasteCostPage() {
                   </div>
                   {selectedJob && <StageBadge stage={selectedJob.stage} />}
                 </div>
-
                 <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
                   <div>
                     <p className="text-slate-400 text-[10px] mb-0.5">ลูกค้า</p>
@@ -665,71 +713,25 @@ export default function WasteCostPage() {
                 )}
               </div>
 
-              {/* ── Stock entry form ── */}
+              {/* ── Stock summary (from handover or manual) ── */}
               <div className="bg-white rounded-xl border border-slate-200 p-4">
-                <h2 className="text-sm font-semibold text-slate-700 mb-3">📦 บันทึกการเบิก-คืนวัสดุ</h2>
-
-                {/* Form row */}
-                <div className="flex flex-wrap gap-2 items-end mb-4">
-                  {/* ประเภท toggle */}
-                  <div>
-                    <p className="text-[10px] text-slate-400 mb-1">ประเภท</p>
-                    <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs">
-                      <button onClick={() => setMovType("out")}
-                        className={`px-3 py-1.5 font-medium transition-colors ${movType === "out" ? "bg-red-500 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
-                        ▼ เบิก
-                      </button>
-                      <button onClick={() => setMovType("return")}
-                        className={`px-3 py-1.5 font-medium transition-colors ${movType === "return" ? "bg-blue-500 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
-                        ↩ คืน
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* วัสดุ toggle */}
-                  <div>
-                    <p className="text-[10px] text-slate-400 mb-1">วัสดุ</p>
-                    <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs">
-                      <button onClick={() => setMovMat("140")}
-                        className={`px-3 py-1.5 font-medium transition-colors ${movMat === "140" ? "bg-slate-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
-                        RS-140
-                      </button>
-                      <button onClick={() => setMovMat("110")}
-                        className={`px-3 py-1.5 font-medium transition-colors ${movMat === "110" ? "bg-slate-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
-                        RS-110
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* จำนวน */}
-                  <div>
-                    <p className="text-[10px] text-slate-400 mb-1">จำนวน (cm)</p>
-                    <div className="flex items-center gap-1">
-                      <input type="number" min={1} value={movQty} onChange={(e) => setMovQty(e.target.value)} placeholder="0"
-                        className="w-24 px-2 py-1.5 text-xs border border-slate-200 rounded-lg text-right focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                      <span className="text-[10px] text-slate-400">cm</span>
-                    </div>
-                  </div>
-
-                  {/* หมายเหตุ */}
-                  <div className="flex-1 min-w-32">
-                    <p className="text-[10px] text-slate-400 mb-1">หมายเหตุ (ถ้ามี)</p>
-                    <input value={movNote} onChange={(e) => setMovNote(e.target.value)} placeholder="เช่น ช่างคืนสต็อก"
-                      className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                  </div>
-
-                  {/* Save */}
-                  <button onClick={saveMovement} disabled={savingMov || !movQty}
-                    className={`px-4 py-1.5 text-xs font-medium rounded-lg transition-colors disabled:opacity-50 ${
-                      movType === "out" ? "bg-red-500 hover:bg-red-600 text-white" : "bg-blue-500 hover:bg-blue-600 text-white"
-                    }`}>
-                    {savingMov ? "บันทึก…" : movType === "out" ? "▼ บันทึกเบิก" : "↩ บันทึกคืน"}
-                  </button>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-semibold text-slate-700">📦 ปริมาณเบิก-คืนวัสดุ</h2>
+                  <SourceBadge source={stockSource} />
                 </div>
 
-                {/* Summary row */}
-                {stockSummary && (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                {stockSource === "handover" && (
+                  <div className="mb-3 p-2.5 bg-emerald-50 border border-emerald-100 rounded-lg text-xs text-emerald-700">
+                    ข้อมูลดึงจาก <strong>tab ปิดงาน</strong> อัตโนมัติ — หากต้องการแก้ไขให้กลับไปแก้ใน tab ปิดงาน แล้วรีเฟรชหน้านี้
+                  </div>
+                )}
+
+                {!stockSummary ? (
+                  <p className="text-xs text-slate-400 text-center py-4">
+                    ยังไม่มีข้อมูลเบิก-คืน — กรอกรายการส่งมอบใน <strong>tab ปิดงาน</strong> ก่อน
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
                     {[
                       { label: "เบิก RS-140", val: stockSummary.issued_140, cls: "text-red-600" },
                       { label: "คืน RS-140", val: stockSummary.returned_140, cls: "text-blue-600" },
@@ -744,53 +746,75 @@ export default function WasteCostPage() {
                   </div>
                 )}
 
-                {/* Movement history */}
-                {movements.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-4">ยังไม่มีรายการเบิก-คืน</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="text-[10px] text-slate-400 uppercase tracking-wide border-b border-slate-100">
-                          <th className="pb-2 text-left font-medium">วันที่</th>
-                          <th className="pb-2 text-left font-medium">ประเภท</th>
-                          <th className="pb-2 text-left font-medium">วัสดุ</th>
-                          <th className="pb-2 text-right font-medium">จำนวน</th>
-                          <th className="pb-2 text-left font-medium">หมายเหตุ</th>
-                          <th className="pb-2"></th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50">
-                        {movements.map((m) => {
-                          const isMat140 = m.material_id === mat140?.id;
-                          return (
+                {/* ── Manual entry (always available as override/extra) ── */}
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-600 select-none py-1">
+                    ✎ บันทึกรายการเพิ่มเติมด้วยตนเอง (override)
+                  </summary>
+                  <div className="mt-3 border-t border-slate-100 pt-3">
+                    <div className="flex flex-wrap gap-2 items-end mb-3">
+                      <div>
+                        <p className="text-[10px] text-slate-400 mb-1">ประเภท</p>
+                        <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs">
+                          <button onClick={() => setMovType("out")} className={`px-3 py-1.5 font-medium transition-colors ${movType === "out" ? "bg-red-500 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▼ เบิก</button>
+                          <button onClick={() => setMovType("return")} className={`px-3 py-1.5 font-medium transition-colors ${movType === "return" ? "bg-blue-500 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>↩ คืน</button>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-slate-400 mb-1">วัสดุ</p>
+                        <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs">
+                          <button onClick={() => setMovMat("140")} className={`px-3 py-1.5 font-medium transition-colors ${movMat === "140" ? "bg-slate-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>RS-140</button>
+                          <button onClick={() => setMovMat("110")} className={`px-3 py-1.5 font-medium transition-colors ${movMat === "110" ? "bg-slate-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>RS-110</button>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-slate-400 mb-1">จำนวน (cm)</p>
+                        <div className="flex items-center gap-1">
+                          <input type="number" min={1} value={movQty} onChange={(e) => setMovQty(e.target.value)} placeholder="0"
+                            className="w-24 px-2 py-1.5 text-xs border border-slate-200 rounded-lg text-right focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                          <span className="text-[10px] text-slate-400">cm</span>
+                        </div>
+                      </div>
+                      <div className="flex-1 min-w-28">
+                        <p className="text-[10px] text-slate-400 mb-1">หมายเหตุ</p>
+                        <input value={movNote} onChange={(e) => setMovNote(e.target.value)} placeholder="เช่น แก้ไขเพิ่มเติม"
+                          className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                      </div>
+                      <button onClick={saveMovement} disabled={savingMov || !movQty}
+                        className={`px-4 py-1.5 text-xs font-medium rounded-lg transition-colors disabled:opacity-50 ${movType === "out" ? "bg-red-500 hover:bg-red-600 text-white" : "bg-blue-500 hover:bg-blue-600 text-white"}`}>
+                        {savingMov ? "บันทึก…" : movType === "out" ? "▼ บันทึกเบิก" : "↩ บันทึกคืน"}
+                      </button>
+                    </div>
+
+                    {movements.length > 0 && (
+                      <table className="w-full text-xs">
+                        <thead><tr className="text-[10px] text-slate-400 border-b border-slate-100">
+                          <th className="pb-1.5 text-left">วันที่</th><th className="pb-1.5 text-left">ประเภท</th>
+                          <th className="pb-1.5 text-left">วัสดุ</th><th className="pb-1.5 text-right">จำนวน</th>
+                          <th className="pb-1.5 text-left">หมายเหตุ</th><th></th>
+                        </tr></thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {movements.map((m) => (
                             <tr key={m.id} className="hover:bg-slate-50">
                               <td className="py-1.5 pr-3 text-slate-500 whitespace-nowrap">
                                 {new Date(m.created_at).toLocaleDateString("th-TH", { day: "numeric", month: "short" })}
                               </td>
                               <td className="py-1.5 pr-3">
-                                {m.type === "out"
-                                  ? <span className="text-red-600 font-medium">▼ เบิก</span>
-                                  : <span className="text-blue-600 font-medium">↩ คืน</span>}
+                                {m.type === "out" ? <span className="text-red-600 font-medium">▼ เบิก</span> : <span className="text-blue-600 font-medium">↩ คืน</span>}
                               </td>
-                              <td className="py-1.5 pr-3 font-mono text-slate-700">
-                                RS-{isMat140 ? "140" : "110"}
-                              </td>
-                              <td className="py-1.5 pr-3 text-right font-mono font-semibold">
-                                {fmtCm(Number(m.qty))} cm
-                              </td>
+                              <td className="py-1.5 pr-3 font-mono text-slate-700">RS-{m.material_id === mat140?.id ? "140" : "110"}</td>
+                              <td className="py-1.5 pr-3 text-right font-mono font-semibold">{fmtCm(Number(m.qty))} cm</td>
                               <td className="py-1.5 pr-3 text-slate-400">{m.note || "—"}</td>
                               <td className="py-1.5 text-right">
-                                <button onClick={() => deleteMovement(m.id)}
-                                  className="text-slate-300 hover:text-red-500 transition-colors text-xs">✕</button>
+                                <button onClick={() => deleteMovement(m.id)} className="text-slate-300 hover:text-red-500 transition-colors text-xs">✕</button>
                               </td>
                             </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
                   </div>
-                )}
+                </details>
               </div>
 
               {/* ── Waste analysis ── */}
