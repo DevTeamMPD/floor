@@ -94,18 +94,34 @@ export default function PipelineBoard() {
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 mb-4">
-        <h1 className="text-xl font-semibold mr-2">Pipeline</h1>
+      <div className="flex flex-col gap-2 mb-4 md:flex-row md:items-center md:gap-3">
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold">Pipeline</h1>
+          <div className="ml-auto flex items-center gap-2 md:hidden">
+            <button
+              onClick={fetchJobs}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm hover:bg-slate-50"
+            >
+              🔄
+            </button>
+            <button
+              onClick={() => setShowCreate(true)}
+              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+            >
+              + สร้าง
+            </button>
+          </div>
+        </div>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="ค้นหา…"
-          className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 w-52"
+          className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 w-full md:w-52"
         />
-        <div className="flex gap-1 ml-2">
+        <div className="flex gap-1 overflow-x-auto">
           <button
             onClick={() => setStageFilter(null)}
-            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors flex-shrink-0 ${
               stageFilter === null ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             }`}
           >
@@ -115,7 +131,7 @@ export default function PipelineBoard() {
             <button
               key={s.id}
               onClick={() => setStageFilter(stageFilter === s.id ? null : s.id)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors flex-shrink-0 ${
                 stageFilter === s.id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
             >
@@ -123,7 +139,7 @@ export default function PipelineBoard() {
             </button>
           ))}
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="hidden md:flex ml-auto items-center gap-2">
           <button
             onClick={fetchJobs}
             className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm hover:bg-slate-50"
