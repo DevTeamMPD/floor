@@ -33,7 +33,6 @@ interface Job {
   product_name: string | null;
   appt_date: string | null;
   stage: number;
-  // handover_data can be: null | JSON string (TEXT col) | parsed object (JSONB col)
   handover_data: unknown;
 }
 
@@ -56,14 +55,6 @@ interface Movement {
 interface StripCalc { n140: number; n110: number; total140: number; total110: number; }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-/**
- * Parse handover_data → StockSummary
- * Handles:
- *   - null / undefined
- *   - JSON string  (Supabase TEXT column)
- *   - Already-parsed object (Supabase JSONB column)
- * qty defaults to 1 if empty — matches drawer's `(Number(mat.qty) || 1)` behavior
- */
 function parseHandoverSummary(raw: unknown): StockSummary | null {
   if (!raw) return null;
   try {
@@ -80,7 +71,7 @@ function parseHandoverSummary(raw: unknown): StockSummary | null {
     let hasData = false;
 
     for (const m of h.materials ?? []) {
-      const qty = Number(m.qty) || 1; // match drawer: empty qty = 1 roll
+      const qty = Number(m.qty) || 1;
       const len = Number(m.lengthCm ?? 0);
       if (len > 0) {
         if (m.widthCm === "140") { s.issued_140 += qty * len; hasData = true; }
@@ -88,7 +79,7 @@ function parseHandoverSummary(raw: unknown): StockSummary | null {
       }
     }
     for (const r of h.returnItems ?? []) {
-      const qty = Number(r.qty) || 1; // match drawer: empty qty = 1 roll
+      const qty = Number(r.qty) || 1;
       const len = Number(r.lengthCm ?? 0);
       if (len > 0) {
         if (r.widthCm === "140") { s.returned_140 += qty * len; hasData = true; }
@@ -257,16 +248,16 @@ export default function WasteCostPage() {
   }, [supabase]);
 
   const fetchStock = useCallback(async (jobNo: string, job: Job) => {
-    if (!mat140 || !mat110) return;
-
-    // 1. Primary: handover_data (handles TEXT string OR JSONB object)
+    // 1. Primary: handover_data — parse FIRST, no material IDs needed
     const handoverSummary = parseHandoverSummary(job.handover_data);
     if (handoverSummary) {
       setStockSummary(handoverSummary);
       setStockSource("handover");
     }
 
-    // 2. Always load stock_movements for manual override history
+    // 2. Load stock_movements (needs material IDs — skip if not yet loaded)
+    if (!mat140 || !mat110) return;
+
     const { data } = await supabase
       .from("stock_movements")
       .select("id,material_id,type,qty,note,created_at")
@@ -872,6 +863,40 @@ export default function WasteCostPage() {
                       );
                     })}
                   </div>
+
+                  {/* ── Total cost summary ── */}
+                  {wasteCalc && (mat140?.unit_cost || mat110?.unit_cost) && (() => {
+                    const uc140 = mat140?.unit_cost ?? 0;
+                    const uc110 = mat110?.unit_cost ?? 0;
+                    const expCost = expected.total140 * uc140 + expected.total110 * uc110;
+                    const actCost = wasteCalc.actual140 * uc140 + wasteCalc.actual110 * uc110;
+                    const totalWaste = actCost - expCost;
+                    return (
+                      <div className="mt-4 pt-4 border-t-2 border-slate-200">
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">สรุปต้นทุน</p>
+                        <div className="grid grid-cols-3 gap-3 text-center">
+                          <div className="bg-slate-50 rounded-lg px-3 py-2.5">
+                            <p className="text-[10px] text-slate-400 mb-0.5">ต้นทุนที่ควร</p>
+                            <p className="text-sm font-bold text-slate-700">{fmtBaht(expCost)}</p>
+                          </div>
+                          <div className="bg-slate-50 rounded-lg px-3 py-2.5">
+                            <p className="text-[10px] text-slate-400 mb-0.5">ต้นทุนจริง</p>
+                            <p className="text-sm font-bold text-slate-700">{fmtBaht(actCost)}</p>
+                          </div>
+                          <div className={`rounded-lg px-3 py-2.5 ${totalWaste > 0 ? "bg-red-50" : totalWaste < 0 ? "bg-green-50" : "bg-slate-50"}`}>
+                            <p className="text-[10px] text-slate-400 mb-0.5">ต้นทุนเศษสุทธิ</p>
+                            <p className={`text-sm font-bold ${totalWaste > 0 ? "text-red-600" : totalWaste < 0 ? "text-green-600" : "text-slate-500"}`}>
+                              {totalWaste > 0 ? "+" : ""}{totalWaste < 0 ? "-" : ""}{fmtBaht(totalWaste)}
+                            </p>
+                            <p className={`text-[10px] font-medium ${totalWaste > 0 ? "text-red-500" : totalWaste < 0 ? "text-green-500" : "text-slate-400"}`}>
+                              {totalWaste > 0 ? "เกินงบ" : totalWaste < 0 ? "ประหยัด" : "ตรงงบ"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   <div className="mt-3 pt-3 border-t border-slate-100 flex gap-4 text-[10px] text-slate-400">
                     <span className="text-green-600 font-medium">■ ≤5%</span>
                     <span className="text-amber-600 font-medium">■ 5–15%</span>
