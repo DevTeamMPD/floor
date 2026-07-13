@@ -12,6 +12,8 @@ interface Props {
   onRefresh: () => void;
 }
 
+const GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1xTJeN6HAhqX8wZ1RKFjm1yzrHaIPCnUpas7E_W2I50I/edit?usp=sharing";
+
 const FIELD_ROWS = [
   { label: "สินค้า", key: "product" as const },
   { label: "SKU", key: "sku" as const },
@@ -1331,13 +1333,42 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 <ul className="list-disc list-inside space-y-0.5 text-gray-700">
                   <li>เปลี่ยน Stage เป็น <strong>เสร็จสิ้น</strong></li>
                   <li>บันทึกวันที่ปิดงาน</li>
-                  <li>สร้างลิงก์ประเมินและคัดลอกไปยัง Clipboard</li>
+                  <li>สร้างลิงก์ประเมิน (ลูกค้า) และคัดลอกไปยัง Clipboard</li>
                 </ul>
               </div>
-              <button onClick={closeJob} disabled={saving}
-                className="w-full bg-green-600 text-white rounded-lg py-3 text-sm font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors">
-                ✅ ปิดงาน &amp; คัดลอกลิงก์ประเมิน
-              </button>
+
+              {job.stage === 7 && job.evalToken && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+                  <p className="text-xs font-semibold text-blue-700">🔗 ลิงก์แบบประเมิน</p>
+                  <button
+                    onClick={() => {
+                      const link = `${window.location.origin}/eval?t=${job.evalToken}`;
+                      navigator.clipboard.writeText(link).catch(() => {});
+                      toast.success("คัดลอกลิงก์ประเมินแล้ว");
+                    }}
+                    className="w-full text-left text-xs bg-white border border-blue-200 rounded-lg px-3 py-2 text-blue-700 hover:bg-blue-50 transition-colors"
+                  >
+                    📋 คัดลอกลิงก์แบบประเมิน (ส่งให้ลูกค้า)
+                  </button>
+                  <a href={GOOGLE_SHEET_URL} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-2 w-full text-xs bg-white border border-emerald-200 rounded-lg px-3 py-2 text-emerald-700 hover:bg-emerald-50 transition-colors">
+                    📊 เปิด Google Sheet บันทึกผลประเมิน ↗
+                  </a>
+                </div>
+              )}
+
+              {job.stage < 7 && (
+                <div className="space-y-2">
+                  <button onClick={closeJob} disabled={saving}
+                    className="w-full bg-green-600 text-white rounded-lg py-3 text-sm font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors">
+                    ✅ ปิดงาน &amp; คัดลอกลิงก์ประเมิน
+                  </button>
+                  <a href={GOOGLE_SHEET_URL} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 w-full border border-slate-200 rounded-lg py-2.5 text-sm text-slate-600 hover:bg-slate-50 transition-colors">
+                    📊 Google Sheet บันทึกผลประเมิน ↗
+                  </a>
+                </div>
+              )}
             </div>
           )}
 
