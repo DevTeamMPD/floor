@@ -62,6 +62,7 @@ interface StripCalc { n140: number; n110: number; total140: number; total110: nu
  *   - null / undefined
  *   - JSON string  (Supabase TEXT column)
  *   - Already-parsed object (Supabase JSONB column)
+ * qty defaults to 1 if empty — matches drawer's `(Number(mat.qty) || 1)` behavior
  */
 function parseHandoverSummary(raw: unknown): StockSummary | null {
   if (!raw) return null;
@@ -79,17 +80,17 @@ function parseHandoverSummary(raw: unknown): StockSummary | null {
     let hasData = false;
 
     for (const m of h.materials ?? []) {
-      const qty = Number(m.qty ?? 0);
+      const qty = Number(m.qty) || 1; // match drawer: empty qty = 1 roll
       const len = Number(m.lengthCm ?? 0);
-      if (qty > 0 && len > 0) {
+      if (len > 0) {
         if (m.widthCm === "140") { s.issued_140 += qty * len; hasData = true; }
         if (m.widthCm === "110") { s.issued_110 += qty * len; hasData = true; }
       }
     }
     for (const r of h.returnItems ?? []) {
-      const qty = Number(r.qty ?? 0);
+      const qty = Number(r.qty) || 1; // match drawer: empty qty = 1 roll
       const len = Number(r.lengthCm ?? 0);
-      if (qty > 0 && len > 0) {
+      if (len > 0) {
         if (r.widthCm === "140") { s.returned_140 += qty * len; hasData = true; }
         if (r.widthCm === "110") { s.returned_110 += qty * len; hasData = true; }
       }
