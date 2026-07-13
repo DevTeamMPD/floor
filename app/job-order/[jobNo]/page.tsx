@@ -83,15 +83,26 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export default function JobOrderPage({ params }: { params: Promise<{ jobNo: string }> }) {
   const { jobNo } = use(params);
   const [job, setJob] = useState<Record<string, unknown> | null>(null);
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    createClient()
+    const supabase = createClient();
+    supabase
       .from("install_jobs")
       .select("*")
       .eq("job_no", jobNo)
       .single()
-      .then(({ data }) => { setJob(data); setLoading(false); });
+      .then(({ data }) => {
+        setJob(data);
+        if (data?.site_photos && Array.isArray(data.site_photos) && data.site_photos.length > 0) {
+          const urls = (data.site_photos as string[]).map(
+            (path) => supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl
+          );
+          setPhotoUrls(urls);
+        }
+        setLoading(false);
+      });
   }, [jobNo]);
 
   if (loading) {
@@ -189,8 +200,15 @@ export default function JobOrderPage({ params }: { params: Promise<{ jobNo: stri
               </div>
               {!!(job.location_url) && (
                 <div className="col-span-2">
-                  <p className="text-xs text-gray-400">Google Maps</p>
-                  <p className="text-blue-600 text-xs break-all">{job.location_url as string}</p>
+                  <p className="text-xs text-gray-400 mb-1">Google Maps (สแกน QR เพื่อนำทาง)</p>
+                  <div className="flex items-start gap-4">
+                    <img
+                      src={`https://chart.googleapis.com/chart?cht=qr&chl=${encodeURIComponent(job.location_url as string)}&chs=180x180&choe=UTF-8`}
+                      alt="QR Code Google Maps"
+                      className="w-24 h-24 border border-gray-200 rounded"
+                    />
+                    <p className="text-blue-600 text-xs break-all mt-1 leading-relaxed">{job.location_url as string}</p>
+                  </div>
                 </div>
               )}
             </div>
@@ -227,6 +245,23 @@ export default function JobOrderPage({ params }: { params: Promise<{ jobNo: stri
               )}
             </div>
           </Section>
+
+          {/* Site Photos */}
+          {photoUrls.length > 0 && (
+            <Section title="รูปหน้างาน / สภาพพื้น">
+              <div className="grid grid-cols-3 gap-3">
+                {photoUrls.map((url, i) => (
+                  <div key={i} className="aspect-square overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
+                    <img
+                      src={url}
+                      alt={`รูปหน้างาน ${i + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
 
           {/* Survey */}
           {(survey.cutTypes?.length || survey.weldType || survey.finishTypes?.length || survey.floorCondition) ? (
