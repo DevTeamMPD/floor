@@ -915,4 +915,304 @@ export default function WasteCostPage() {
                                 </td>
                                 <td className="py-1.5 text-right">
                                   <button onClick={() => setEditMats((p) => p.filter((x) => x._localId !== r._localId))}
-         
+                                    className="text-slate-300 hover:text-red-500 transition-colors">✕</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <button onClick={() => setEditMats((p) => [...p, makeEditRow()])}
+                          className="text-xs text-blue-500 hover:underline">+ เพิ่มรายการ</button>
+                      </div>
+                    )}
+
+                    {/* Ret rows */}
+                    {handoverTab === "ret" && (
+                      <div>
+                        <table className="w-full text-xs mb-2">
+                          <thead>
+                            <tr className="text-[10px] text-slate-400 border-b border-slate-100">
+                              <th className="pb-1.5 text-left font-medium">ความกว้าง</th>
+                              <th className="pb-1.5 text-right font-medium">ความยาว (cm)</th>
+                              <th className="pb-1.5 text-right font-medium">จำนวน (ม้วน)</th>
+                              <th className="pb-1.5 text-left pl-2 font-medium">หนา / สี</th>
+                              <th></th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {editRets.length === 0 && (
+                              <tr><td colSpan={5} className="py-3 text-center text-slate-300 text-[11px]">ยังไม่มีรายการ</td></tr>
+                            )}
+                            {editRets.map((r) => (
+                              <tr key={r._localId}>
+                                <td className="py-1.5 pr-2">
+                                  <select value={r.widthCm}
+                                    onChange={(e) => patchRet(r._localId, "widthCm", e.target.value as "110" | "140" | "")}
+                                    className="px-2 py-1 border border-slate-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400">
+                                    <option value="">—</option>
+                                    <option value="140">RS-140</option>
+                                    <option value="110">RS-110</option>
+                                  </select>
+                                </td>
+                                <td className="py-1.5 pr-2 text-right">
+                                  <input type="number" min={0} value={r.lengthCm} onChange={(e) => patchRet(r._localId, "lengthCm", e.target.value)} placeholder="0"
+                                    className="w-20 px-2 py-1 border border-slate-200 rounded text-right text-xs focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                                </td>
+                                <td className="py-1.5 pr-2 text-right">
+                                  <input type="number" min={1} value={r.qty} onChange={(e) => patchRet(r._localId, "qty", e.target.value)} placeholder="1"
+                                    className="w-16 px-2 py-1 border border-slate-200 rounded text-right text-xs focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                                </td>
+                                <td className="py-1.5 pl-2">
+                                  <div className="flex gap-1">
+                                    <input value={r.thickness} onChange={(e) => patchRet(r._localId, "thickness", e.target.value)} placeholder="หนา"
+                                      className="w-14 px-2 py-1 border border-slate-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                                    <input value={r.color} onChange={(e) => patchRet(r._localId, "color", e.target.value)} placeholder="สี"
+                                      className="w-16 px-2 py-1 border border-slate-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                                  </div>
+                                </td>
+                                <td className="py-1.5 text-right">
+                                  <button onClick={() => setEditRets((p) => p.filter((x) => x._localId !== r._localId))}
+                                    className="text-slate-300 hover:text-red-500 transition-colors">✕</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <button onClick={() => setEditRets((p) => [...p, makeEditRow()])}
+                          className="text-xs text-blue-500 hover:underline">+ เพิ่มรายการ</button>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2 mt-4 pt-3 border-t border-slate-100">
+                      <button onClick={saveHandoverEdit} disabled={savingHandover}
+                        className="px-4 py-1.5 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50">
+                        {savingHandover ? "กำลังบันทึก…" : "💾 บันทึก"}
+                      </button>
+                      <button onClick={() => setShowHandoverEdit(false)}
+                        className="px-4 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
+                        ยกเลิก
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Manual movement (collapsed) ── */}
+                <div className="mt-3 pt-3 border-t border-slate-100">
+                  <button onClick={() => setShowMovForm((v) => !v)}
+                    className="text-xs text-slate-400 hover:text-slate-600 select-none">
+                    {showMovForm ? "▲ ซ่อน" : "▼"} บันทึกรายการ stock_movements เพิ่มเติม
+                  </button>
+                  {showMovForm && (
+                    <div className="mt-3">
+                      <div className="flex flex-wrap gap-2 items-end mb-3">
+                        <div>
+                          <p className="text-[10px] text-slate-400 mb-1">ประเภท</p>
+                          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs">
+                            <button onClick={() => setMovType("out")} className={`px-3 py-1.5 font-medium transition-colors ${movType === "out" ? "bg-red-500 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▼ เบิก</button>
+                            <button onClick={() => setMovType("return")} className={`px-3 py-1.5 font-medium transition-colors ${movType === "return" ? "bg-blue-500 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>↩ คืน</button>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-slate-400 mb-1">วัสดุ</p>
+                          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs">
+                            <button onClick={() => setMovMat("140")} className={`px-3 py-1.5 font-medium transition-colors ${movMat === "140" ? "bg-slate-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>RS-140</button>
+                            <button onClick={() => setMovMat("110")} className={`px-3 py-1.5 font-medium transition-colors ${movMat === "110" ? "bg-slate-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>RS-110</button>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-slate-400 mb-1">จำนวน (cm)</p>
+                          <div className="flex items-center gap-1">
+                            <input type="number" min={1} value={movQty} onChange={(e) => setMovQty(e.target.value)} placeholder="0"
+                              className="w-24 px-2 py-1.5 text-xs border border-slate-200 rounded-lg text-right focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                            <span className="text-[10px] text-slate-400">cm</span>
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-28">
+                          <p className="text-[10px] text-slate-400 mb-1">หมายเหตุ</p>
+                          <input value={movNote} onChange={(e) => setMovNote(e.target.value)} placeholder="เช่น แก้ไขเพิ่มเติม"
+                            className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                        </div>
+                        <button onClick={saveMovement} disabled={savingMov || !movQty}
+                          className={`px-4 py-1.5 text-xs font-medium rounded-lg transition-colors disabled:opacity-50 ${movType === "out" ? "bg-red-500 hover:bg-red-600 text-white" : "bg-blue-500 hover:bg-blue-600 text-white"}`}>
+                          {savingMov ? "บันทึก…" : movType === "out" ? "▼ บันทึกเบิก" : "↩ บันทึกคืน"}
+                        </button>
+                      </div>
+                      {movements.length > 0 && (
+                        <table className="w-full text-xs">
+                          <thead><tr className="text-[10px] text-slate-400 border-b border-slate-100">
+                            <th className="pb-1.5 text-left">วันที่</th><th className="pb-1.5 text-left">ประเภท</th>
+                            <th className="pb-1.5 text-left">วัสดุ</th><th className="pb-1.5 text-right">จำนวน</th>
+                            <th className="pb-1.5 text-left">หมายเหตุ</th><th></th>
+                          </tr></thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {movements.map((m) => (
+                              <tr key={m.id} className="hover:bg-slate-50">
+                                <td className="py-1.5 pr-3 text-slate-500 whitespace-nowrap">
+                                  {new Date(m.created_at).toLocaleDateString("th-TH", { day: "numeric", month: "short" })}
+                                </td>
+                                <td className="py-1.5 pr-3">
+                                  {m.type === "out" ? <span className="text-red-600 font-medium">▼ เบิก</span> : <span className="text-blue-600 font-medium">↩ คืน</span>}
+                                </td>
+                                <td className="py-1.5 pr-3 font-mono text-slate-700">RS-{m.material_id === mat140?.id ? "140" : "110"}</td>
+                                <td className="py-1.5 pr-3 text-right font-mono font-semibold">{fmtCm(Number(m.qty))} cm</td>
+                                <td className="py-1.5 pr-3 text-slate-400">{m.note || "—"}</td>
+                                <td className="py-1.5 text-right">
+                                  <button onClick={() => deleteMovement(m.id)} className="text-slate-300 hover:text-red-500 transition-colors text-xs">✕</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ── Area waste summary ── */}
+              {totalZoneArea > 0 && (
+                <div className="bg-white rounded-xl border border-slate-200 p-4">
+                  <h2 className="text-sm font-semibold text-slate-700 mb-0.5">📐 สรุปเศษพื้นที่โดยรวม</h2>
+                  <p className="text-[11px] text-slate-400 mb-4">พื้นที่รวมทุกโซน เทียบกับพื้นที่แผ่นที่ใช้จริง</p>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-slate-50 rounded-xl p-3 text-center">
+                      <p className="text-[10px] text-slate-400 mb-1">พื้นที่ทุกโซน</p>
+                      <p className="text-base font-bold text-slate-700">{fmtM2(totalZoneArea)}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">ที่ควรใช้</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-xl p-3 text-center">
+                      <p className="text-[10px] text-slate-400 mb-1">พื้นที่แผ่นจริง</p>
+                      {totalActualArea !== null ? (
+                        <>
+                          <p className="text-base font-bold text-slate-700">{fmtM2(totalActualArea)}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">ที่ใช้จริง</p>
+                        </>
+                      ) : (
+                        <p className="text-base font-bold text-slate-300 mt-1">—</p>
+                      )}
+                    </div>
+                    <div className={`rounded-xl p-3 text-center ${
+                      wasteAreaCm2 === null ? "bg-slate-50"
+                      : wasteAreaCm2 > 0 ? "bg-red-50 border border-red-100"
+                      : "bg-green-50 border border-green-100"
+                    }`}>
+                      <p className="text-[10px] text-slate-400 mb-1">เศษพื้นที่</p>
+                      {wasteAreaCm2 !== null ? (
+                        <>
+                          <p className={`text-base font-bold ${wasteAreaCm2 > 0 ? "text-red-600" : "text-green-600"}`}>
+                            {wasteAreaCm2 >= 0 ? "+" : ""}{fmtM2(wasteAreaCm2)}
+                          </p>
+                          <p className={`text-[10px] mt-0.5 font-medium ${wasteAreaCm2 > 0 ? "text-red-400" : "text-green-400"}`}>
+                            {wasteAreaCm2 > 0 ? "เกินความต้องการ" : "น้อยกว่าที่คำนวณ"}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-base font-bold text-slate-300 mt-1">—</p>
+                      )}
+                    </div>
+                    <div className="bg-slate-50 rounded-xl p-3 text-center flex flex-col items-center justify-center">
+                      <p className="text-[10px] text-slate-400 mb-2">% เศษพื้นที่</p>
+                      <WasteBadge pct={wasteAreaPct} />
+                    </div>
+                  </div>
+
+                  {wasteAreaCm2 !== null && (
+                    <p className="text-[10px] text-slate-300 mt-3">
+                      พื้นที่แผ่นจริง = (เบิก RS-140 × 140) + (เบิก RS-110 × 110) หน่วย cm² — พื้นที่โซน = ผลรวม กว้าง × ยาว ทุกโซน
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* ── Per-strip waste analysis ── */}
+              {(expected.total140 > 0 || expected.total110 > 0) && (
+                <div className="bg-white rounded-xl border border-slate-200 p-4">
+                  <h2 className="text-sm font-semibold text-slate-700 mb-3">📊 วิเคราะห์ต้นทุนเศษ (แยกรายแผ่น)</h2>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {[
+                      { label: "แผ่นกว้าง 140 cm", exp: expected.total140, issued: stockSummary?.issued_140 ?? null, ret: stockSummary?.returned_140 ?? null, actual: wasteCalc?.actual140 ?? null, waste: wasteCalc?.waste140 ?? null, uc: mat140?.unit_cost ?? 0 },
+                      { label: "แผ่นกว้าง 110 cm", exp: expected.total110, issued: stockSummary?.issued_110 ?? null, ret: stockSummary?.returned_110 ?? null, actual: wasteCalc?.actual110 ?? null, waste: wasteCalc?.waste110 ?? null, uc: mat110?.unit_cost ?? 0 },
+                    ].map((m) => {
+                      const wasteCostVal = m.uc > 0 && m.actual !== null ? (m.actual - m.exp) * m.uc : null;
+                      return (
+                        <div key={m.label} className="border border-slate-200 rounded-lg p-3">
+                          <p className="text-xs font-semibold text-slate-500 mb-1.5">{m.label}</p>
+                          {[
+                            { label: "ควรใช้", val: m.exp },
+                            { label: "เบิกไป", val: m.issued },
+                            { label: "คืนมา", val: m.ret },
+                          ].map((r) => (
+                            <div key={r.label} className="flex justify-between items-center py-1">
+                              <span className="text-xs text-slate-500">{r.label}</span>
+                              <span className="text-xs font-mono">{r.val === null ? "—" : `${fmtCm(r.val)} cm`}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between items-center py-1 border-t border-slate-100 mt-1">
+                            <span className="text-xs font-semibold text-slate-700">ใช้จริง</span>
+                            <span className="text-xs font-semibold font-mono">{m.actual === null ? "—" : `${fmtCm(m.actual)} cm`}</span>
+                          </div>
+                          {wasteCostVal !== null && (
+                            <div className="flex justify-between items-center py-1">
+                              <span className="text-xs text-slate-500">ต้นทุนเศษ</span>
+                              <span className={`text-xs font-semibold font-mono ${wasteCostVal > 0 ? "text-red-600" : "text-green-600"}`}>
+                                {wasteCostVal > 0 ? "+" : "-"}{fmtBaht(wasteCostVal)}
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex justify-between items-center pt-2 border-t border-slate-100 mt-1">
+                            <span className="text-xs font-semibold text-slate-700">% เศษ</span>
+                            <WasteBadge pct={m.waste} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Total cost summary */}
+                  {wasteCalc && (mat140?.unit_cost || mat110?.unit_cost) && (() => {
+                    const uc140 = mat140?.unit_cost ?? 0;
+                    const uc110 = mat110?.unit_cost ?? 0;
+                    const expCost = expected.total140 * uc140 + expected.total110 * uc110;
+                    const actCost = wasteCalc.actual140 * uc140 + wasteCalc.actual110 * uc110;
+                    const totalWaste = actCost - expCost;
+                    return (
+                      <div className="mt-4 pt-4 border-t-2 border-slate-200">
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">สรุปต้นทุน</p>
+                        <div className="grid grid-cols-3 gap-3 text-center">
+                          <div className="bg-slate-50 rounded-lg px-3 py-2.5">
+                            <p className="text-[10px] text-slate-400 mb-0.5">ต้นทุนที่ควร</p>
+                            <p className="text-sm font-bold text-slate-700">{fmtBaht(expCost)}</p>
+                          </div>
+                          <div className="bg-slate-50 rounded-lg px-3 py-2.5">
+                            <p className="text-[10px] text-slate-400 mb-0.5">ต้นทุนจริง</p>
+                            <p className="text-sm font-bold text-slate-700">{fmtBaht(actCost)}</p>
+                          </div>
+                          <div className={`rounded-lg px-3 py-2.5 ${totalWaste > 0 ? "bg-red-50" : totalWaste < 0 ? "bg-green-50" : "bg-slate-50"}`}>
+                            <p className="text-[10px] text-slate-400 mb-0.5">ต้นทุนเศษสุทธิ์</p>
+                            <p className={`text-sm font-bold ${totalWaste > 0 ? "text-red-600" : totalWaste < 0 ? "text-green-600" : "text-slate-500"}`}>
+                              {totalWaste > 0 ? "+" : ""}{totalWaste < 0 ? "-" : ""}{fmtBaht(totalWaste)}
+                            </p>
+                            <p className={`text-[10px] font-medium ${totalWaste > 0 ? "text-red-500" : totalWaste < 0 ? "text-green-500" : "text-slate-400"}`}>
+                              {totalWaste > 0 ? "เกินงบ" : totalWaste < 0 ? "ประหยัด" : "ตรงงบ"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="mt-3 pt-3 border-t border-slate-100 flex gap-4 text-[10px] text-slate-400">
+                    <span className="text-green-600 font-medium">■ ≤5%</span>
+                    <span className="text-amber-600 font-medium">■ 5–15%</span>
+                    <span className="text-red-600 font-medium">■ &gt;15%</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
