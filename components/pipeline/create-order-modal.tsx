@@ -25,7 +25,7 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
     order_date: today(),
     product_name: "",
     customer_name: "",
-    phone: "",
+    customer_phone: "",
     address: "",
     location_url: "",
     appt_shift: "",
@@ -33,6 +33,7 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
   const [checking, setChecking] = useState(false);
   const [exists, setExists] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -44,7 +45,7 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
         .from("install_jobs")
         .select("job_no")
         .eq("order_no", form.order_no)
-        .single();
+        .maybeSingle();
       setExists(!!data);
       setChecking(false);
     }, 400);
@@ -61,23 +62,35 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
+    setError(null);
     try {
       const payload = {
-        ...form,
+        job_no: form.order_no,
+        order_no: form.order_no,
+        order_source: form.order_source,
+        product_skus: form.sku ? [form.sku] : null,
+        order_date: form.order_date,
+        product_name: form.product_name,
+        customer_name: form.customer_name,
+        customer_phone: form.customer_phone || null,
+        address: form.address || null,
         location_url: form.location_url || null,
         appt_shift: form.appt_shift || null,
         stage: 1,
         status: "Active",
+        created_via: "manual",
       };
       if (exists) {
-        await supabase
+        const { error: err } = await supabase
           .from("install_jobs")
           .update(payload)
           .eq("order_no", form.order_no);
+        if (err) { setError(err.message); return; }
       } else {
-        await supabase
+        const { error: err } = await supabase
           .from("install_jobs")
           .insert(payload);
+        if (err) { setError(err.message); return; }
       }
       onCreated();
     } finally {
@@ -94,6 +107,13 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-3">
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-sm">
+              ❌ {error}
+            </div>
+          )}
+
           <div>
             <label className="text-xs font-medium text-slate-600 block mb-1">เลขออเดอร์</label>
             <div className="flex gap-2">
@@ -171,8 +191,8 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
             <div>
               <label className="text-xs font-medium text-slate-600 block mb-1">เบอร์โทร</label>
               <input
-                value={form.phone}
-                onChange={(e) => set("phone", e.target.value)}
+                value={form.customer_phone}
+                onChange={(e) => set("customer_phone", e.target.value)}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
               />
             </div>
@@ -188,7 +208,6 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
             />
           </div>
 
-          {/* Location URL */}
           <div>
             <label className="text-xs font-medium text-slate-600 block mb-1">📍 Google Maps URL</label>
             <input
@@ -199,7 +218,6 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
             />
           </div>
 
-          {/* Appointment shift */}
           <div>
             <label className="text-xs font-medium text-slate-600 block mb-1">🕐 กะนัดหมาย</label>
             <div className="flex gap-2">
