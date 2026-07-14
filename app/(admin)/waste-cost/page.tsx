@@ -62,6 +62,7 @@ interface Movement {
 }
 
 interface StripCalc { n140: number; n110: number; total140: number; total110: number; }
+interface RemnantPiece { id: string; width_bin: number; length_cm: number; mat_type: string; status: string; reserved_for: string | null; source_job: string | null; note: string | null; }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function parseHandoverSummary(raw: unknown): StockSummary | null {
@@ -130,6 +131,17 @@ function calcStripsForZone(dimA: number, dimB: number): StripCalc {
   const optA = singleOrient(dimA, dimB);
   const optB = singleOrient(dimB, dimA);
   return optA.total140 + optA.total110 <= optB.total140 + optB.total110 ? optA : optB;
+}
+
+function getStripLen(dimA: number, dimB: number): number {
+  function singleOrient(sLen: number, cover: number) {
+    const nP = Math.floor(cover / 250); const rem = cover % 250;
+    let n140 = nP, n110 = nP;
+    if (rem > 0 && rem <= 110) n110 += 1;
+    else if (rem > 110) { n140 += 1; n110 += 1; }
+    return n140 * sLen + n110 * sLen;
+  }
+  return singleOrient(dimA, dimB) <= singleOrient(dimB, dimA) ? dimA : dimB;
 }
 
 function sumZones(zones: Zone[]) {
@@ -208,6 +220,8 @@ export default function WasteCostPage() {
   const [movements, setMovements] = useState<Movement[]>([]);
   const [savingZone, setSavingZone] = useState<string | null>(null);
   const [addingZone, setAddingZone] = useState(false);
+  const [availableRemnants, setAvailableRemnants] = useState<RemnantPiece[]>([]);
+  const [reservingRemnant, setReservingRemnant] = useState<string | null>(null);
 
   // ── Handover editor state ─────────────────────────────────────────────────
   const [showHandoverEdit, setShowHandoverEdit] = useState(false);
@@ -269,6 +283,11 @@ export default function WasteCostPage() {
     setZones(data ?? []);
   }, [supabase]);
 
+  const fetchRemnants = useCallback(async () => {
+    const { data } = await supabase.from("remnant_stock").select("*").eq("status", "available").order("width_bin").order("length_cm");
+    setAvailableRemnants(data ?? []);
+  }, [supabase]);
+
   const fetchStock = useCallback(async (jobNo: string, job: Job) => {
     const handoverSummary = parseHandoverSummary(job.handover_data);
     if (handoverSummary) {
@@ -315,6 +334,7 @@ export default function WasteCostPage() {
     setEditRets(handoverToEditRows(h.returnItems ?? []));
     fetchZones(selectedJobNo);
     fetchStock(selectedJobNo, job);
+    fetchRemnants();
   }, [selectedJobNo, jobs, fetchZones, fetchStock]);
 
   // ── Zone CRUD ─────────────────────────────────────────────────────────────
@@ -800,6 +820,65 @@ export default function WasteCostPage() {
                   </div>
                 )}
               </div>
+
+              {/* ── Remnant suggestions ── */}
+              {(() => {
+                const suggestions = zones
+                  .filter((z) => z.width_cm > 0 && z.length_cm > 0)
+                  .map((z) => {
+                    const calc = calcStripsForZone(z.width_cm, z.length_cm);
+                    const stripLen = getStripLen(z.width_cm, z.length_cm);
+                    const matches140 = calc.n140 > 0
+                      ? availableRemnants.filter((r) => r.width_bin >= 140 && r.length_cm >= stripLen)
+                      : [];
+                    const matches110 = calc.n110 > 0
+                      ? availableRemnants.filter((r) => r.width_bin >= 110 && r.length_cm >= stripLen && !matches140.find((x) => x.id === r.id))
+                      : [];
+                    return { zone: z, stripLen, matches140, matches110 };
+                  })
+                  .filter((s) => s.matches140.length > 0 || s.matches110.length > 0);
+                if (suggestions.length === 0) return null;
+                return (
+                  <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
+                    <h2 className="text-sm font-semibold text-teal-800 mb-3">💡 เศษที่ใช้แทนได้</h2>
+                    <div className="space-y-3">
+                      {suggestions.map(({ zone: z, stripLen, matches140, matches110 }) => (
+                        <div key={z.id} className="bg-white rounded-lg border border-teal-100 p-3">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-xs font-semibold text-slate-700">{z.zone_name}</span>
+                            <span className="text-[10px] text-slate-400">ต้องยาว ≥ {stripLen} cm</span>
+                          </div>
+                          {[...matches140.map((r) => ({ r, forWidth: 140 })), ...matches110.map((r) => ({ r, forWidth: 110 }))].map(({ r, forWidth }) => (
+                            <div key={r.id} className="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
+                              <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700">{r.width_bin}cm</span>
+                                <span className="text-xs font-mono text-slate-700">{r.length_cm} cm</span>
+                                <span className="text-[10px] text-slate-400">{r.mat_type}</span>
+                                <span className="text-[10px] text-teal-600">→ แทน {forWidth}cm strip</span>
+                              </div>
+                              <button
+                                disabled={reservingRemnant === r.id}
+                                onClick={async () => {
+                                  setReservingRemnant(r.id);
+                                  const { error } = await supabase.from("remnant_stock")
+                                    .update({ status: "reserved", reserved_for: selectedJobNo })
+                                    .eq("id", r.id);
+                                  if (error) toast.error(error.message);
+                                  else { toast.success("จองเศษสำหรับงานนี้แล้ว"); fetchRemnants(); }
+                                  setReservingRemnant(null);
+                                }}
+                                className="px-3 py-1 rounded-lg text-xs font-medium bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50"
+                              >
+                                {reservingRemnant === r.id ? "..." : "จอง"}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* ── Stock / Handover edit section ── */}
               <div className="bg-white rounded-xl border border-slate-200 p-4">
