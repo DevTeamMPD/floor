@@ -10,31 +10,34 @@ import CreateOrderModal from "./create-order-modal";
 // install_jobs PK is job_no (text) — there is NO id column in the DB.
 // id here is set to job_no so React keys and any legacy references still work.
 function mapRow(row: Record<string, unknown>): InstallJob {
+  const skus = Array.isArray(row.product_skus)
+    ? (row.product_skus as string[]).join(", ")
+    : (row.product_skus as string | undefined);
   return {
     id: row.job_no as string,
-    ticket: row.ticket_no as string,
+    ticket: row.external_id as string,
     order: row.order_no as string,
     bill: row.bill_no as string,
-    sku: row.sku as string,
+    sku: skus,
     product: row.product_name as string,
     customer: row.customer_name as string,
     stage: Number(row.stage) || 1,
-    via: row.via as string,
-    linked: row.linked_order as string,
+    via: row.created_via as string,
+    linked: row.linked ? "linked" : undefined,
     date: row.order_date as string,
     status: row.status as string,
     due: row.due_date as string,
-    shift: row.shift as string,
+    shift: row.shift != null ? String(row.shift) : undefined,
     assignees: row.assignees as string[],
     callLogs: row.call_logs as InstallJob["callLogs"],
     docs: row.docs as string[],
     confirmations: row.confirmations as string[],
     sitePhotos: row.site_photos as string[],
     completionPhotos: row.completion_photos as string[],
-    area: row.area as string,
+    area: row.area_w != null ? String(row.area_w) : undefined,
     addr: row.address as string,
     loc: row.location as string,
-    phone: row.phone as string,
+    phone: row.customer_phone as string,
     price: row.price != null ? Number(row.price) : undefined,
     jobNo: row.job_no as string,
     evalToken: row.eval_token as string,
