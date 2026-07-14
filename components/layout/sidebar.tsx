@@ -10,6 +10,7 @@ const NAV = [
   { href: "/service",         icon: "🛠", label: "บริการ" },
   { href: "/inventory",       icon: "📦", label: "คลังวัสดุ" },
   { href: "/waste-cost",      icon: "♻️", label: "ต้นทุนเศษ" },
+  { href: "/remnants",        icon: "✂️", label: "เศษวัสดุ" },
   { href: "/bom",             icon: "📐", label: "BOQ / BOM" },
   { href: "/purchase-orders", icon: "🛒", label: "ใบสั่งซื้อ" },
   { href: "/appointments",    icon: "📅", label: "นัดหมาย" },
