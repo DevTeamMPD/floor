@@ -4,7 +4,8 @@ import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface Zone { id: string; job_no: string; zone_name: string; width_cm: number; length_cm: number; }
+interface Obstacle { id: string; name: string; width_cm: number; length_cm: number; deduct: boolean; }
+interface Zone { id: string; job_no: string; zone_name: string; width_cm: number; length_cm: number; obstacles: Obstacle[]; }
 
 interface MaterialItem {
   thickness?: string; color?: string;
@@ -155,6 +156,13 @@ function sumZones(zones: Zone[]) {
   );
 }
 
+function getZoneNetArea(zone: Zone): number {
+  const raw = zone.width_cm * zone.length_cm;
+  if (!zone.obstacles?.length) return raw;
+  const ded = zone.obstacles.filter(o => o.deduct).reduce((s, o) => s + o.width_cm * o.length_cm, 0);
+  return Math.max(0, raw - ded);
+}
+
 function fmtCm(n: number) { return n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 function fmtBaht(n: number) { return "฿" + Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 function fmtM2(cm2: number) { return (cm2 / 10000).toFixed(2) + " m²"; }
@@ -222,6 +230,8 @@ export default function WasteCostPage() {
   const [addingZone, setAddingZone] = useState(false);
   const [availableRemnants, setAvailableRemnants] = useState<RemnantPiece[]>([]);
   const [reservingRemnant, setReservingRemnant] = useState<string | null>(null);
+  const [expandedZones, setExpandedZones] = useState<Set<string>>(new Set());
+  const [savingObstacles, setSavingObstacles] = useState<string | null>(null);
 
   // ── Handover editor state ─────────────────────────────────────────────────
   const [showHandoverEdit, setShowHandoverEdit] = useState(false);
@@ -280,7 +290,7 @@ export default function WasteCostPage() {
   const fetchZones = useCallback(async (jobNo: string) => {
     const { data, error } = await supabase.from("install_job_zones").select("*").eq("job_no", jobNo).order("created_at");
     if (error) toast.error("โหลด zone ไม่ได้: " + error.message);
-    setZones(data ?? []);
+    setZones((data ?? []).map(z => ({ ...z, obstacles: (z.obstacles as Obstacle[]) ?? [] })));
   }, [supabase]);
 
   const fetchRemnants = useCallback(async () => {
@@ -328,6 +338,7 @@ export default function WasteCostPage() {
     setMovements([]);
     setStockSource("none");
     setShowHandoverEdit(false);
+    setExpandedZones(new Set());
     // Populate editor
     const h = parseHandoverData(job.handover_data);
     setEditMats(handoverToEditRows(h.materials ?? []));
@@ -366,6 +377,31 @@ export default function WasteCostPage() {
     const { error } = await supabase.from("install_job_zones").delete().eq("id", id);
     if (error) { toast.error("ลบไม่ได้: " + error.message); return; }
     setZones((prev) => prev.filter((z) => z.id !== id));
+  };
+
+  // ── Obstacle CRUD ─────────────────────────────────────────────────────────
+  const addObstacle = (zoneId: string) =>
+    setZones(prev => prev.map(z => z.id === zoneId ? {
+      ...z, obstacles: [...z.obstacles, { id: Math.random().toString(36).slice(2), name: "", width_cm: 0, length_cm: 0, deduct: true }]
+    } : z));
+
+  const patchObstacle = (zoneId: string, obsId: string, field: keyof Obstacle, value: string | number | boolean) =>
+    setZones(prev => prev.map(z => z.id === zoneId ? {
+      ...z, obstacles: z.obstacles.map(o => o.id === obsId ? { ...o, [field]: value } : o)
+    } : z));
+
+  const deleteObstacle = (zoneId: string, obsId: string) =>
+    setZones(prev => prev.map(z => z.id === zoneId ? {
+      ...z, obstacles: z.obstacles.filter(o => o.id !== obsId)
+    } : z));
+
+  const saveObstacles = async (zone: Zone) => {
+    setSavingObstacles(zone.id);
+    const { error } = await supabase.from("install_job_zones")
+      .update({ obstacles: zone.obstacles }).eq("id", zone.id);
+    setSavingObstacles(null);
+    if (error) toast.error("บันทึกไม่ได้: " + error.message);
+    else toast.success("บันทึกสิ่งกีดขวางแล้ว");
   };
 
   // ── Handover editor ───────────────────────────────────────────────────────
@@ -436,9 +472,14 @@ export default function WasteCostPage() {
   const expected = useMemo(() => sumZones(zones), [zones]);
 
   const totalZoneArea = useMemo(() =>
+    zones.reduce((s, z) => s + (z.width_cm > 0 && z.length_cm > 0 ? getZoneNetArea(z) : 0), 0),
+    [zones]
+  );
+  const totalRawZoneArea = useMemo(() =>
     zones.reduce((s, z) => s + (z.width_cm > 0 && z.length_cm > 0 ? z.width_cm * z.length_cm : 0), 0),
     [zones]
   );
+  const totalObstacleArea = totalRawZoneArea - totalZoneArea;
 
   const wasteCalc = useMemo(() => {
     if (!stockSummary || (stockSummary.issued_140 === 0 && stockSummary.issued_110 === 0)) return null;
@@ -759,14 +800,19 @@ export default function WasteCostPage() {
                           <th className="pb-2 text-right font-medium">พื้นที่</th>
                           <th className="pb-2 text-right font-medium">ควรใช้ 140cm</th>
                           <th className="pb-2 text-right font-medium">ควรใช้ 110cm</th>
+                          <th className="pb-2 text-center font-medium">สิ่งกีดขวาง</th>
                           <th className="pb-2"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">
                         {zones.map((z) => {
                           const calc = z.width_cm > 0 && z.length_cm > 0 ? calcStripsForZone(z.width_cm, z.length_cm) : null;
-                          const area = z.width_cm > 0 && z.length_cm > 0 ? z.width_cm * z.length_cm : 0;
+                          const netArea = z.width_cm > 0 && z.length_cm > 0 ? getZoneNetArea(z) : 0;
+                          const rawArea = z.width_cm > 0 && z.length_cm > 0 ? z.width_cm * z.length_cm : 0;
+                          const dedArea = rawArea - netArea;
+                          const isExpanded = expandedZones.has(z.id);
                           return (
+                            <>
                             <tr key={z.id}>
                               <td className="py-2 pr-2">
                                 <input value={z.zone_name} onChange={(e) => patchZone(z.id, "zone_name", e.target.value)} onBlur={() => saveZone(z)}
@@ -787,7 +833,12 @@ export default function WasteCostPage() {
                                 </div>
                               </td>
                               <td className="py-2 pr-2 text-right text-xs font-mono text-slate-500">
-                                {area > 0 ? fmtM2(area) : "—"}
+                                {netArea > 0 ? (
+                                  <span>
+                                    {fmtM2(netArea)}
+                                    {dedArea > 0 && <span className="text-[9px] text-orange-500 ml-1">-{fmtM2(dedArea)}</span>}
+                                  </span>
+                                ) : "—"}
                               </td>
                               <td className="py-2 pr-2 text-right">
                                 {calc ? <span className="text-xs font-mono text-slate-700">{fmtCm(calc.total140)} cm <span className="text-slate-400">×{calc.n140}</span></span> : <span className="text-xs text-slate-300">—</span>}
@@ -795,11 +846,101 @@ export default function WasteCostPage() {
                               <td className="py-2 pr-2 text-right">
                                 {calc ? <span className="text-xs font-mono text-slate-700">{fmtCm(calc.total110)} cm <span className="text-slate-400">×{calc.n110}</span></span> : <span className="text-xs text-slate-300">—</span>}
                               </td>
+                              <td className="py-2 text-center">
+                                <button
+                                  onClick={() => setExpandedZones(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(z.id)) next.delete(z.id); else next.add(z.id);
+                                    return next;
+                                  })}
+                                  className={`px-2 py-0.5 text-xs rounded transition-colors ${isExpanded ? "bg-orange-500 text-white" : "bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100"}`}
+                                  title="สิ่งกีดขวาง / พื้นที่ไม่ปู"
+                                >
+                                  🧱{z.obstacles?.length > 0 ? ` ${z.obstacles.length}` : ""}
+                                </button>
+                              </td>
                               <td className="py-2 text-right">
                                 {savingZone === z.id ? <span className="text-[10px] text-blue-400">💾</span>
                                   : <button onClick={() => deleteZone(z.id)} className="text-slate-300 hover:text-red-500 text-xs transition-colors">✕</button>}
                               </td>
                             </tr>
+                            {isExpanded && (
+                              <tr key={z.id + "-obs"} className="bg-orange-50/60">
+                                <td colSpan={8} className="px-4 py-3">
+                                  <div className="text-[11px] font-semibold text-orange-700 mb-2">🧱 สิ่งกีดขวาง / พื้นที่ไม่ปู</div>
+                                  {z.obstacles?.length === 0 && (
+                                    <p className="text-[11px] text-slate-400 mb-2">ยังไม่มีสิ่งกีดขวาง — กด "+ เพิ่ม" เพื่อระบุ</p>
+                                  )}
+                                  {z.obstacles?.length > 0 && (
+                                    <table className="w-full text-xs mb-2">
+                                      <thead>
+                                        <tr className="text-[10px] text-slate-400 border-b border-orange-100">
+                                          <th className="pb-1.5 text-left font-medium">ชื่อ/รายละเอียด</th>
+                                          <th className="pb-1.5 text-right font-medium">กว้าง (cm)</th>
+                                          <th className="pb-1.5 text-right font-medium">ยาว (cm)</th>
+                                          <th className="pb-1.5 text-right font-medium">พื้นที่</th>
+                                          <th className="pb-1.5 text-center font-medium">หักพื้นที่</th>
+                                          <th></th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-orange-50">
+                                        {z.obstacles.map((obs) => (
+                                          <tr key={obs.id}>
+                                            <td className="py-1.5 pr-2">
+                                              <input value={obs.name} onChange={(e) => patchObstacle(z.id, obs.id, "name", e.target.value)} placeholder="เช่น เสา, ผนัง"
+                                                className="w-full px-2 py-1 text-xs border border-orange-200 rounded focus:outline-none focus:ring-1 focus:ring-orange-400 bg-white" />
+                                            </td>
+                                            <td className="py-1.5 pr-2">
+                                              <input type="number" min={0} value={obs.width_cm || ""} onChange={(e) => patchObstacle(z.id, obs.id, "width_cm", Number(e.target.value))} placeholder="0"
+                                                className="w-20 px-2 py-1 text-xs border border-orange-200 rounded text-right focus:outline-none focus:ring-1 focus:ring-orange-400 bg-white" />
+                                            </td>
+                                            <td className="py-1.5 pr-2">
+                                              <input type="number" min={0} value={obs.length_cm || ""} onChange={(e) => patchObstacle(z.id, obs.id, "length_cm", Number(e.target.value))} placeholder="0"
+                                                className="w-20 px-2 py-1 text-xs border border-orange-200 rounded text-right focus:outline-none focus:ring-1 focus:ring-orange-400 bg-white" />
+                                            </td>
+                                            <td className="py-1.5 pr-2 text-right font-mono text-slate-600 text-[11px]">
+                                              {obs.width_cm > 0 && obs.length_cm > 0 ? fmtM2(obs.width_cm * obs.length_cm) : "—"}
+                                            </td>
+                                            <td className="py-1.5 text-center">
+                                              <button
+                                                onClick={() => patchObstacle(z.id, obs.id, "deduct", !obs.deduct)}
+                                                className={`px-2 py-0.5 text-[10px] rounded-full font-medium border transition-colors ${obs.deduct ? "bg-red-100 text-red-700 border-red-200" : "bg-slate-100 text-slate-500 border-slate-200"}`}
+                                                title={obs.deduct ? "หักพื้นที่ออก (คลิกเพื่อเปลี่ยน)" : "ไม่หักพื้นที่ (คลิกเพื่อเปลี่ยน)"}
+                                              >
+                                                {obs.deduct ? "หักออก" : "ไม่หัก"}
+                                              </button>
+                                            </td>
+                                            <td className="py-1.5 text-right">
+                                              <button onClick={() => deleteObstacle(z.id, obs.id)} className="text-slate-300 hover:text-red-500 text-xs transition-colors">✕</button>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  )}
+                                  <div className="flex items-center gap-3">
+                                    <button onClick={() => addObstacle(z.id)} className="text-xs text-orange-600 hover:underline">+ เพิ่มสิ่งกีดขวาง</button>
+                                    <button
+                                      onClick={() => saveObstacles(z)}
+                                      disabled={savingObstacles === z.id}
+                                      className="px-3 py-1 text-xs bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-colors"
+                                    >
+                                      {savingObstacles === z.id ? "บันทึก…" : "💾 บันทึก"}
+                                    </button>
+                                    {z.obstacles?.some(o => o.deduct && o.width_cm > 0 && o.length_cm > 0) && (
+                                      <span className="text-[11px] text-orange-600 font-medium ml-auto">
+                                        หักพื้นที่รวม: {fmtM2(z.obstacles.filter(o => o.deduct).reduce((s, o) => s + o.width_cm * o.length_cm, 0))}
+                                        {" · "}พื้นที่สุทธิ: <strong>{fmtM2(getZoneNetArea(z))}</strong>
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-slate-400 mt-2">
+                                    💡 <strong>หักออก</strong> = เสา/ผนัง (ไม่ปู) — <strong>ไม่หัก</strong> = เฟอร์นิเจอร์ที่ต้องปูใต้ (ยังคำนวณพื้นที่ปกติ)
+                                  </p>
+                                </td>
+                              </tr>
+                            )}
+                            </>
                           );
                         })}
                       </tbody>
@@ -808,10 +949,16 @@ export default function WasteCostPage() {
                           <tr className="border-t-2 border-slate-200">
                             <td colSpan={3} className="pt-2 text-xs font-semibold text-slate-600">รวมทุกโซน</td>
                             <td className="pt-2 text-right text-xs font-semibold font-mono text-slate-700">
-                              {totalZoneArea > 0 ? fmtM2(totalZoneArea) : "—"}
+                              {totalZoneArea > 0 ? (
+                                <span>
+                                  {fmtM2(totalZoneArea)}
+                                  {totalObstacleArea > 0 && <span className="text-[9px] text-orange-500 block">-{fmtM2(totalObstacleArea)} สิ่งกีดขวาง</span>}
+                                </span>
+                              ) : "—"}
                             </td>
                             <td className="pt-2 text-right text-xs font-semibold font-mono">{expected.total140 > 0 ? `${fmtCm(expected.total140)} cm` : "—"}</td>
                             <td className="pt-2 text-right text-xs font-semibold font-mono">{expected.total110 > 0 ? `${fmtCm(expected.total110)} cm` : "—"}</td>
+                            <td></td>
                             <td></td>
                           </tr>
                         </tfoot>
