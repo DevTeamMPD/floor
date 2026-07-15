@@ -5,7 +5,8 @@ import { toast } from "sonner";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Obstacle { id: string; name: string; width_cm: number; length_cm: number; deduct: boolean; }
-interface GridData { type: "grid"; cell_cm: number; rows: number; cols: number; blocked: number[]; }
+interface CellData { w?: number; l?: number; blocked?: boolean; }
+  interface GridData { type: "grid"; cell_cm: number; rows: number; cols: number; blocked: number[]; cellData?: Record<string, CellData>; }
 interface Zone { id: string; job_no: string; zone_name: string; width_cm: number; length_cm: number; obstacles: (Obstacle | GridData)[]; }
 
 interface MaterialItem {
@@ -161,7 +162,18 @@ function getZoneNetArea(zone: Zone): number {
   const raw = zone.width_cm * zone.length_cm;
   if (!zone.obstacles?.length) return raw;
   const grid = zone.obstacles.find((o): o is GridData => (o as GridData).type === "grid");
-  if (grid) return Math.max(0, raw - grid.blocked.length * grid.cell_cm * grid.cell_cm);
+  if (grid) {
+    if (grid.cellData && Object.keys(grid.cellData).length > 0) {
+      const totalCells = grid.rows * grid.cols;
+      let netArea = 0;
+      for (let i = 0; i < totalCells; i++) {
+        const cell = grid.cellData[String(i)];
+        if (!cell?.blocked) netArea += (cell?.w ?? grid.cell_cm) * (cell?.l ?? grid.cell_cm);
+      }
+      return Math.max(0, netArea);
+    }
+    return Math.max(0, raw - grid.blocked.length * grid.cell_cm * grid.cell_cm);
+  }
   const ded = (zone.obstacles as Obstacle[]).filter(o => o.deduct).reduce((s, o) => s + o.width_cm * o.length_cm, 0);
   return Math.max(0, raw - ded);
 }
@@ -236,6 +248,8 @@ export default function WasteCostPage() {
   const [expandedZones, setExpandedZones] = useState<Set<string>>(new Set());
   const [savingObstacles, setSavingObstacles] = useState<string | null>(null);
   const [gridCellCm, setGridCellCm] = useState<Record<string, number>>({});
+  const [selectedCell, setSelectedCell] = useState<{ zoneId: string; idx: number } | null>(null);
+  const [editingCell, setEditingCell] = useState<{ w: string; l: string }>({ w: "50", l: "50" });
 
   // ── Handover editor state ─────────────────────────────────────────────────
   const [showHandoverEdit, setShowHandoverEdit] = useState(false);
@@ -415,10 +429,27 @@ export default function WasteCostPage() {
     setZones(prev => prev.map(z => {
       if (z.id !== zone.id) return z;
       const existing = z.obstacles?.find((o): o is GridData => (o as GridData).type === "grid");
-      const newBlocked = existing
-        ? (existing.blocked.includes(idx) ? existing.blocked.filter(i => i !== idx) : [...existing.blocked, idx])
-        : [idx];
-      return { ...z, obstacles: [{ type: "grid" as const, cell_cm: cellCm, rows, cols, blocked: newBlocked }] };
+      const existingCellData: Record<string, CellData> = existing?.cellData ?? {};
+      const currentCell = existingCellData[String(idx)];
+      const isNowBlocked = !currentCell?.blocked;
+      const newCellData = { ...existingCellData, [String(idx)]: { w: currentCell?.w ?? cellCm, l: currentCell?.l ?? cellCm, blocked: isNowBlocked } };
+      const newBlocked = Object.entries(newCellData).filter(([, c]) => c.blocked).map(([k]) => parseInt(k));
+      return { ...z, obstacles: [{ type: "grid" as const, cell_cm: cellCm, rows, cols, blocked: newBlocked, cellData: newCellData }] };
+    }));
+  };
+
+  const updateCellSize = (zone: Zone, idx: number, w: number, l: number) => {
+    const cellCm = gridCellCm[zone.id] ?? 50;
+    const cols = Math.max(1, Math.ceil(zone.width_cm / cellCm));
+    const rows = Math.max(1, Math.ceil(zone.length_cm / cellCm));
+    setZones(prev => prev.map(z => {
+      if (z.id !== zone.id) return z;
+      const existing = z.obstacles?.find((o): o is GridData => (o as GridData).type === "grid");
+      const existingCellData: Record<string, CellData> = existing?.cellData ?? {};
+      const currentCell = existingCellData[String(idx)];
+      const newCellData = { ...existingCellData, [String(idx)]: { ...currentCell, w, l } };
+      const newBlocked = Object.entries(newCellData).filter(([, c]) => c.blocked).map(([k]) => parseInt(k));
+      return { ...z, obstacles: [{ type: "grid" as const, cell_cm: cellCm, rows, cols, blocked: newBlocked, cellData: newCellData }] };
     }));
   };
 
@@ -437,8 +468,9 @@ export default function WasteCostPage() {
     const cols = Math.max(1, Math.ceil(zone.width_cm / cellCm));
     const rows = Math.max(1, Math.ceil(zone.length_cm / cellCm));
     setZones(prev => prev.map(z => z.id !== zone.id ? z : {
-      ...z, obstacles: [{ type: "grid" as const, cell_cm: cellCm, rows, cols, blocked: [] }]
+      ...z, obstacles: [{ type: "grid" as const, cell_cm: cellCm, rows, cols, blocked: [], cellData: {} }]
     }));
+    setSelectedCell(null);
   };
 
   // ── Handover editor ───────────────────────────────────────────────────────
@@ -938,22 +970,86 @@ export default function WasteCostPage() {
                                               <span>← {z.width_cm} cm →</span>
                                             </div>
                                             <div className="inline-grid gap-0.5" style={{gridTemplateColumns: `repeat(${cols}, ${cellPx}px)`}}>
-                                              {Array.from({ length: rows * cols }).map((_, idx) => (
-                                                <div
-                                                  key={idx}
-                                                  onClick={() => toggleGridCell(z, idx)}
-                                                  style={{width: cellPx, height: cellPx}}
-                                                  className={`border cursor-pointer rounded-[2px] transition-colors ${
-                                                    blocked.includes(idx)
-                                                      ? "bg-orange-400 border-orange-500 hover:bg-orange-500"
-                                                      : "bg-slate-100 border-slate-200 hover:bg-blue-100 hover:border-blue-300"
-                                                  }`}
-                                                  title={`เซลล์ ${Math.floor(idx/cols)+1},${(idx%cols)+1} — ${blocked.includes(idx) ? "ไม่ปู (คลิกยกเลิก)" : "ปู (คลิกเพื่อทำเครื่องหมาย)"}`}
-                                                />
-                                              ))}
+                                              {Array.from({ length: rows * cols }, (_, i) => {
+                                                const cellDatum = grid.cellData?.[String(i)];
+                                                const isBlocked = cellDatum?.blocked ?? grid.blocked.includes(i);
+                                                const isSelected = selectedCell?.zoneId === z.id && selectedCell?.idx === i;
+                                                const hasCustom = cellDatum?.w !== undefined || cellDatum?.l !== undefined;
+                                                const cW = cellDatum?.w ?? grid.cell_cm;
+                                                const cL = cellDatum?.l ?? grid.cell_cm;
+                                                return (
+                                                  <div
+                                                    key={i}
+                                                    onClick={() => {
+                                                      if (isBlocked) { toggleGridCell(z, i); }
+                                                      else { setSelectedCell({ zoneId: z.id, idx: i }); setEditingCell({ w: String(cW), l: String(cL) }); }
+                                                    }}
+                                                    style={{ width: cellPx, height: cellPx }}
+                                                    className={`border cursor-pointer rounded-[2px] flex items-center justify-center overflow-hidden transition-colors
+                                                      ${isBlocked ? "bg-orange-400 border-orange-500 text-white text-xs font-bold" : isSelected ? "bg-blue-100 border-blue-400" : hasCustom ? "bg-blue-50 hover:bg-blue-100 border-blue-200" : "bg-slate-100 border-slate-200 hover:bg-blue-100 hover:border-blue-300"}`}
+                                                    title={`เซลล์ ${Math.floor(i/cols)+1},${(i%cols)+1} — ${isBlocked ? "ไม่ปู (คลิกยกเลิก)" : "คลิกเพื่อตั้งขนาด"}`}
+                                                  >
+                                                    {isBlocked ? "×" : hasCustom ? (
+                                                      <span className="text-center leading-none text-blue-700" style={{ fontSize: Math.max(5, cellPx / 6) }}>
+                                                        {cW}<br/>{cL}
+                                                      </span>
+                                                    ) : null}
+                                                  </div>
+                                                );
+                                              })}
                                             </div>
                                             <div className="text-[9px] text-slate-400 mt-1">{z.length_cm} cm ↕</div>
                                           </div>
+
+                                          {selectedCell?.zoneId === z.id && (() => {
+                                            const colsN = Math.max(1, Math.ceil(z.width_cm / (gridCellCm[z.id] ?? 50)));
+                                            return (
+                                              <div className="mt-2 p-3 bg-blue-50 rounded-lg border border-blue-200 w-full">
+                                                <div className="flex items-center justify-between mb-2">
+                                                  <span className="text-sm font-medium text-blue-800">
+                                                    ✏️ แถว {Math.floor(selectedCell.idx / colsN) + 1} — คอล {(selectedCell.idx % colsN) + 1}
+                                                  </span>
+                                                  <button onClick={() => setSelectedCell(null)} className="text-gray-400 hover:text-gray-600 text-sm leading-none">✕</button>
+                                                </div>
+                                                <div className="flex gap-3 items-end flex-wrap">
+                                                  <label className="text-xs text-gray-600">
+                                                    กว้าง (ซม.)
+                                                    <input type="number" value={editingCell.w}
+                                                      onChange={e => setEditingCell(p => ({ ...p, w: e.target.value }))}
+                                                      className="block mt-1 w-20 border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-400"
+                                                      min="1" />
+                                                  </label>
+                                                  <label className="text-xs text-gray-600">
+                                                    ยาว (ซม.)
+                                                    <input type="number" value={editingCell.l}
+                                                      onChange={e => setEditingCell(p => ({ ...p, l: e.target.value }))}
+                                                      className="block mt-1 w-20 border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-blue-400"
+                                                      min="1" />
+                                                  </label>
+                                                  <button
+                                                    onClick={() => {
+                                                      const w = parseFloat(editingCell.w); const l = parseFloat(editingCell.l);
+                                                      if (w > 0 && l > 0) { updateCellSize(z, selectedCell.idx, w, l); setSelectedCell(null); }
+                                                    }}
+                                                    className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+                                                  >บันทึกขนาด</button>
+                                                  <button
+                                                    onClick={() => { toggleGridCell(z, selectedCell.idx); setSelectedCell(null); }}
+                                                    className="px-3 py-1.5 bg-orange-500 text-white text-sm rounded hover:bg-orange-600"
+                                                  >🚫 ขวาง</button>
+                                                  {(editingCell.w !== String(gridCellCm[z.id] ?? 50) || editingCell.l !== String(gridCellCm[z.id] ?? 50)) && (
+                                                    <button
+                                                      onClick={() => {
+                                                        updateCellSize(z, selectedCell.idx, gridCellCm[z.id] ?? 50, gridCellCm[z.id] ?? 50);
+                                                        setSelectedCell(null);
+                                                      }}
+                                                      className="px-3 py-1.5 bg-gray-400 text-white text-sm rounded hover:bg-gray-500"
+                                                    >↩ ค่าเดิม</button>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            );
+                                          })()}
 
                                           {/* Legend + stats */}
                                           <div className="flex flex-col gap-2 text-[11px] min-w-[140px]">
