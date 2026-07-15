@@ -971,12 +971,12 @@ export default function WasteCostPage() {
                                             </div>
                                             <div className="inline-grid gap-0.5" style={{gridTemplateColumns: `repeat(${cols}, ${cellPx}px)`}}>
                                               {Array.from({ length: rows * cols }, (_, i) => {
-                                                const cellDatum = grid.cellData?.[String(i)];
-                                                const isBlocked = cellDatum?.blocked ?? grid.blocked.includes(i);
+                                                const cellDatum = gridEntry?.cellData?.[String(i)];
+                                                const isBlocked = cellDatum?.blocked ?? blocked.includes(i);
                                                 const isSelected = selectedCell?.zoneId === z.id && selectedCell?.idx === i;
                                                 const hasCustom = cellDatum?.w !== undefined || cellDatum?.l !== undefined;
-                                                const cW = cellDatum?.w ?? grid.cell_cm;
-                                                const cL = cellDatum?.l ?? grid.cell_cm;
+                                                const cW = cellDatum?.w ?? gridEntry?.cell_cm ?? cellCm;
+                                                const cL = cellDatum?.l ?? gridEntry?.cell_cm ?? cellCm;
                                                 return (
                                                   <div
                                                     key={i}
