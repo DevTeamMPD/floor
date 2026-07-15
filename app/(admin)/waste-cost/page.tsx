@@ -9,6 +9,10 @@ interface CellData { w?: number; l?: number; blocked?: boolean; }
   interface GridData { type: "grid"; cell_cm: number; rows: number; cols: number; blocked: number[]; cellData?: Record<string, CellData>; }
 interface Zone { id: string; job_no: string; zone_name: string; width_cm: number; length_cm: number; obstacles: (Obstacle | GridData)[]; }
 
+function cx(...parts: (string | false | undefined)[]) {
+  return parts.filter(Boolean).join(" ");
+}
+
 interface MaterialItem {
   thickness?: string; color?: string;
   widthCm?: "110" | "140" | "";
@@ -250,6 +254,8 @@ export default function WasteCostPage() {
   const [gridCellCm, setGridCellCm] = useState<Record<string, number>>({});
   const [selectedCell, setSelectedCell] = useState<{ zoneId: string; idx: number } | null>(null);
   const [editingCell, setEditingCell] = useState<{ w: string; l: string }>({ w: "50", l: "50" });
+  const [dragStart, setDragStart] = useState<{ zoneId: string; idx: number; mode: "block" | "unblock" } | null>(null);
+  const [dragCurrent, setDragCurrent] = useState<number | null>(null);
 
   // ── Handover editor state ─────────────────────────────────────────────────
   const [showHandoverEdit, setShowHandoverEdit] = useState(false);
@@ -433,6 +439,34 @@ export default function WasteCostPage() {
       const currentCell = existingCellData[String(idx)];
       const isNowBlocked = !currentCell?.blocked;
       const newCellData = { ...existingCellData, [String(idx)]: { w: currentCell?.w ?? cellCm, l: currentCell?.l ?? cellCm, blocked: isNowBlocked } };
+      const newBlocked = Object.entries(newCellData).filter(([, c]) => c.blocked).map(([k]) => parseInt(k));
+      return { ...z, obstacles: [{ type: "grid" as const, cell_cm: cellCm, rows, cols, blocked: newBlocked, cellData: newCellData }] };
+    }));
+  };
+
+  const rectIndices = (startIdx: number, endIdx: number, cols: number) => {
+    const sr = Math.floor(startIdx / cols), sc = startIdx % cols;
+    const er = Math.floor(endIdx / cols), ec = endIdx % cols;
+    const r0 = Math.min(sr, er), r1 = Math.max(sr, er);
+    const c0 = Math.min(sc, ec), c1 = Math.max(sc, ec);
+    const out: number[] = [];
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) out.push(r * cols + c);
+    return out;
+  };
+
+  const setBlockedRange = (zone: Zone, indices: number[], blockedValue: boolean) => {
+    const cellCm = gridCellCm[zone.id] ?? 50;
+    const cols = Math.max(1, Math.ceil(zone.width_cm / cellCm));
+    const rows = Math.max(1, Math.ceil(zone.length_cm / cellCm));
+    setZones(prev => prev.map(z => {
+      if (z.id !== zone.id) return z;
+      const existing = z.obstacles?.find((o): o is GridData => (o as GridData).type === "grid");
+      const existingCellData: Record<string, CellData> = existing?.cellData ?? {};
+      const newCellData = { ...existingCellData };
+      indices.forEach(idx => {
+        const current = newCellData[String(idx)];
+        newCellData[String(idx)] = { w: current?.w ?? cellCm, l: current?.l ?? cellCm, blocked: blockedValue };
+      });
       const newBlocked = Object.entries(newCellData).filter(([, c]) => c.blocked).map(([k]) => parseInt(k));
       return { ...z, obstacles: [{ type: "grid" as const, cell_cm: cellCm, rows, cols, blocked: newBlocked, cellData: newCellData }] };
     }));
@@ -961,6 +995,7 @@ export default function WasteCostPage() {
                                             >{sz} cm</button>
                                           ))}
                                           <span className="text-[10px] text-slate-400 ml-1">{cols}×{rows} เซลล์</span>
+                                          <span className="text-[10px] text-blue-500 ml-1">🖱️ ลากคลุมหลายเซลล์เพื่อขวางทีเดียว</span>
                                         </div>
 
                                         <div className="flex gap-4 items-start">
@@ -969,7 +1004,26 @@ export default function WasteCostPage() {
                                             <div className="text-[9px] text-slate-400 mb-1 flex justify-between" style={{width: cols * (cellPx + 2) + "px"}}>
                                               <span>← {z.width_cm} cm →</span>
                                             </div>
-                                            <div className="inline-grid gap-0.5" style={{gridTemplateColumns: `repeat(${cols}, ${cellPx}px)`}}>
+                                            {(() => {
+                                              const dragRectSet = (dragStart && dragStart.zoneId === z.id && dragCurrent !== null)
+                                                ? new Set(rectIndices(dragStart.idx, dragCurrent, cols))
+                                                : null;
+                                              const cancelDrag = () => { setDragStart(null); setDragCurrent(null); };
+                                              const commitDrag = () => {
+                                                if (!dragStart || dragStart.zoneId !== z.id) return;
+                                                const endIdx = dragCurrent ?? dragStart.idx;
+                                                if (endIdx !== dragStart.idx) {
+                                                  setBlockedRange(z, rectIndices(dragStart.idx, endIdx, cols), dragStart.mode === "block");
+                                                }
+                                                cancelDrag();
+                                              };
+                                              return (
+                                            <div
+                                              className="inline-grid gap-0.5 select-none"
+                                              style={{gridTemplateColumns: `repeat(${cols}, ${cellPx}px)`}}
+                                              onMouseUp={commitDrag}
+                                              onMouseLeave={cancelDrag}
+                                            >
                                               {Array.from({ length: rows * cols }, (_, i) => {
                                                 const cellDatum = gridEntry?.cellData?.[String(i)];
                                                 const isBlocked = cellDatum?.blocked ?? blocked.includes(i);
@@ -977,17 +1031,26 @@ export default function WasteCostPage() {
                                                 const hasCustom = cellDatum?.w !== undefined || cellDatum?.l !== undefined;
                                                 const cW = cellDatum?.w ?? gridEntry?.cell_cm ?? cellCm;
                                                 const cL = cellDatum?.l ?? gridEntry?.cell_cm ?? cellCm;
+                                                const inDragRect = dragRectSet?.has(i) ?? false;
+                                                const dragPreviewClass = inDragRect
+                                                  ? (dragStart?.mode === "block" ? "ring-2 ring-orange-500 bg-orange-200" : "ring-2 ring-blue-400 bg-blue-100")
+                                                  : "";
                                                 return (
                                                   <div
                                                     key={i}
+                                                    onMouseDown={(e) => { e.preventDefault(); setDragStart({ zoneId: z.id, idx: i, mode: isBlocked ? "unblock" : "block" }); setDragCurrent(i); }}
+                                                    onMouseEnter={() => { if (dragStart?.zoneId === z.id) setDragCurrent(i); }}
                                                     onClick={() => {
                                                       if (isBlocked) { toggleGridCell(z, i); }
                                                       else { setSelectedCell({ zoneId: z.id, idx: i }); setEditingCell({ w: String(cW), l: String(cL) }); }
                                                     }}
                                                     style={{ width: cellPx, height: cellPx }}
-                                                    className={`border cursor-pointer rounded-[2px] flex items-center justify-center overflow-hidden transition-colors
-                                                      ${isBlocked ? "bg-orange-400 border-orange-500 text-white text-xs font-bold" : isSelected ? "bg-blue-100 border-blue-400" : hasCustom ? "bg-blue-50 hover:bg-blue-100 border-blue-200" : "bg-slate-100 border-slate-200 hover:bg-blue-100 hover:border-blue-300"}`}
-                                                    title={`เซลล์ ${Math.floor(i/cols)+1},${(i%cols)+1} — ${isBlocked ? "ไม่ปู (คลิกยกเลิก)" : "คลิกเพื่อตั้งขนาด"}`}
+                                                    className={cx(
+                                                      "border cursor-pointer rounded-[2px] flex items-center justify-center overflow-hidden transition-colors",
+                                                      isBlocked ? "bg-orange-400 border-orange-500 text-white text-xs font-bold" : isSelected ? "bg-blue-100 border-blue-400" : hasCustom ? "bg-blue-50 hover:bg-blue-100 border-blue-200" : "bg-slate-100 border-slate-200 hover:bg-blue-100 hover:border-blue-300",
+                                                      dragPreviewClass
+                                                    )}
+                                                    title={`เซลล์ ${Math.floor(i/cols)+1},${(i%cols)+1} — ${isBlocked ? "ไม่ปู (คลิกยกเลิก หรือลากคลุมเพื่อยกเลิกหลายเซลล์)" : "คลิกเพื่อตั้งขนาด หรือลากคลุมเพื่อขวางหลายเซลล์"}`}
                                                   >
                                                     {isBlocked ? "×" : hasCustom ? (
                                                       <span className="text-center leading-none text-blue-700" style={{ fontSize: Math.max(5, cellPx / 6) }}>
@@ -998,6 +1061,8 @@ export default function WasteCostPage() {
                                                 );
                                               })}
                                             </div>
+                                              );
+                                            })()}
                                             <div className="text-[9px] text-slate-400 mt-1">{z.length_cm} cm ↕</div>
                                           </div>
 
