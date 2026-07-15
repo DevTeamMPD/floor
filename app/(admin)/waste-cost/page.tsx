@@ -391,12 +391,12 @@ export default function WasteCostPage() {
 
   const patchObstacle = (zoneId: string, obsId: string, field: keyof Obstacle, value: string | number | boolean) =>
     setZones(prev => prev.map(z => z.id === zoneId ? {
-      ...z, obstacles: z.obstacles.map(o => o.id === obsId ? { ...o, [field]: value } : o)
+      ...z, obstacles: z.obstacles.map(o => (o as Obstacle).id === obsId ? { ...o, [field]: value } : o)
     } : z));
 
   const deleteObstacle = (zoneId: string, obsId: string) =>
     setZones(prev => prev.map(z => z.id === zoneId ? {
-      ...z, obstacles: z.obstacles.filter(o => o.id !== obsId)
+      ...z, obstacles: z.obstacles.filter(o => (o as Obstacle).id !== obsId)
     } : z));
 
   const saveObstacles = async (zone: Zone) => {
