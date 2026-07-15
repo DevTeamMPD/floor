@@ -5,7 +5,8 @@ import { toast } from "sonner";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Obstacle { id: string; name: string; width_cm: number; length_cm: number; deduct: boolean; }
-interface Zone { id: string; job_no: string; zone_name: string; width_cm: number; length_cm: number; obstacles: Obstacle[]; }
+interface GridData { type: "grid"; cell_cm: number; rows: number; cols: number; blocked: number[]; }
+interface Zone { id: string; job_no: string; zone_name: string; width_cm: number; length_cm: number; obstacles: (Obstacle | GridData)[]; }
 
 interface MaterialItem {
   thickness?: string; color?: string;
@@ -159,7 +160,9 @@ function sumZones(zones: Zone[]) {
 function getZoneNetArea(zone: Zone): number {
   const raw = zone.width_cm * zone.length_cm;
   if (!zone.obstacles?.length) return raw;
-  const ded = zone.obstacles.filter(o => o.deduct).reduce((s, o) => s + o.width_cm * o.length_cm, 0);
+  const grid = zone.obstacles.find((o): o is GridData => (o as GridData).type === "grid");
+  if (grid) return Math.max(0, raw - grid.blocked.length * grid.cell_cm * grid.cell_cm);
+  const ded = (zone.obstacles as Obstacle[]).filter(o => o.deduct).reduce((s, o) => s + o.width_cm * o.length_cm, 0);
   return Math.max(0, raw - ded);
 }
 
@@ -232,6 +235,7 @@ export default function WasteCostPage() {
   const [reservingRemnant, setReservingRemnant] = useState<string | null>(null);
   const [expandedZones, setExpandedZones] = useState<Set<string>>(new Set());
   const [savingObstacles, setSavingObstacles] = useState<string | null>(null);
+  const [gridCellCm, setGridCellCm] = useState<Record<string, number>>({});
 
   // ── Handover editor state ─────────────────────────────────────────────────
   const [showHandoverEdit, setShowHandoverEdit] = useState(false);
@@ -401,7 +405,40 @@ export default function WasteCostPage() {
       .update({ obstacles: zone.obstacles }).eq("id", zone.id);
     setSavingObstacles(null);
     if (error) toast.error("บันทึกไม่ได้: " + error.message);
-    else toast.success("บันทึกสิ่งกีดขวางแล้ว");
+    else toast.success("บันทึกตารางแล้ว");
+  };
+
+  const toggleGridCell = (zone: Zone, idx: number) => {
+    const cellCm = gridCellCm[zone.id] ?? 50;
+    const cols = Math.max(1, Math.ceil(zone.width_cm / cellCm));
+    const rows = Math.max(1, Math.ceil(zone.length_cm / cellCm));
+    setZones(prev => prev.map(z => {
+      if (z.id !== zone.id) return z;
+      const existing = z.obstacles?.find((o): o is GridData => (o as GridData).type === "grid");
+      const newBlocked = existing
+        ? (existing.blocked.includes(idx) ? existing.blocked.filter(i => i !== idx) : [...existing.blocked, idx])
+        : [idx];
+      return { ...z, obstacles: [{ type: "grid" as const, cell_cm: cellCm, rows, cols, blocked: newBlocked }] };
+    }));
+  };
+
+  const changeCellSize = (zone: Zone, newCellCm: number) => {
+    setGridCellCm(prev => ({ ...prev, [zone.id]: newCellCm }));
+    setZones(prev => prev.map(z => {
+      if (z.id !== zone.id) return z;
+      const cols = Math.max(1, Math.ceil(z.width_cm / newCellCm));
+      const rows = Math.max(1, Math.ceil(z.length_cm / newCellCm));
+      return { ...z, obstacles: [{ type: "grid" as const, cell_cm: newCellCm, rows, cols, blocked: [] }] };
+    }));
+  };
+
+  const clearGrid = (zone: Zone) => {
+    const cellCm = gridCellCm[zone.id] ?? 50;
+    const cols = Math.max(1, Math.ceil(zone.width_cm / cellCm));
+    const rows = Math.max(1, Math.ceil(zone.length_cm / cellCm));
+    setZones(prev => prev.map(z => z.id !== zone.id ? z : {
+      ...z, obstacles: [{ type: "grid" as const, cell_cm: cellCm, rows, cols, blocked: [] }]
+    }));
   };
 
   // ── Handover editor ───────────────────────────────────────────────────────
@@ -854,9 +891,12 @@ export default function WasteCostPage() {
                                     return next;
                                   })}
                                   className={`px-2 py-0.5 text-xs rounded transition-colors ${isExpanded ? "bg-orange-500 text-white" : "bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100"}`}
-                                  title="สิ่งกีดขวาง / พื้นที่ไม่ปู"
+                                  title="ตีตารางพื้นที่ไม่ปู"
                                 >
-                                  🧱{z.obstacles?.length > 0 ? ` ${z.obstacles.length}` : ""}
+                                  {(() => {
+                                    const g = z.obstacles?.find((o): o is GridData => (o as GridData).type === "grid");
+                                    return g && g.blocked.length > 0 ? `🧱 ${g.blocked.length}` : "🧱";
+                                  })()}
                                 </button>
                               </td>
                               <td className="py-2 text-right">
@@ -865,78 +905,103 @@ export default function WasteCostPage() {
                               </td>
                             </tr>
                             {isExpanded && (
-                              <tr key={z.id + "-obs"} className="bg-orange-50/60">
+                              <tr key={z.id + "-obs"} className="bg-orange-50/40">
                                 <td colSpan={8} className="px-4 py-3">
-                                  <div className="text-[11px] font-semibold text-orange-700 mb-2">🧱 สิ่งกีดขวาง / พื้นที่ไม่ปู</div>
-                                  {z.obstacles?.length === 0 && (
-                                    <p className="text-[11px] text-slate-400 mb-2">ยังไม่มีสิ่งกีดขวาง — กด "+ เพิ่ม" เพื่อระบุ</p>
-                                  )}
-                                  {z.obstacles?.length > 0 && (
-                                    <table className="w-full text-xs mb-2">
-                                      <thead>
-                                        <tr className="text-[10px] text-slate-400 border-b border-orange-100">
-                                          <th className="pb-1.5 text-left font-medium">ชื่อ/รายละเอียด</th>
-                                          <th className="pb-1.5 text-right font-medium">กว้าง (cm)</th>
-                                          <th className="pb-1.5 text-right font-medium">ยาว (cm)</th>
-                                          <th className="pb-1.5 text-right font-medium">พื้นที่</th>
-                                          <th className="pb-1.5 text-center font-medium">หักพื้นที่</th>
-                                          <th></th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-orange-50">
-                                        {z.obstacles.map((obs) => (
-                                          <tr key={obs.id}>
-                                            <td className="py-1.5 pr-2">
-                                              <input value={obs.name} onChange={(e) => patchObstacle(z.id, obs.id, "name", e.target.value)} placeholder="เช่น เสา, ผนัง"
-                                                className="w-full px-2 py-1 text-xs border border-orange-200 rounded focus:outline-none focus:ring-1 focus:ring-orange-400 bg-white" />
-                                            </td>
-                                            <td className="py-1.5 pr-2">
-                                              <input type="number" min={0} value={obs.width_cm || ""} onChange={(e) => patchObstacle(z.id, obs.id, "width_cm", Number(e.target.value))} placeholder="0"
-                                                className="w-20 px-2 py-1 text-xs border border-orange-200 rounded text-right focus:outline-none focus:ring-1 focus:ring-orange-400 bg-white" />
-                                            </td>
-                                            <td className="py-1.5 pr-2">
-                                              <input type="number" min={0} value={obs.length_cm || ""} onChange={(e) => patchObstacle(z.id, obs.id, "length_cm", Number(e.target.value))} placeholder="0"
-                                                className="w-20 px-2 py-1 text-xs border border-orange-200 rounded text-right focus:outline-none focus:ring-1 focus:ring-orange-400 bg-white" />
-                                            </td>
-                                            <td className="py-1.5 pr-2 text-right font-mono text-slate-600 text-[11px]">
-                                              {obs.width_cm > 0 && obs.length_cm > 0 ? fmtM2(obs.width_cm * obs.length_cm) : "—"}
-                                            </td>
-                                            <td className="py-1.5 text-center">
-                                              <button
-                                                onClick={() => patchObstacle(z.id, obs.id, "deduct", !obs.deduct)}
-                                                className={`px-2 py-0.5 text-[10px] rounded-full font-medium border transition-colors ${obs.deduct ? "bg-red-100 text-red-700 border-red-200" : "bg-slate-100 text-slate-500 border-slate-200"}`}
-                                                title={obs.deduct ? "หักพื้นที่ออก (คลิกเพื่อเปลี่ยน)" : "ไม่หักพื้นที่ (คลิกเพื่อเปลี่ยน)"}
-                                              >
-                                                {obs.deduct ? "หักออก" : "ไม่หัก"}
-                                              </button>
-                                            </td>
-                                            <td className="py-1.5 text-right">
-                                              <button onClick={() => deleteObstacle(z.id, obs.id)} className="text-slate-300 hover:text-red-500 text-xs transition-colors">✕</button>
-                                            </td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  )}
-                                  <div className="flex items-center gap-3">
-                                    <button onClick={() => addObstacle(z.id)} className="text-xs text-orange-600 hover:underline">+ เพิ่มสิ่งกีดขวาง</button>
-                                    <button
-                                      onClick={() => saveObstacles(z)}
-                                      disabled={savingObstacles === z.id}
-                                      className="px-3 py-1 text-xs bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-colors"
-                                    >
-                                      {savingObstacles === z.id ? "บันทึก…" : "💾 บันทึก"}
-                                    </button>
-                                    {z.obstacles?.some(o => o.deduct && o.width_cm > 0 && o.length_cm > 0) && (
-                                      <span className="text-[11px] text-orange-600 font-medium ml-auto">
-                                        หักพื้นที่รวม: {fmtM2(z.obstacles.filter(o => o.deduct).reduce((s, o) => s + o.width_cm * o.length_cm, 0))}
-                                        {" · "}พื้นที่สุทธิ: <strong>{fmtM2(getZoneNetArea(z))}</strong>
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-[10px] text-slate-400 mt-2">
-                                    💡 <strong>หักออก</strong> = เสา/ผนัง (ไม่ปู) — <strong>ไม่หัก</strong> = เฟอร์นิเจอร์ที่ต้องปูใต้ (ยังคำนวณพื้นที่ปกติ)
-                                  </p>
+                                  {z.width_cm <= 0 || z.length_cm <= 0 ? (
+                                    <p className="text-[11px] text-slate-400">กรอกขนาดโซนก่อนเพื่อสร้างตาราง</p>
+                                  ) : (() => {
+                                    const cellCm = gridCellCm[z.id] ?? 50;
+                                    const cols = Math.max(1, Math.ceil(z.width_cm / cellCm));
+                                    const rows = Math.max(1, Math.ceil(z.length_cm / cellCm));
+                                    const gridEntry = z.obstacles?.find((o): o is GridData => (o as GridData).type === "grid");
+                                    const blocked = gridEntry?.blocked ?? [];
+                                    const blockedArea = blocked.length * cellCm * cellCm;
+                                    const maxPx = 360;
+                                    const cellPx = Math.max(14, Math.min(32, Math.floor(maxPx / cols)));
+                                    return (
+                                      <div>
+                                        <div className="flex items-center gap-2 mb-3 flex-wrap">
+                                          <span className="text-[11px] font-semibold text-orange-700">🧱 ตีตารางพื้นที่ไม่ปู</span>
+                                          <span className="text-[10px] text-slate-400">ขนาดเซลล์:</span>
+                                          {[25, 50, 100].map(sz => (
+                                            <button key={sz} onClick={() => changeCellSize(z, sz)}
+                                              className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${cellCm === sz ? "bg-orange-500 text-white border-orange-500" : "bg-white text-slate-500 border-slate-200 hover:bg-orange-50"}`}
+                                            >{sz} cm</button>
+                                          ))}
+                                          <span className="text-[10px] text-slate-400 ml-1">{cols}×{rows} เซลล์</span>
+                                        </div>
+
+                                        <div className="flex gap-4 items-start">
+                                          {/* Grid */}
+                                          <div className="flex-shrink-0">
+                                            <div className="text-[9px] text-slate-400 mb-1 flex justify-between" style={{width: cols * (cellPx + 2) + "px"}}>
+                                              <span>← {z.width_cm} cm →</span>
+                                            </div>
+                                            <div className="inline-grid gap-0.5" style={{gridTemplateColumns: `repeat(${cols}, ${cellPx}px)`}}>
+                                              {Array.from({ length: rows * cols }).map((_, idx) => (
+                                                <div
+                                                  key={idx}
+                                                  onClick={() => toggleGridCell(z, idx)}
+                                                  style={{width: cellPx, height: cellPx}}
+                                                  className={`border cursor-pointer rounded-[2px] transition-colors ${
+                                                    blocked.includes(idx)
+                                                      ? "bg-orange-400 border-orange-500 hover:bg-orange-500"
+                                                      : "bg-slate-100 border-slate-200 hover:bg-blue-100 hover:border-blue-300"
+                                                  }`}
+                                                  title={`เซลล์ ${Math.floor(idx/cols)+1},${(idx%cols)+1} — ${blocked.includes(idx) ? "ไม่ปู (คลิกยกเลิก)" : "ปู (คลิกเพื่อทำเครื่องหมาย)"}`}
+                                                />
+                                              ))}
+                                            </div>
+                                            <div className="text-[9px] text-slate-400 mt-1">{z.length_cm} cm ↕</div>
+                                          </div>
+
+                                          {/* Legend + stats */}
+                                          <div className="flex flex-col gap-2 text-[11px] min-w-[140px]">
+                                            <div className="flex items-center gap-2">
+                                              <span className="w-3 h-3 bg-slate-100 border border-slate-200 rounded-[2px] flex-shrink-0 inline-block"/>
+                                              <span className="text-slate-600">ปู ({rows * cols - blocked.length} เซลล์)</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                              <span className="w-3 h-3 bg-orange-400 rounded-[2px] flex-shrink-0 inline-block"/>
+                                              <span className="text-orange-700">ไม่ปู ({blocked.length} เซลล์)</span>
+                                            </div>
+                                            <div className="border-t border-orange-100 pt-2 mt-1 space-y-1">
+                                              <div className="flex justify-between gap-3">
+                                                <span className="text-slate-500">พื้นที่โซน</span>
+                                                <span className="font-mono text-slate-700">{fmtM2(z.width_cm * z.length_cm)}</span>
+                                              </div>
+                                              {blockedArea > 0 && (
+                                                <div className="flex justify-between gap-3">
+                                                  <span className="text-orange-600">หักออก</span>
+                                                  <span className="font-mono text-orange-600">-{fmtM2(blockedArea)}</span>
+                                                </div>
+                                              )}
+                                              <div className="flex justify-between gap-3 font-semibold border-t border-orange-200 pt-1">
+                                                <span className="text-slate-700">สุทธิ</span>
+                                                <span className="font-mono text-slate-800">{fmtM2(getZoneNetArea(z))}</span>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        <div className="flex gap-2 mt-3">
+                                          <button onClick={() => saveObstacles(z)} disabled={savingObstacles === z.id}
+                                            className="px-3 py-1 text-xs bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-colors">
+                                            {savingObstacles === z.id ? "บันทึก…" : "💾 บันทึก"}
+                                          </button>
+                                          {blocked.length > 0 && (
+                                            <button onClick={() => clearGrid(z)}
+                                              className="px-3 py-1 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 transition-colors">
+                                              ล้างทั้งหมด
+                                            </button>
+                                          )}
+                                        </div>
+                                        <p className="text-[10px] text-slate-400 mt-2">
+                                          💡 คลิกเซลล์สีเทาเพื่อทำเครื่องหมายพื้นที่ไม่ปู (เสา / ผนัง) — เซลล์สีส้ม = ตัดออก
+                                        </p>
+                                      </div>
+                                    );
+                                  })()}
                                 </td>
                               </tr>
                             )}
