@@ -68,7 +68,7 @@ interface Movement {
   created_at: string;
 }
 
-interface StripCalc { n140: number; n110: number; total140: number; total110: number; }
+interface StripCalc { n140: number; n110: number; total140: number; total110: number; effStripLen: number; }
 interface RemnantPiece { id: string; width_bin: number; length_cm: number; mat_type: string; status: string; reserved_for: string | null; source_job: string | null; note: string | null; }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -126,36 +126,63 @@ function handoverToEditRows(items: (MaterialItem | ReturnItem)[]): EditRow[] {
   }));
 }
 
-function calcStripsForZone(dimA: number, dimB: number): StripCalc {
-  function singleOrient(stripLen: number, cover: number): StripCalc {
+interface ObstacleReduction { alongWidth: number; alongLength: number; }
+
+// เมื่อ "ทั้งคอลัมน์" (ตลอดความยาว) หรือ "ทั้งแถว" (ตลอดความกว้าง) ถูกขีดไม่ปูทั้งหมด
+// แปลว่าตำแหน่งนั้นตัดแผ่นออกได้เต็มความยาว/กว้าง — ใช้ลดจำนวน cm ที่ต้องเบิกจริง
+function getObstacleReduction(zone: Zone): ObstacleReduction {
+  const grid = zone.obstacles?.find((o): o is GridData => (o as GridData).type === "grid");
+  if (!grid || (!grid.blocked?.length && !grid.cellData)) return { alongWidth: 0, alongLength: 0 };
+  const { cell_cm: cellCm, rows, cols, blocked, cellData } = grid;
+  const isBlockedAt = (idx: number) => cellData?.[String(idx)]?.blocked ?? blocked.includes(idx);
+
+  let blockedCols = 0;
+  for (let c = 0; c < cols; c++) {
+    let allBlocked = true;
+    for (let r = 0; r < rows; r++) {
+      if (!isBlockedAt(r * cols + c)) { allBlocked = false; break; }
+    }
+    if (allBlocked) blockedCols++;
+  }
+
+  let blockedRows = 0;
+  for (let r = 0; r < rows; r++) {
+    let allBlocked = true;
+    for (let c = 0; c < cols; c++) {
+      if (!isBlockedAt(r * cols + c)) { allBlocked = false; break; }
+    }
+    if (allBlocked) blockedRows++;
+  }
+
+  return { alongWidth: blockedCols * cellCm, alongLength: blockedRows * cellCm };
+}
+
+function calcStripsForZone(dimA: number, dimB: number, reduction?: ObstacleReduction): StripCalc {
+  function singleOrient(stripLen: number, cover: number, reduceBy: number): StripCalc {
     const nPairs = Math.floor(cover / 250);
     const rem = cover % 250;
     let n140 = nPairs, n110 = nPairs;
     if (rem > 0 && rem <= 110) n110 += 1;
     else if (rem > 110) { n140 += 1; n110 += 1; }
-    return { n140, n110, total140: n140 * stripLen, total110: n110 * stripLen };
+    const effLen = Math.max(0, stripLen - reduceBy);
+    return { n140, n110, total140: n140 * effLen, total110: n110 * effLen, effStripLen: effLen };
   }
-  const optA = singleOrient(dimA, dimB);
-  const optB = singleOrient(dimB, dimA);
+  const alongWidth = reduction?.alongWidth ?? 0;
+  const alongLength = reduction?.alongLength ?? 0;
+  const optA = singleOrient(dimA, dimB, alongWidth);
+  const optB = singleOrient(dimB, dimA, alongLength);
   return optA.total140 + optA.total110 <= optB.total140 + optB.total110 ? optA : optB;
 }
 
-function getStripLen(dimA: number, dimB: number): number {
-  function singleOrient(sLen: number, cover: number) {
-    const nP = Math.floor(cover / 250); const rem = cover % 250;
-    let n140 = nP, n110 = nP;
-    if (rem > 0 && rem <= 110) n110 += 1;
-    else if (rem > 110) { n140 += 1; n110 += 1; }
-    return n140 * sLen + n110 * sLen;
-  }
-  return singleOrient(dimA, dimB) <= singleOrient(dimB, dimA) ? dimA : dimB;
+function getStripLen(dimA: number, dimB: number, reduction?: ObstacleReduction): number {
+  return calcStripsForZone(dimA, dimB, reduction).effStripLen;
 }
 
 function sumZones(zones: Zone[]) {
   return zones.reduce(
     (acc, z) => {
       if (z.width_cm <= 0 || z.length_cm <= 0) return acc;
-      const c = calcStripsForZone(z.width_cm, z.length_cm);
+      const c = calcStripsForZone(z.width_cm, z.length_cm, getObstacleReduction(z));
       return { total140: acc.total140 + c.total140, total110: acc.total110 + c.total110 };
     },
     { total140: 0, total110: 0 }
@@ -909,7 +936,7 @@ export default function WasteCostPage() {
                       </thead>
                       <tbody className="divide-y divide-slate-50">
                         {zones.map((z) => {
-                          const calc = z.width_cm > 0 && z.length_cm > 0 ? calcStripsForZone(z.width_cm, z.length_cm) : null;
+                          const calc = z.width_cm > 0 && z.length_cm > 0 ? calcStripsForZone(z.width_cm, z.length_cm, getObstacleReduction(z)) : null;
                           const netArea = z.width_cm > 0 && z.length_cm > 0 ? getZoneNetArea(z) : 0;
                           const rawArea = z.width_cm > 0 && z.length_cm > 0 ? z.width_cm * z.length_cm : 0;
                           const dedArea = rawArea - netArea;
@@ -1160,6 +1187,9 @@ export default function WasteCostPage() {
                                         <p className="text-[10px] text-slate-400 mt-2">
                                           💡 คลิกเซลล์สีเทาเพื่อทำเครื่องหมายพื้นที่ไม่ปู (เสา / ผนัง) — เซลล์สีส้ม = ตัดออก
                                         </p>
+                                        <p className="text-[10px] text-slate-400 mt-1">
+                                          📏 ถ้าขีดไม่ปูเต็มแถวหรือเต็มคอลัมน์ ระบบจะลดจำนวน cm ที่ควรเบิก (140/110) ให้อัตโนมัติตามแนวที่ตัดจริง
+                                        </p>
                                       </div>
                                     );
                                   })()}
@@ -1199,8 +1229,9 @@ export default function WasteCostPage() {
                 const suggestions = zones
                   .filter((z) => z.width_cm > 0 && z.length_cm > 0)
                   .map((z) => {
-                    const calc = calcStripsForZone(z.width_cm, z.length_cm);
-                    const stripLen = getStripLen(z.width_cm, z.length_cm);
+                    const reduction = getObstacleReduction(z);
+                    const calc = calcStripsForZone(z.width_cm, z.length_cm, reduction);
+                    const stripLen = getStripLen(z.width_cm, z.length_cm, reduction);
                     const matches140 = calc.n140 > 0
                       ? availableRemnants.filter((r) => r.width_bin >= 140 && r.length_cm >= stripLen)
                       : [];
