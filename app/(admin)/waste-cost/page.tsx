@@ -1226,7 +1226,7 @@ export default function WasteCostPage() {
 
               {/* ── Remnant suggestions ── */}
               {(() => {
-                const suggestions = zones
+                const zoneInfo = zones
                   .filter((z) => z.width_cm > 0 && z.length_cm > 0)
                   .map((z) => {
                     const reduction = getObstacleReduction(z);
@@ -1238,47 +1238,60 @@ export default function WasteCostPage() {
                     const matches110 = calc.n110 > 0
                       ? availableRemnants.filter((r) => r.width_bin >= 110 && r.length_cm >= stripLen && !matches140.find((x) => x.id === r.id))
                       : [];
-                    return { zone: z, stripLen, matches140, matches110 };
+                    const needed140 = calc.n140 > 0;
+                    const needed110 = calc.n110 > 0;
+                    return { zone: z, stripLen, calc, matches140, matches110, needed140, needed110 };
                   })
-                  .filter((s) => s.matches140.length > 0 || s.matches110.length > 0);
-                if (suggestions.length === 0) return null;
+                  .filter((s) => s.needed140 || s.needed110);
+                if (zoneInfo.length === 0) return null;
                 return (
                   <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
-                    <h2 className="text-sm font-semibold text-teal-800 mb-3">💡 เศษที่ใช้แทนได้</h2>
+                    <h2 className="text-sm font-semibold text-teal-800 mb-1">💡 เศษที่ใช้แทนได้</h2>
+                    <p className="text-[11px] text-teal-700 mb-3">
+                      ระบบเทียบความยาวเศษที่มีในคลัง (หน้า &ldquo;เศษวัสดุ&rdquo;) กับความยาวที่ต้องใช้จริงต่อโซน
+                      ถ้ายาวพอจะขึ้นให้เลือก — กด <strong>จอง</strong> เพื่อล็อกชิ้นนั้นไว้ให้งานนี้ แล้วแจ้งช่างไปหยิบตามหมายเลขที่หน้า &ldquo;เศษวัสดุ&rdquo;
+                    </p>
                     <div className="space-y-3">
-                      {suggestions.map(({ zone: z, stripLen, matches140, matches110 }) => (
-                        <div key={z.id} className="bg-white rounded-lg border border-teal-100 p-3">
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className="text-xs font-semibold text-slate-700">{z.zone_name}</span>
-                            <span className="text-[10px] text-slate-400">ต้องยาว ≥ {stripLen} cm</span>
-                          </div>
-                          {[...matches140.map((r) => ({ r, forWidth: 140 })), ...matches110.map((r) => ({ r, forWidth: 110 }))].map(({ r, forWidth }) => (
-                            <div key={r.id} className="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
-                              <div className="flex items-center gap-2">
-                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700">{r.width_bin}cm</span>
-                                <span className="text-xs font-mono text-slate-700">{r.length_cm} cm</span>
-                                <span className="text-[10px] text-slate-400">{r.mat_type}</span>
-                                <span className="text-[10px] text-teal-600">→ แทน {forWidth}cm strip</span>
-                              </div>
-                              <button
-                                disabled={reservingRemnant === r.id}
-                                onClick={async () => {
-                                  setReservingRemnant(r.id);
-                                  const { error } = await supabase.from("remnant_stock")
-                                    .update({ status: "reserved", reserved_for: selectedJobNo })
-                                    .eq("id", r.id);
-                                  if (error) toast.error(error.message);
-                                  else { toast.success("จองเศษสำหรับงานนี้แล้ว"); fetchRemnants(); }
-                                  setReservingRemnant(null);
-                                }}
-                                className="px-3 py-1 rounded-lg text-xs font-medium bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50"
-                              >
-                                {reservingRemnant === r.id ? "..." : "จอง"}
-                              </button>
+                      {zoneInfo.map(({ zone: z, stripLen, calc, matches140, matches110, needed140, needed110 }) => {
+                        const allMatches = [...matches140.map((r) => ({ r, forWidth: 140 })), ...matches110.map((r) => ({ r, forWidth: 110 }))];
+                        return (
+                          <div key={z.id} className="bg-white rounded-lg border border-teal-100 p-3">
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                              <span className="text-xs font-semibold text-slate-700">{z.zone_name}</span>
+                              <span className="text-[10px] text-slate-400">ต้องการ</span>
+                              {needed140 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">140cm ×{calc.n140} ยาว ≥ {stripLen}cm</span>}
+                              {needed110 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">110cm ×{calc.n110} ยาว ≥ {stripLen}cm</span>}
                             </div>
-                          ))}
-                        </div>
-                      ))}
+                            {allMatches.length === 0 ? (
+                              <p className="text-[11px] text-slate-400 italic">ยังไม่มีเศษในคลังที่ยาวพอสำหรับโซนนี้ — ต้องเบิกแผ่นใหม่ตามปกติ</p>
+                            ) : allMatches.map(({ r, forWidth }) => (
+                              <div key={r.id} className="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700">{r.width_bin}cm</span>
+                                  <span className="text-xs font-mono text-slate-700">{r.length_cm} cm</span>
+                                  <span className="text-[10px] text-slate-400">{r.mat_type}</span>
+                                  <span className="text-[10px] text-teal-600">→ แทน {forWidth}cm strip</span>
+                                </div>
+                                <button
+                                  disabled={reservingRemnant === r.id}
+                                  onClick={async () => {
+                                    setReservingRemnant(r.id);
+                                    const { error } = await supabase.from("remnant_stock")
+                                      .update({ status: "reserved", reserved_for: selectedJobNo })
+                                      .eq("id", r.id);
+                                    if (error) toast.error(error.message);
+                                    else { toast.success("จองเศษสำหรับงานนี้แล้ว — ไปหยิบได้ที่หน้า เศษวัสดุ"); fetchRemnants(); }
+                                    setReservingRemnant(null);
+                                  }}
+                                  className="px-3 py-1 rounded-lg text-xs font-medium bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50"
+                                >
+                                  {reservingRemnant === r.id ? "..." : "จอง"}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 );
