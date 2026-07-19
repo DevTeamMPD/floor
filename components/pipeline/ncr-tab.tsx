@@ -50,14 +50,14 @@ export default function NcrTab({ job }: { job: InstallJob }) {
         .select(
           "id, title, type, status, product_sku, quantity, estimated_value_thb, created_at"
         )
-        .eq("job_no", job.job_no)
+        .eq("job_no", job.jobNo)
         .order("created_at", { ascending: false });
       if (!error && data) setNcrs(data);
       setLoading(false);
     }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job.job_no]);
+  }, [job.jobNo]);
 
   if (loading)
     return (
@@ -71,7 +71,7 @@ export default function NcrTab({ job }: { job: InstallJob }) {
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-gray-800">🔴 NCR — เคลมสินค้า</h3>
         <Link
-          href={`/ncr?job_no=${encodeURIComponent(job.job_no)}`}
+          href={`/ncr?job_no=${encodeURIComponent(job.jobNo)}`}
           className="text-xs bg-red-600 text-white px-3 py-1.5 rounded-lg hover:bg-red-700 transition-colors font-medium"
         >
           + สร้าง NCR
@@ -83,7 +83,7 @@ export default function NcrTab({ job }: { job: InstallJob }) {
           <p className="text-3xl mb-2">📋</p>
           <p className="text-sm">ไม่มีรายการ NCR สำหรับงานนี้</p>
           <Link
-            href={`/ncr?job_no=${encodeURIComponent(job.job_no)}`}
+            href={`/ncr?job_no=${encodeURIComponent(job.jobNo)}`}
             className="mt-3 inline-block text-sm text-blue-600 hover:underline"
           >
             สร้าง NCR แรก →

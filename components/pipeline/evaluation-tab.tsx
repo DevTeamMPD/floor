@@ -47,7 +47,7 @@ export default function EvaluationTab({ job }: { job: InstallJob }) {
         supabase
           .from("job_evaluations")
           .select("*")
-          .eq("job_no", job.job_no)
+          .eq("job_no", job.jobNo)
           .maybeSingle(),
       ]);
       if (qs) setQuestions(qs);
@@ -64,13 +64,13 @@ export default function EvaluationTab({ job }: { job: InstallJob }) {
     }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job.job_no]);
+  }, [job.jobNo]);
 
   async function save() {
     setSaving(true);
     try {
       const payload = {
-        job_no: job.job_no,
+        job_no: job.jobNo,
         cs_name: csName,
         call_date: callDate || null,
         satisfaction_score: score,
