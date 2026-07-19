@@ -26,16 +26,16 @@ export interface CallLog {
 }
 
 /**
- * InstallJob — mirrors install_jobs table.
+ * InstallJob -- mirrors install_jobs table.
  *
- * NOTE: The DB primary key is `job_no` (text). There is NO `id` column.
+ * NOTE: The DB primary key is `job_no` (text). There is NO `id` column in the DB.
  * `id` here is set equal to `job_no` in mapRow() so React keys work correctly.
  * Always use `jobNo` (not `id`) when querying Supabase: .eq("job_no", job.jobNo)
  */
 export interface InstallJob {
-  /** Same as jobNo — set by mapRow() for React key compatibility. */
+  /** Same as jobNo -- set by mapRow() for React key compatibility. */
   id: string;
-  jobNo: string; // DB primary key — always present
+  jobNo: string;
   ticket?: string;
   order?: string;
   bill?: string;
@@ -51,6 +51,7 @@ export interface InstallJob {
   shift?: string;
   assignees?: string[];
   callLogs?: CallLog[];
+  callAttempts?: number;
   docs?: string[];
   confirmations?: string[];
   sitePhotos?: string[];
