@@ -3,8 +3,6 @@ import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 
-export const metadata = { title: "จัดการคำถามประเมิน — MPD Workspace" };
-
 interface EvalQuestion {
   id: string;
   question_text: string;
@@ -189,7 +187,7 @@ export default function EvaluationConfigPage() {
       </div>
 
       <p className="text-xs text-gray-400 text-center">
-        คำถามที่ปิดจะไม่ปรากฏในแบบประเมิน แต่ข้อมูลเก่าจะยังคงอยู่
+        คำถามที่ปิดจะไม่ปรากฏในแบบประเมิน แต่ข้อมูลเก่ายังคงอยู่
       </p>
     </div>
   );
