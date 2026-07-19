@@ -171,6 +171,7 @@ const FILTER_TABS = [
   { key: "pending",  label: "🔴 รอโทร" },
   { key: "done",     label: "✅ ประเมินแล้ว" },
   { key: "followup", label: "⚡ ต้องติดตาม" },
+  { key: "overdue",  label: "🚨 เกินกำหนด" },
 ] as const;
 type FilterKey = typeof FILTER_TABS[number]["key"];
 
@@ -209,12 +210,24 @@ function CsTrackingInner() {
   const done     = rows.filter((r) => !!r.evaluation?.score).length;
   const pending  = total - done;
   const followup = rows.filter((r) => !!r.evaluation?.needs_followup).length;
+  const overdue  = rows.filter((r) => {
+    if (!!r.evaluation?.score) return false;
+    if (!r.closed_at) return false;
+    const days = Math.floor((Date.now() - new Date(r.closed_at).getTime()) / (1000 * 60 * 60 * 24));
+    return days > 3;
+  }).length;
 
   const visible = rows
     .filter((r) => {
-      if (filter === "pending")  return !r.evaluation?.score;
-      if (filter === "done")     return !!r.evaluation?.score;
+      const isEvaluated = !!r.evaluation?.score;
+      if (filter === "pending")  return !isEvaluated;
+      if (filter === "done")     return isEvaluated;
       if (filter === "followup") return !!r.evaluation?.needs_followup;
+      if (filter === "overdue") {
+        if (isEvaluated || !r.closed_at) return false;
+        const days = Math.floor((Date.now() - new Date(r.closed_at).getTime()) / (1000 * 60 * 60 * 24));
+        return days > 3;
+      }
       return true;
     })
     .filter((r) => {
@@ -245,12 +258,13 @@ function CsTrackingInner() {
             placeholder="ค้นหา เลขงาน / ลูกค้า / สินค้า..."
             className="border rounded-xl px-4 py-2 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-blue-400" />
         </div>
-        <div className="grid grid-cols-4 gap-3 mt-4">
+        <div className="grid grid-cols-5 gap-3 mt-4">
           {[
             { label: "งานเสร็จสิ้นทั้งหมด", value: total,    color: "text-gray-700",   bg: "bg-gray-100" },
             { label: "รอโทรประเมิน",          value: pending,  color: "text-red-600",   bg: "bg-red-50"   },
             { label: "ประเมินแล้ว",           value: done,     color: "text-green-600", bg: "bg-green-50" },
             { label: "ต้องติดตามผล",          value: followup, color: "text-amber-600", bg: "bg-amber-50"  },
+            { label: "เกิน 3 วัน",              value: overdue,  color: "text-red-700",   bg: "bg-red-100"  },
           ].map((s) => (
             <div key={s.label} className={`rounded-xl px-4 py-3 ${s.bg}`}>
               <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
@@ -296,8 +310,11 @@ function CsTrackingInner() {
               {visible.map((row) => {
                 const ev = row.evaluation;
                 const evaluated = !!ev?.score;
+                const daysOverdue = (!evaluated && row.closed_at)
+                  ? Math.floor((Date.now() - new Date(row.closed_at).getTime()) / (1000 * 60 * 60 * 24))
+                  : 0;
                 return (
-                  <tr key={row.job_no} className="hover:bg-blue-50 transition-colors">
+                  <tr key={row.job_no} className={`hover:bg-blue-50 transition-colors ${daysOverdue > 3 ? "bg-red-50/40" : ""}`}>
                     <td className="px-4 py-3 font-medium text-blue-700 whitespace-nowrap">{row.job_no}</td>
                     <td className="px-4 py-3 text-gray-800 max-w-[140px] truncate">{row.customer_name ?? "—"}</td>
                     <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{row.product_name ?? "—"}</td>
@@ -314,6 +331,11 @@ function CsTrackingInner() {
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 whitespace-nowrap">✅ ประเมินแล้ว</span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-600 whitespace-nowrap">🔴 รอโทร</span>
+                        )}
+                        {!evaluated && daysOverdue > 3 && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-600 text-white whitespace-nowrap">
+                            🚨 เกิน {daysOverdue} วัน
+                          </span>
                         )}
                         {ev?.needs_followup && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 whitespace-nowrap">⚡ ติดตาม</span>
