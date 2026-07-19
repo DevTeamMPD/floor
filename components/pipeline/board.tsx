@@ -7,7 +7,7 @@ import JobCard from "./job-card";
 import JobDrawer from "./job-drawer";
 import CreateOrderModal from "./create-order-modal";
 
-// install_jobs PK is job_no (text) — there is NO id column in the DB.
+// install_jobs PK is job_no (text) -- there is NO id column in the DB.
 // id here is set to job_no so React keys and any legacy references still work.
 function mapRow(row: Record<string, unknown>): InstallJob {
   const skus = Array.isArray(row.product_skus)
@@ -30,6 +30,7 @@ function mapRow(row: Record<string, unknown>): InstallJob {
     shift: row.shift != null ? String(row.shift) : undefined,
     assignees: row.assignees as string[],
     callLogs: row.call_logs as InstallJob["callLogs"],
+    callAttempts: Number(row.call_attempts) || 0,
     docs: row.docs as string[],
     confirmations: row.confirmations as string[],
     sitePhotos: row.site_photos as string[],
@@ -105,26 +106,18 @@ export default function PipelineBoard() {
     [filtered]
   );
 
-  // When searching, show flat list instead of kanban so results are visible regardless of stage
   const isSearching = search.trim().length > 0;
 
   return (
     <div className="flex flex-col h-full">
-      {/* Toolbar */}
       <div className="flex flex-col gap-2 mb-4 md:flex-row md:items-center md:gap-3">
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-semibold">Pipeline</h1>
           <div className="ml-auto flex items-center gap-2 md:hidden">
-            <button
-              onClick={fetchJobs}
-              className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm hover:bg-slate-50"
-            >
-              🔄
+            <button onClick={fetchJobs} className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm hover:bg-slate-50">
+              &#x1f504;
             </button>
-            <button
-              onClick={() => setShowCreate(true)}
-              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
-            >
+            <button onClick={() => setShowCreate(true)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
               + สร้างงาน
             </button>
           </div>
@@ -137,10 +130,7 @@ export default function PipelineBoard() {
             className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 w-full"
           />
           {search && (
-            <button
-              onClick={() => setSearch("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
-            >
+            <button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs">
               ✕
             </button>
           )}
@@ -167,16 +157,10 @@ export default function PipelineBoard() {
           ))}
         </div>
         <div className="hidden md:flex ml-auto items-center gap-2">
-          <button
-            onClick={fetchJobs}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm hover:bg-slate-50"
-          >
-            🔄 โหลดใหม่
+          <button onClick={fetchJobs} className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm hover:bg-slate-50">
+            &#x1f504; โหลดใหม่
           </button>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
-          >
+          <button onClick={() => setShowCreate(true)} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
             + สร้างงานใหม่
           </button>
         </div>
@@ -185,7 +169,6 @@ export default function PipelineBoard() {
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-slate-400">⏳ กำลังโหลด...</div>
       ) : isSearching ? (
-        /* ── Search Results: flat list ── */
         <div className="flex-1 overflow-y-auto">
           {filtered.length === 0 ? (
             <div className="text-center text-slate-400 py-16 text-sm">ไม่พบงานที่ตรงกับ "{search}"</div>
@@ -213,7 +196,6 @@ export default function PipelineBoard() {
           )}
         </div>
       ) : (
-        /* ── Kanban Board ── */
         <div
           className="flex gap-3 overflow-x-auto pb-4"
           style={{ display: stageFilter ? "block" : "flex" }}
@@ -221,21 +203,14 @@ export default function PipelineBoard() {
           {columns
             .filter((c) => stageFilter === null || c.stage.id === stageFilter)
             .map((col) => (
-              <div
-                key={col.stage.id}
-                className="flex-shrink-0 w-64"
-              >
+              <div key={col.stage.id} className="flex-shrink-0 w-64">
                 <div className={`flex items-center justify-between px-3 py-2 rounded-t-lg ${col.stage.color}`}>
                   <span className="text-sm font-medium">{col.stage.icon} {col.stage.name}</span>
                   <span className="text-xs font-bold opacity-70">{col.items.length}</span>
                 </div>
                 <div className="bg-slate-50 rounded-b-lg p-2 space-y-2 min-h-[120px]">
                   {col.items.map((job) => (
-                    <JobCard
-                      key={job.jobNo}
-                      job={job}
-                      onClick={() => setSelectedJob(job)}
-                    />
+                    <JobCard key={job.jobNo} job={job} onClick={() => setSelectedJob(job)} />
                   ))}
                   {col.items.length === 0 && (
                     <div className="text-center text-xs text-slate-300 py-6">ไม่มีงาน</div>
@@ -247,17 +222,10 @@ export default function PipelineBoard() {
       )}
 
       {selectedJob && (
-        <JobDrawer
-          job={selectedJob}
-          onClose={() => setSelectedJob(null)}
-          onRefresh={fetchJobs}
-        />
+        <JobDrawer job={selectedJob} onClose={() => setSelectedJob(null)} onRefresh={fetchJobs} />
       )}
       {showCreate && (
-        <CreateOrderModal
-          onClose={() => setShowCreate(false)}
-          onCreated={() => { setShowCreate(false); fetchJobs(); }}
-        />
+        <CreateOrderModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); fetchJobs(); }} />
       )}
     </div>
   );
