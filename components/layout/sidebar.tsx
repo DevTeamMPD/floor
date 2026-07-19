@@ -8,6 +8,7 @@ const NAV = [
   { href: "/jobs",            icon: "💼", label: "งานทั้งหมด" },
   { href: "/queue",           icon: "🕑", label: "คิวงาน" },
   { href: "/service",         icon: "🛠", label: "บริการ" },
+  { href: "/cs-tracking",     icon: "📞", label: "CS ติดตาม" },
   { href: "/inventory",       icon: "📦", label: "คลังวัสดุ" },
   { href: "/waste-cost",      icon: "♻️", label: "ต้นทุนเศษ" },
   { href: "/remnants",        icon: "✂️", label: "เศษวัสดุ" },
