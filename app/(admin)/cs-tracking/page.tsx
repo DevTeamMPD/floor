@@ -4,7 +4,6 @@ import { createClient } from "@/lib/supabase/client";
 import { IP_STAGES } from "@/lib/types";
 import { toast } from "sonner";
 
-/* ── Types ──────────────────────────────────────────────────────── */
 interface Job {
   job_no: string;
   customer_name: string | null;
@@ -38,7 +37,6 @@ interface JobRow extends Job {
   evaluation: Evaluation | null;
 }
 
-/* ── Stage badge ────────────────────────────────────────────────── */
 function StageBadge({ stage }: { stage: number }) {
   const s = IP_STAGES.find((x) => x.id === stage);
   if (!s) return null;
@@ -49,7 +47,6 @@ function StageBadge({ stage }: { stage: number }) {
   );
 }
 
-/* ── Score stars ────────────────────────────────────────────────── */
 function StarScore({ score }: { score: number | null }) {
   if (!score) return <span className="text-gray-300 text-xs">—</span>;
   return (
@@ -61,15 +58,11 @@ function StarScore({ score }: { score: number | null }) {
   );
 }
 
-/* ── Evaluation Modal ────────────────────────────────────────────── */
-function EvalModal({
-  row, questions, onClose, onSaved,
-}: {
+function EvalModal({ row, questions, onClose, onSaved }: {
   row: JobRow; questions: Question[]; onClose: () => void; onSaved: () => void;
 }) {
   const supabase = createClient();
   const ev = row.evaluation;
-
   const [score, setScore]       = useState(ev?.score ?? 0);
   const [csName, setCsName]     = useState(ev?.cs_name ?? "");
   const [callDate, setCallDate] = useState(ev?.call_date ?? "");
@@ -83,13 +76,11 @@ function EvalModal({
     setSaving(true);
     try {
       const payload = {
-        job_no: row.job_no,
-        score,
+        job_no: row.job_no, score,
         cs_name: csName.trim() || null,
         call_date: callDate || null,
         issues_text: issues.trim() || null,
-        needs_followup: followup,
-        answers,
+        needs_followup: followup, answers,
         updated_at: new Date().toISOString(),
       };
       if (ev?.id) {
@@ -100,13 +91,10 @@ function EvalModal({
         if (error) throw error;
       }
       toast.success("บันทึกการประเมินแล้ว");
-      onSaved();
-      onClose();
+      onSaved(); onClose();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }
 
   return (
@@ -115,9 +103,7 @@ function EvalModal({
         <div className="flex items-start justify-between px-6 py-4 border-b">
           <div>
             <h2 className="font-bold text-gray-900">📞 บันทึกการประเมิน</h2>
-            <p className="text-sm text-gray-500 mt-0.5">
-              {row.job_no}{row.customer_name ? ` — ${row.customer_name}` : ""}
-            </p>
+            <p className="text-sm text-gray-500 mt-0.5">{row.job_no}{row.customer_name ? ` — ${row.customer_name}` : ""}</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl ml-4">×</button>
         </div>
@@ -125,7 +111,7 @@ function EvalModal({
           <div>
             <p className="text-sm font-medium text-gray-700 mb-2">คะแนนความพึงพอใจ <span className="text-red-500">*</span></p>
             <div className="flex gap-2 items-center">
-              {[1, 2, 3, 4, 5].map((s) => (
+              {[1,2,3,4,5].map((s) => (
                 <button key={s} onClick={() => setScore(s)}
                   className={`text-3xl transition-transform hover:scale-110 ${s <= score ? "text-yellow-400" : "text-gray-200"}`}>★</button>
               ))}
@@ -159,19 +145,17 @@ function EvalModal({
           )}
           <div>
             <label className="text-sm font-medium text-gray-700">ปัญหาที่พบ / ข้อเสนอแนะ</label>
-            <textarea value={issues} onChange={(e) => setIssues(e.target.value)}
-              rows={3} placeholder="บันทึกปัญหาหรือข้อเสนอแนะ (ถ้ามี)"
+            <textarea value={issues} onChange={(e) => setIssues(e.target.value)} rows={3}
+              placeholder="บันทึกปัญหาหรือข้อเสนอแนะ (ถ้ามี)"
               className="mt-1 w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400" />
           </div>
           <label className="flex items-center gap-3 cursor-pointer select-none">
-            <input type="checkbox" checked={followup} onChange={(e) => setFollowup(e.target.checked)}
-              className="w-4 h-4 rounded text-blue-600" />
+            <input type="checkbox" checked={followup} onChange={(e) => setFollowup(e.target.checked)} className="w-4 h-4 rounded text-blue-600" />
             <span className="text-sm text-gray-700">ต้องติดตามผล (Follow-up)</span>
           </label>
         </div>
         <div className="px-6 py-4 border-t flex gap-3">
-          <button onClick={onClose}
-            className="flex-1 border rounded-xl py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50">ยกเลิก</button>
+          <button onClick={onClose} className="flex-1 border rounded-xl py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50">ยกเลิก</button>
           <button onClick={save} disabled={saving}
             className="flex-1 bg-blue-600 text-white rounded-xl py-2.5 text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
             {saving ? "กำลังบันทึก..." : "💾 บันทึก"}
@@ -182,7 +166,6 @@ function EvalModal({
   );
 }
 
-/* ── Main ────────────────────────────────────────────────────────── */
 const FILTER_TABS = [
   { key: "all",      label: "ทั้งหมด" },
   { key: "pending",  label: "🔴 รอโทร" },
@@ -190,9 +173,6 @@ const FILTER_TABS = [
   { key: "followup", label: "⚡ ต้องติดตาม" },
 ] as const;
 type FilterKey = typeof FILTER_TABS[number]["key"];
-
-// stages that CS must call: ระหว่างติดตั้ง (5) → เสร็จสิ้น (7)
-const CS_STAGES = [5, 6, 7];
 
 function CsTrackingInner() {
   const supabase = createClient();
@@ -208,18 +188,12 @@ function CsTrackingInner() {
       supabase
         .from("install_jobs")
         .select("job_no, customer_name, product_name, external_id, product_skus, closed_at, appt_date, customer_phone, stage")
-        .in("stage", CS_STAGES)
-        .order("appt_date", { ascending: false, nullsFirst: false }),
+        .eq("stage", 7)
+        .order("closed_at", { ascending: false, nullsFirst: false }),
       supabase.from("job_evaluations").select("*"),
-      supabase
-        .from("evaluation_questions")
-        .select("id, question_text, order_index")
-        .eq("is_active", true)
-        .order("order_index"),
+      supabase.from("evaluation_questions").select("id, question_text, order_index").eq("is_active", true).order("order_index"),
     ]);
-
-    if (jobErr) { toast.error(jobErr.message); }
-
+    if (jobErr) toast.error(jobErr.message);
     if (jobs) {
       const evalMap = new Map<string, Evaluation>();
       (evals ?? []).forEach((e: Evaluation) => evalMap.set(e.job_no, e));
@@ -261,27 +235,22 @@ function CsTrackingInner() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
-      {/* Header */}
       <div className="bg-white border-b px-6 py-4 shrink-0">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-xl font-bold text-gray-900">📞 CS ติดตามความพึงพอใจ</h1>
-            <p className="text-xs text-gray-500 mt-0.5">
-              งานสถานะ ✨ระหว่างติดตั้ง, ตรวจสอบ และ เสร็จสิ้น — ทุกรายการต้องมีการโทรประเมิน
-            </p>
+            <p className="text-xs text-gray-500 mt-0.5">งานสถานะ ✅ เสร็จสิ้น — ทุกรายการต้องมีการโทรประเมิน</p>
           </div>
           <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="ค้นหา เลขงาน / ลูกค้า / สินค้า..."
             className="border rounded-xl px-4 py-2 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-blue-400" />
         </div>
-
-        {/* Stats */}
         <div className="grid grid-cols-4 gap-3 mt-4">
           {[
-            { label: "งานทั้งหมด",    value: total,    color: "text-gray-700",   bg: "bg-gray-100"  },
-            { label: "รอโทรประเมิน", value: pending,  color: "text-red-600",  bg: "bg-red-50"    },
-            { label: "ประเมินแล้ว",  value: done,     color: "text-green-600",bg: "bg-green-50"  },
-            { label: "ต้องติดตามผล", value: followup, color: "text-amber-600",bg: "bg-amber-50"  },
+            { label: "งานเสร็จสิ้นทั้งหมด", value: total,    color: "text-gray-700",   bg: "bg-gray-100" },
+            { label: "รอโทรประเมิน",          value: pending,  color: "text-red-600",   bg: "bg-red-50"   },
+            { label: "ประเมินแล้ว",           value: done,     color: "text-green-600", bg: "bg-green-50" },
+            { label: "ต้องติดตามผล",          value: followup, color: "text-amber-600", bg: "bg-amber-50"  },
           ].map((s) => (
             <div key={s.label} className={`rounded-xl px-4 py-3 ${s.bg}`}>
               <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
@@ -289,21 +258,16 @@ function CsTrackingInner() {
             </div>
           ))}
         </div>
-
-        {/* Filter tabs */}
         <div className="flex gap-1 mt-4">
           {FILTER_TABS.map((t) => (
             <button key={t.key} onClick={() => setFilter(t.key)}
               className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
                 filter === t.key ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}>
-              {t.label}
-            </button>
+              }`}>{t.label}</button>
           ))}
         </div>
       </div>
 
-      {/* Table */}
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-gray-400">⏳ กำลังโหลด...</div>
       ) : visible.length === 0 ? (
@@ -313,6 +277,9 @@ function CsTrackingInner() {
             <p className="text-gray-500 font-medium">
               {filter === "pending" ? "ไม่มีงานค้างโทร!" : "ไม่พบรายการ"}
             </p>
+            {filter === "pending" && total === 0 && (
+              <p className="text-xs text-gray-400 mt-2">ยังไม่มีงานที่เลื่อนไปสถานะ “เสร็จสิ้น” ใน Pipeline</p>
+            )}
           </div>
         </div>
       ) : (
@@ -320,7 +287,7 @@ function CsTrackingInner() {
           <table className="w-full text-sm">
             <thead className="bg-white border-b sticky top-0 z-10">
               <tr>
-                {["เลขงาน", "สถานะงาน", "ลูกค้า", "สินค้า", "วันนัด", "เบอร์โทร", "CS", "วันที่โทร", "คะแนน", "สถานะการโทร", ""].map((h) => (
+                {["เลขงาน", "ลูกค้า", "สินค้า", "วันเสร็จงาน", "เบอร์โทร", "CS", "วันที่โทร", "คะแนน", "สถานะ", ""].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -332,7 +299,6 @@ function CsTrackingInner() {
                 return (
                   <tr key={row.job_no} className="hover:bg-blue-50 transition-colors">
                     <td className="px-4 py-3 font-medium text-blue-700 whitespace-nowrap">{row.job_no}</td>
-                    <td className="px-4 py-3"><StageBadge stage={row.stage} /></td>
                     <td className="px-4 py-3 text-gray-800 max-w-[140px] truncate">{row.customer_name ?? "—"}</td>
                     <td className="px-4 py-3 text-gray-600 max-w-[160px] truncate">{row.product_name ?? "—"}</td>
                     <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
@@ -345,18 +311,12 @@ function CsTrackingInner() {
                     <td className="px-4 py-3">
                       <div className="flex flex-col gap-1">
                         {evaluated ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 whitespace-nowrap">
-                            ✅ ประเมินแล้ว
-                          </span>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 whitespace-nowrap">✅ ประเมินแล้ว</span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-600 whitespace-nowrap">
-                            🔴 รอโทร
-                          </span>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-600 whitespace-nowrap">🔴 รอโทร</span>
                         )}
                         {ev?.needs_followup && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 whitespace-nowrap">
-                            ⚡ ติดตาม
-                          </span>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 whitespace-nowrap">⚡ ติดตาม</span>
                         )}
                       </div>
                     </td>
