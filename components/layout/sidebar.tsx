@@ -15,6 +15,7 @@ const NAV = [
   { href: "/purchase-orders", icon: "🛒", label: "ใบสั่งซื้อ" },
   { href: "/appointments",    icon: "📅", label: "นัดหมาย" },
   { href: "/documents",       icon: "📄", label: "เอกสาร" },
+  { href: "/ncr",             icon: "🔴", label: "NCR" },
   { href: "/docs",            icon: "📖", label: "คู่มือ" },
 ];
 
