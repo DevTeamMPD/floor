@@ -5,6 +5,8 @@ import { IP_STAGES } from "@/lib/types";
 import type { InstallJob } from "@/lib/types";
 import { formatDate, ipGenToken } from "@/lib/utils";
 import { toast } from "sonner";
+import EvaluationTab from "@/components/pipeline/evaluation-tab";
+import NcrTab from "@/components/pipeline/ncr-tab";
 
 interface Props {
   job: InstallJob;
@@ -155,7 +157,7 @@ interface QCData {
 export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const supabase = createClient();
   const jobNo = job.jobNo ?? "";
-  const [tab, setTab] = useState<"info" | "stages" | "survey" | "qc" | "photos" | "close">("info");
+  const [tab, setTab] = useState<"info" | "stages" | "survey" | "qc" | "photos" | "close" | "evaluation" | "ncr">("info");
   const [saving, setSaving] = useState(false);
   const [contactErrors, setContactErrors] = useState<string[]>([]);
   const [zoneDimensions, setZoneDimensions] = useState<ZoneDimension[]>([]);
@@ -552,7 +554,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
         {/* Tabs */}
         <div className="flex text-sm border-b overflow-x-auto">
-          {(["info", "stages", "survey", "qc", "photos", "close"] as const).map((t) => (
+          {(["info", "stages", "survey", "qc", "photos", "close", "evaluation", "ncr"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -565,7 +567,9 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                : t === "survey" ? "สำรวจ"
                : t === "qc" ? `QC${preInstallCheckedCount > 0 ? ` ✓${preInstallCheckedCount}` : ""}`
                : t === "photos" ? `รูป${photoPaths.length ? ` (${photoPaths.length})` : ""}`
-               : `ปิดงาน${completionPhotoPaths.length ? ` 📷${completionPhotoPaths.length}` : ""}`}
+               : t === "evaluation" ? "📞 ประเมิน"
+       : t === "ncr" ? "🔴 NCR"
+       : `ปิดงาน${completionPhotoPaths.length ? ` 📷${completionPhotoPaths.length}` : ""}`}
             </button>
           ))}
         </div>
@@ -1370,6 +1374,16 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 </div>
               )}
             </div>
+          )}
+
+          {/* EVALUATION */}
+          {tab === "evaluation" && (
+            <EvaluationTab job={job} />
+          )}
+
+          {/* NCR */}
+          {tab === "ncr" && (
+            <NcrTab job={job} />
           )}
 
         </div>
