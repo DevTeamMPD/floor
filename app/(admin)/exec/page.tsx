@@ -2,26 +2,25 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 /* ---------- types ---------- */
-type Rev = { month: string; orders: number; qty: number; revenue: number };
 type StageN = { id: number; name: string; n: number };
 type NamedJob = { customer: string; product: string; due: string; stage: number };
 type WasteTop = { customer: string; bill: string | null; zoneM2: number; actM2: number | null; pct: number | null };
 type Exec = {
-  revenue: Rev[];
   jobs: { total: number; byStage: StageN[]; bySource: Record<string, number>; byMonth: { month: string; n: number }[]; done: number; active: number; overdue: number };
   upcoming: NamedJob[];
   overdueList: NamedJob[];
   waste: { withZones: number; withData: number; costSetup: boolean; totalWasteCost: number; top: WasteTop[] };
   updatedAt: string;
-  error?: string;
 };
-type Survey = { responses: { scores: (number | null)[]; overall: number | null; customer: string; comment: string }[]; error?: string };
+type SResp = { scores: (number | null)[]; overall: number | null; customer: string; comment: string; bill: string };
+type Survey = { responses: SResp[] };
 
-/* ---------- helpers ---------- */
+/* ---------- constants / helpers ---------- */
+const DIMS = ["บริการ", "คุณภาพงาน", "ความเรียบร้อย", "ตรงเวลา", "ความสุภาพ"];
+const SCORE_COLOR: Record<number, string> = { 5: "#15935E", 4: "#2563EB", 3: "#C2820E", 2: "#E8833A", 1: "#C0392B" };
 const SOURCE_LABEL: Record<string, string> = { sales_txn: "ระบบขาย", manual: "สร้างเอง", shopee: "Shopee", lazada: "Lazada", tiktok: "TikTok", web: "เว็บ" };
-function baht(n: number): string {
-  return "฿" + Math.round(n).toLocaleString("th-TH");
-}
+
+function baht(n: number): string { return "฿" + Math.round(n).toLocaleString("th-TH"); }
 function monthLabel(ym: string): string {
   const [y, m] = ym.split("-");
   const names = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
@@ -32,6 +31,11 @@ function avgColor(v: number): string {
   if (v >= 4) return "#2563EB";
   if (v >= 3) return "#C2820E";
   return "#C0392B";
+}
+function wasteColor(pct: number): string {
+  if (pct > 15) return "#C0392B";
+  if (pct > 0) return "#C2820E";
+  return "#15935E";
 }
 
 export default function ExecPage() {
@@ -54,27 +58,35 @@ export default function ExecPage() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const csat = useMemo(() => {
-    const rs = sv?.responses ?? [];
-    const all = rs.flatMap((r) => r.scores.filter((x): x is number => x !== null));
-    const avg = all.length ? all.reduce((a, b) => a + b, 0) / all.length : 0;
-    const satisfied = all.length ? Math.round((all.filter((s) => s >= 4).length / all.length) * 100) : 0;
-    const low = rs.filter((r) => r.scores.some((s) => s !== null && s <= 2) || (r.overall !== null && r.overall < 3));
-    return { count: rs.length, avg, satisfied, low };
-  }, [sv]);
+  const responses = useMemo(() => sv?.responses ?? [], [sv]);
+  const allScores = useMemo(() => responses.flatMap((r) => r.scores.filter((x): x is number => x !== null)), [responses]);
+  const csatAvg = useMemo(() => (allScores.length ? allScores.reduce((a, b) => a + b, 0) / allScores.length : 0), [allScores]);
+  const satisfied = useMemo(() => (allScores.length ? Math.round((allScores.filter((s) => s >= 4).length / allScores.length) * 100) : 0), [allScores]);
+  const dimAvg = useMemo(
+    () => DIMS.map((_, i) => {
+      const v = responses.map((r) => r.scores[i]).filter((x): x is number => x !== null);
+      return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+    }),
+    [responses]
+  );
+  const dist = useMemo(() => {
+    const d: Record<number, number> = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    allScores.forEach((s) => { d[s]++; });
+    return d;
+  }, [allScores]);
+  const lowList = useMemo(
+    () => responses.filter((r) => r.scores.some((s) => s !== null && s <= 2) || (r.overall !== null && r.overall < 3)),
+    [responses]
+  );
 
-  const revTotal = useMemo(() => (ex?.revenue ?? []).reduce((s, r) => s + r.revenue, 0), [ex]);
-  const maxRev = useMemo(() => Math.max(1, ...(ex?.revenue ?? []).map((r) => r.revenue)), [ex]);
   const maxMonthN = useMemo(() => Math.max(1, ...(ex?.jobs.byMonth ?? []).map((r) => r.n)), [ex]);
   const maxStageN = useMemo(() => Math.max(1, ...(ex?.jobs.byStage ?? []).map((r) => r.n)), [ex]);
 
-  if (loading && !ex) {
-    return <div className="text-slate-400 py-20 text-center">⏳ กำลังโหลด...</div>;
-  }
+  if (loading && !ex) return <div className="text-slate-400 py-20 text-center">⏳ กำลังโหลด...</div>;
 
   const j = ex?.jobs;
   const donePct = j && j.total ? Math.round((j.done / j.total) * 100) : 0;
-  const flagCount = (ex?.jobs.overdue ?? 0) + csat.low.length;
+  const flagCount = (ex?.jobs.overdue ?? 0) + lowList.length;
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -86,18 +98,15 @@ export default function ExecPage() {
             {ex?.updatedAt ? ` · อัปเดต ${new Date(ex.updatedAt).toLocaleString("th-TH", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })}` : ""}
           </p>
         </div>
-        <button onClick={load} className="ml-auto px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">
-          🔄 โหลดใหม่
-        </button>
+        <button onClick={load} className="ml-auto px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">🔄 โหลดใหม่</button>
       </div>
 
-      {/* KPI row */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
-        <Kpi label="รายได้ (จับคู่ยอดขาย)" value={baht(revTotal)} color="#15935E" />
+      {/* KPI row (no revenue) */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
         <Kpi label="งานเข้าทั้งหมด" value={String(j?.total ?? 0)} color="#2563EB" />
         <Kpi label="กำลังดำเนินงาน" value={String(j?.active ?? 0)} color="#C2820E" />
         <Kpi label="เสร็จสิ้น" value={`${j?.done ?? 0} (${donePct}%)`} color="#15935E" />
-        <Kpi label="CSAT เฉลี่ย" value={csat.count ? `${csat.avg.toFixed(2)}/5` : "—"} color={avgColor(csat.avg)} />
+        <Kpi label="CSAT เฉลี่ย" value={responses.length ? `${csatAvg.toFixed(2)}/5` : "—"} color={avgColor(csatAvg)} />
         <Kpi label="ต้องติดตาม" value={String(flagCount)} color={flagCount > 0 ? "#C0392B" : "#15935E"} />
       </div>
 
@@ -116,65 +125,36 @@ export default function ExecPage() {
                 <span className="text-xs text-slate-400 ml-auto">นัด {o.due}</span>
               </div>
             ))}
-            {csat.low.slice(0, 8).map((r, i) => (
+            {lowList.slice(0, 8).map((r, i) => (
               <div key={`c${i}`} className="flex items-center gap-2 text-sm">
                 <span className="tag s-amber shrink-0">คะแนนต่ำ</span>
                 <span className="font-medium text-slate-800">{r.customer || "-"}</span>
                 <span className="text-xs text-slate-500 truncate">{r.comment}</span>
-                {r.overall !== null && (
-                  <span className="text-xs font-bold ml-auto" style={{ color: avgColor(r.overall) }}>{r.overall.toFixed(1)}</span>
-                )}
+                {r.overall !== null && <span className="text-xs font-bold ml-auto" style={{ color: avgColor(r.overall) }}>{r.overall.toFixed(1)}</span>}
               </div>
             ))}
           </div>
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
-        {/* Revenue trend */}
-        <div className="bg-white border border-slate-100 rounded-xl p-4">
-          <div className="flex items-baseline justify-between mb-3">
-            <h2 className="text-sm font-semibold">รายได้รายเดือน</h2>
-            <span className="text-[11px] text-slate-400">เฉพาะงานที่จับคู่รายการขายได้</span>
-          </div>
-          {(ex?.revenue ?? []).length === 0 ? (
-            <p className="text-sm text-slate-400">ไม่มีข้อมูล</p>
-          ) : (
-            <div className="space-y-2">
-              {ex!.revenue.map((r) => (
-                <div key={r.month} className="flex items-center gap-2 text-xs">
-                  <span className="w-14 shrink-0 text-slate-500">{monthLabel(r.month)}</span>
-                  <div className="flex-1 h-5 rounded bg-slate-100 overflow-hidden">
-                    <div className="h-full rounded" style={{ width: `${(r.revenue / maxRev) * 100}%`, background: "#15935E" }} />
-                  </div>
-                  <span className="w-24 shrink-0 text-right font-medium text-slate-700">{baht(r.revenue)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* New jobs by month */}
-        <div className="bg-white border border-slate-100 rounded-xl p-4">
-          <h2 className="text-sm font-semibold mb-3">งานเข้าใหม่รายเดือน</h2>
-          <div className="space-y-2">
-            {(ex?.jobs.byMonth ?? []).map((r) => (
-              <div key={r.month} className="flex items-center gap-2 text-xs">
-                <span className="w-14 shrink-0 text-slate-500">{monthLabel(r.month)}</span>
-                <div className="flex-1 h-5 rounded bg-slate-100 overflow-hidden">
-                  <div className="h-full rounded" style={{ width: `${(r.n / maxMonthN) * 100}%`, background: "#2563EB" }} />
-                </div>
-                <span className="w-10 shrink-0 text-right font-medium text-slate-700">{r.n}</span>
+      {/* New jobs by month + channel */}
+      <div className="bg-white border border-slate-100 rounded-xl p-4 mb-5">
+        <h2 className="text-sm font-semibold mb-3">งานเข้าใหม่รายเดือน</h2>
+        <div className="space-y-2">
+          {(ex?.jobs.byMonth ?? []).map((r) => (
+            <div key={r.month} className="flex items-center gap-2 text-xs">
+              <span className="w-14 shrink-0 text-slate-500">{monthLabel(r.month)}</span>
+              <div className="flex-1 h-5 rounded bg-slate-100 overflow-hidden">
+                <div className="h-full rounded" style={{ width: `${(r.n / maxMonthN) * 100}%`, background: "#2563EB" }} />
               </div>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-slate-100">
-            {Object.entries(ex?.jobs.bySource ?? {}).map(([s, n]) => (
-              <span key={s} className="text-xs text-slate-500">
-                {SOURCE_LABEL[s] || s}: <strong className="text-slate-700">{n}</strong>
-              </span>
-            ))}
-          </div>
+              <span className="w-10 shrink-0 text-right font-medium text-slate-700">{r.n}</span>
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-slate-100">
+          {Object.entries(ex?.jobs.bySource ?? {}).map(([s, n]) => (
+            <span key={s} className="text-xs text-slate-500">{SOURCE_LABEL[s] || s}: <strong className="text-slate-700">{n}</strong></span>
+          ))}
         </div>
       </div>
 
@@ -197,37 +177,104 @@ export default function ExecPage() {
         </div>
       </div>
 
-      {/* Quality + Waste summary */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white border border-slate-100 rounded-xl p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold">คุณภาพ / ความพึงพอใจ</h2>
-            <a href="/dashboard" className="text-xs text-blue-600 hover:underline">รายละเอียด →</a>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <MiniStat label="แบบประเมิน" value={String(csat.count)} />
-            <MiniStat label="เฉลี่ย" value={csat.count ? `${csat.avg.toFixed(2)}` : "—"} color={avgColor(csat.avg)} />
-            <MiniStat label="พึงพอใจ" value={`${csat.satisfied}%`} color="#15935E" />
-          </div>
-          {csat.low.length > 0 && (
-            <p className="text-xs text-amber-700 mt-3">⚠️ มี {csat.low.length} เคสที่ให้คะแนนต่ำ ควรตามแก้</p>
-          )}
+      {/* ===== CSAT detail ===== */}
+      <div className="bg-white border border-slate-100 rounded-xl p-4 mb-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold">⭐ คุณภาพ / ความพึงพอใจลูกค้า</h2>
+          <a href="/dashboard" className="text-xs text-blue-600 hover:underline">รายละเอียดเต็ม →</a>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+          <MiniStat label="แบบประเมิน" value={String(responses.length)} />
+          <MiniStat label="คะแนนเฉลี่ย" value={responses.length ? csatAvg.toFixed(2) : "—"} color={avgColor(csatAvg)} />
+          <MiniStat label="พึงพอใจ (4-5)" value={`${satisfied}%`} color="#15935E" />
+          <MiniStat label="เคสคะแนนต่ำ" value={String(lowList.length)} color={lowList.length ? "#C0392B" : "#15935E"} />
         </div>
 
-        <div className="bg-white border border-slate-100 rounded-xl p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold">ต้นทุนเศษ</h2>
-            <a href="/waste-cost" className="text-xs text-blue-600 hover:underline">รายละเอียด →</a>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* dimension averages */}
+          <div>
+            <div className="text-xs font-medium text-slate-500 mb-2">คะแนนเฉลี่ยรายด้าน</div>
+            <div className="space-y-2">
+              {DIMS.map((d, i) => (
+                <div key={d} className="flex items-center gap-2 text-xs">
+                  <span className="w-24 shrink-0 text-slate-600">{d}</span>
+                  <div className="flex-1 h-3 rounded-full bg-slate-100 overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${(dimAvg[i] / 5) * 100}%`, background: avgColor(dimAvg[i]) }} />
+                  </div>
+                  <span className="w-8 shrink-0 text-right font-bold" style={{ color: avgColor(dimAvg[i]) }}>{dimAvg[i].toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <MiniStat label="มีข้อมูลโซน" value={String(ex?.waste.withZones ?? 0)} />
-            <MiniStat label="มีข้อมูลปิดงาน" value={String(ex?.waste.withData ?? 0)} />
-            <MiniStat label="รวมต้นทุนเศษ" value={ex?.waste.costSetup ? baht(ex.waste.totalWasteCost) : "—"} color={ex?.waste.costSetup ? "#C0392B" : "#94A3B8"} />
+          {/* distribution */}
+          <div>
+            <div className="text-xs font-medium text-slate-500 mb-2">การกระจายคะแนน (ทุกด้าน)</div>
+            <div className="space-y-2">
+              {[5, 4, 3, 2, 1].map((s) => {
+                const n = dist[s];
+                const pct = allScores.length ? (n / allScores.length) * 100 : 0;
+                return (
+                  <div key={s} className="flex items-center gap-2 text-xs">
+                    <span className="w-10 shrink-0 text-slate-600">{s} ดาว</span>
+                    <div className="flex-1 h-3 rounded-full bg-slate-100 overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: SCORE_COLOR[s] }} />
+                    </div>
+                    <span className="w-16 shrink-0 text-right text-slate-500">{n} ({pct.toFixed(0)}%)</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          {!ex?.waste.costSetup && (
-            <p className="text-xs text-slate-400 mt-3">ตั้งราคา unit_cost RS-140/RS-110 ที่คลังวัสดุ เพื่อคำนวณเป็นบาท</p>
-          )}
         </div>
+
+        {/* weakest dimension callout */}
+        {responses.length > 0 && (
+          <div className="mt-4 text-xs text-slate-500 border-t border-slate-100 pt-3">
+            ด้านที่คะแนนต่ำสุด: <strong className="text-slate-700">{DIMS[dimAvg.indexOf(Math.min(...dimAvg))]}</strong>{" "}
+            ({Math.min(...dimAvg).toFixed(2)}) — โฟกัสปรับปรุงจุดนี้ก่อน
+          </div>
+        )}
+      </div>
+
+      {/* ===== Waste detail ===== */}
+      <div className="bg-white border border-slate-100 rounded-xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold">♻️ ต้นทุนเศษ</h2>
+          <a href="/waste-cost" className="text-xs text-blue-600 hover:underline">รายละเอียดเต็ม →</a>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+          <MiniStat label="งานทั้งหมด" value={String(j?.total ?? 0)} color="#2563EB" />
+          <MiniStat label="มีข้อมูลโซน" value={String(ex?.waste.withZones ?? 0)} color="#7C3AED" />
+          <MiniStat label="มีข้อมูลปิดงาน" value={String(ex?.waste.withData ?? 0)} color="#15935E" />
+          <MiniStat label="รวมต้นทุนเศษ" value={ex?.waste.costSetup ? baht(ex.waste.totalWasteCost) : "—"} color={ex?.waste.costSetup ? "#C0392B" : "#94A3B8"} />
+        </div>
+
+        {!ex?.waste.costSetup && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2 text-xs mb-3">
+            💡 ยังไม่ได้ตั้งราคาต้นทุน — ตั้งค่า unit_cost ของ RS-140 / RS-110 ที่หน้า คลังวัสดุ เพื่อคำนวณต้นทุนเศษเป็นบาท
+          </div>
+        )}
+
+        {(ex?.waste.top ?? []).length > 0 ? (
+          <>
+            <div className="text-xs font-medium text-slate-500 mb-2">งานที่ %เศษพื้นที่สูงสุด</div>
+            <div className="space-y-2">
+              {ex!.waste.top.map((r, i) => (
+                <div key={i} className="flex items-center gap-3 text-sm">
+                  <span className="font-medium text-slate-800 truncate max-w-[150px]">{r.customer}</span>
+                  {r.bill && <span className="text-xs text-slate-400 font-mono hidden sm:block">#{r.bill}</span>}
+                  <span className="text-xs text-slate-500 ml-auto hidden sm:block">โซน {r.zoneM2.toFixed(1)} → จริง {r.actM2?.toFixed(1)} m²</span>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full text-white shrink-0" style={{ background: wasteColor(r.pct ?? 0) }}>
+                    {(r.pct ?? 0) > 0 ? "+" : ""}{r.pct?.toFixed(1)}%
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-3">%เศษพื้นที่ = (พื้นที่วัสดุจริง − พื้นที่โซน) ÷ พื้นที่โซน · บวกมาก = เปลืองวัสดุ</p>
+          </>
+        ) : (
+          <p className="text-sm text-slate-400">ยังไม่มีงานที่มีทั้งข้อมูลโซนและข้อมูลปิดงานให้คำนวณ %เศษ</p>
+        )}
       </div>
     </div>
   );
@@ -241,7 +288,6 @@ function Kpi({ label, value, color }: { label: string; value: string; color: str
     </div>
   );
 }
-
 function MiniStat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div>
