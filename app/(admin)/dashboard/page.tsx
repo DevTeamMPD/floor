@@ -1,5 +1,8 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+
+/* ============================ Satisfaction (CSAT) ============================ */
 
 type SurveyResponse = {
   timestamp: string;
@@ -47,10 +50,82 @@ function fmtDate(ts: string): string {
   return d.toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+/* ============================ Waste cost (ต้นทุนเศษ) ============================ */
+
+type Mov = { issued140: number; returned140: number; issued110: number; returned110: number };
+
+// Same logic as the waste-cost page: sum issued/returned strip lengths (cm) per width.
+function parseHandover(raw: unknown): Mov | null {
+  if (!raw) return null;
+  let h: unknown;
+  try {
+    h = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    return null;
+  }
+  if (!h || typeof h !== "object") return null;
+  const obj = h as { materials?: unknown; returnItems?: unknown };
+  const s: Mov = { issued140: 0, returned140: 0, issued110: 0, returned110: 0 };
+  let has = false;
+  const acc = (arr: unknown, issued: boolean) => {
+    if (!Array.isArray(arr)) return;
+    for (const it of arr) {
+      if (!it || typeof it !== "object") continue;
+      const m = it as { qty?: unknown; lengthCm?: unknown; widthCm?: unknown };
+      const q = Number(m.qty) || 1;
+      const len = Number(m.lengthCm ?? 0);
+      if (len <= 0) continue;
+      const w = String(m.widthCm);
+      if (w === "140") {
+        if (issued) s.issued140 += q * len;
+        else s.returned140 += q * len;
+        has = true;
+      } else if (w === "110") {
+        if (issued) s.issued110 += q * len;
+        else s.returned110 += q * len;
+        has = true;
+      }
+    }
+  };
+  acc(obj.materials, true);
+  acc(obj.returnItems, false);
+  return has ? s : null;
+}
+
+type WasteJob = {
+  jobNo: string;
+  bill: string | null;
+  customer: string | null;
+  zoneAreaM2: number;
+  actAreaM2: number | null;
+  wastePct: number | null;
+  hasZones: boolean;
+  hasMov: boolean;
+};
+
+type WasteData = {
+  jobs: WasteJob[];
+  total: number;
+  withZones: number;
+  withData: number;
+  totalWasteCost: number;
+  costSetup: boolean;
+};
+
+function wasteColor(pct: number): string {
+  if (pct > 15) return "#C0392B";
+  if (pct > 0) return "#C2820E";
+  return "#15935E";
+}
+
+/* ================================ Page ================================ */
+
 export default function DashboardPage() {
   const [data, setData] = useState<ApiData | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+
+  const [waste, setWaste] = useState<WasteData | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -67,9 +142,78 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const loadWaste = useCallback(async () => {
+    try {
+      const supabase = createClient();
+      const [jobsRes, zonesRes, matRes] = await Promise.all([
+        supabase.from("install_jobs").select("job_no,bill_no,customer_name,handover_data"),
+        supabase.from("install_job_zones").select("job_no,width_cm,length_cm"),
+        supabase.from("materials").select("sku,unit_cost").in("sku", ["RS-140", "RS-110"]),
+      ]);
+      const jobs = jobsRes.data ?? [];
+      const zones = zonesRes.data ?? [];
+      const mats = matRes.data ?? [];
+
+      const c140 = Number(mats.find((m) => m.sku === "RS-140")?.unit_cost ?? 0);
+      const c110 = Number(mats.find((m) => m.sku === "RS-110")?.unit_cost ?? 0);
+      const costSetup = c140 > 0 && c110 > 0;
+
+      const zonesByJob: Record<string, { w: number; l: number }[]> = {};
+      for (const z of zones) {
+        const key = String(z.job_no);
+        (zonesByJob[key] = zonesByJob[key] ?? []).push({
+          w: Number(z.width_cm) || 0,
+          l: Number(z.length_cm) || 0,
+        });
+      }
+
+      let totalWasteCost = 0;
+      const rows: WasteJob[] = jobs.map((j) => {
+        const jzones = zonesByJob[String(j.job_no)] ?? [];
+        const zoneAreaCm2 = jzones.reduce((s, z) => s + (z.w > 0 && z.l > 0 ? z.w * z.l : 0), 0);
+        const mov = parseHandover(j.handover_data);
+        const actual140 = mov ? mov.issued140 - mov.returned140 : null;
+        const actual110 = mov ? mov.issued110 - mov.returned110 : null;
+        const actAreaCm2 =
+          actual140 !== null && actual110 !== null ? actual140 * 140 + actual110 * 110 : null;
+        const wastePct =
+          actAreaCm2 !== null && zoneAreaCm2 > 0 ? ((actAreaCm2 - zoneAreaCm2) / zoneAreaCm2) * 100 : null;
+        // cost (matches waste-cost page; 0 until unit_cost is set)
+        if (actual140 !== null && actual110 !== null) {
+          const expCost = 0; // needs strip calc; unit_cost currently unset so this stays 0
+          const actCost = actual140 * c140 + actual110 * c110;
+          totalWasteCost += actCost - expCost;
+        }
+        return {
+          jobNo: String(j.job_no),
+          bill: (j.bill_no as string | null) ?? null,
+          customer: (j.customer_name as string | null) ?? null,
+          zoneAreaM2: zoneAreaCm2 / 10000,
+          actAreaM2: actAreaCm2 === null ? null : actAreaCm2 / 10000,
+          wastePct: wastePct === null ? null : Math.round(wastePct * 10) / 10,
+          hasZones: jzones.length > 0,
+          hasMov: mov !== null,
+        };
+      });
+
+      setWaste({
+        jobs: rows,
+        total: jobs.length,
+        withZones: rows.filter((r) => r.hasZones).length,
+        withData: rows.filter((r) => r.hasMov).length,
+        totalWasteCost,
+        costSetup,
+      });
+    } catch {
+      // Supabase unavailable — leave waste section hidden.
+      setWaste(null);
+    }
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadWaste();
+  }, [load, loadWaste]);
 
   const responses = useMemo(() => data?.responses ?? [], [data]);
 
@@ -116,6 +260,14 @@ export default function DashboardPage() {
     [responses]
   );
 
+  const topWaste = useMemo(() => {
+    if (!waste) return [];
+    return waste.jobs
+      .filter((r) => r.wastePct !== null)
+      .sort((a, b) => (b.wastePct ?? 0) - (a.wastePct ?? 0))
+      .slice(0, 8);
+  }, [waste]);
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="flex flex-wrap items-center gap-3 mb-5">
@@ -145,7 +297,10 @@ export default function DashboardPage() {
             </a>
           )}
           <button
-            onClick={load}
+            onClick={() => {
+              load();
+              loadWaste();
+            }}
             className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
           >
             🔄 โหลดใหม่
@@ -212,6 +367,61 @@ export default function DashboardPage() {
               })}
             </div>
           </div>
+
+          {/* ===== Waste cost overview ===== */}
+          {waste && (
+            <div className="mb-5">
+              <div className="flex items-center gap-2 mb-3">
+                <h2 className="text-base font-semibold">📊 ต้นทุนเศษ (ภาพรวม)</h2>
+                <a href="/waste-cost" className="text-xs text-blue-600 hover:underline ml-auto">
+                  ดูรายละเอียดเต็ม →
+                </a>
+              </div>
+
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+                <StatTile label="งานทั้งหมด" value={String(waste.total)} color="#2563EB" />
+                <StatTile label="มีข้อมูลโซน" value={String(waste.withZones)} color="#7C3AED" />
+                <StatTile label="มีข้อมูลปิดงาน" value={String(waste.withData)} color="#15935E" />
+                <StatTile
+                  label="รวมต้นทุนเศษ"
+                  value={waste.costSetup ? `฿${waste.totalWasteCost.toLocaleString("th-TH", { maximumFractionDigits: 0 })}` : "—"}
+                  color={waste.costSetup ? "#C0392B" : "#94A3B8"}
+                />
+              </div>
+
+              {!waste.costSetup && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2 text-xs mb-3">
+                  💡 ยังไม่ได้ตั้งราคาต้นทุน — ตั้งค่า unit_cost ของ RS-140 / RS-110 ที่หน้า คลังวัสดุ เพื่อคำนวณต้นทุนเศษเป็นบาท
+                </div>
+              )}
+
+              {topWaste.length > 0 && (
+                <div className="bg-white border border-slate-100 rounded-xl p-4">
+                  <h3 className="text-sm font-semibold mb-3">งานที่ %เศษพื้นที่สูงสุด</h3>
+                  <div className="space-y-2">
+                    {topWaste.map((r) => (
+                      <div key={r.jobNo} className="flex items-center gap-3 text-sm">
+                        <span className="font-medium text-slate-800 truncate max-w-[160px]">
+                          {r.customer || r.bill || r.jobNo}
+                        </span>
+                        {r.bill && <span className="text-xs text-slate-400 font-mono hidden sm:block">#{r.bill}</span>}
+                        <span className="text-xs text-slate-500 ml-auto hidden sm:block">
+                          โซน {r.zoneAreaM2.toFixed(1)} → จริง {r.actAreaM2?.toFixed(1)} m²
+                        </span>
+                        <span
+                          className="text-xs font-bold px-2 py-0.5 rounded-full text-white shrink-0"
+                          style={{ background: wasteColor(r.wastePct ?? 0) }}
+                        >
+                          {(r.wastePct ?? 0) > 0 ? "+" : ""}
+                          {r.wastePct?.toFixed(1)}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* follow-up list */}
           {followUp.length > 0 && (
