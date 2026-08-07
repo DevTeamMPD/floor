@@ -42,7 +42,7 @@ function parseHandover(raw: unknown): Mov | null {
 
 interface JobRow {
   stage: number | null; order_source: string | null; order_date: string | null; due_date: string | null;
-  customer_name: string | null; product_name: string | null; bill_no: string | null; handover_data: unknown; job_no: string;
+  customer_name: string | null; product_name: string | null; bill_no: string | null; handover_data: unknown; completed_date: string | null; eval_score: number | null; job_no: string;
 }
 interface ZoneRow { job_no: string; width_cm: number | null; length_cm: number | null; }
 
@@ -67,7 +67,7 @@ export async function GET() {
   const overdueList: { customer: string; product: string; due: string; stage: number }[] = [];
   let jobs: JobRow[] = [];
   try {
-    const { data } = await supabase.from("install_jobs").select("job_no,stage,order_source,order_date,due_date,customer_name,product_name,bill_no,handover_data");
+    const { data } = await supabase.from("install_jobs").select("job_no,stage,order_source,order_date,due_date,customer_name,product_name,bill_no,handover_data,completed_date,eval_score");
     jobs = (data ?? []) as JobRow[];
     total = jobs.length;
     for (const jb of jobs) {
@@ -87,6 +87,13 @@ export async function GET() {
   } catch { /* defaults */ }
   const byMonth = Object.keys(byMonthMap).sort().map((m) => ({ month: m, n: byMonthMap[m] }));
   upcoming.sort((a, b) => (a.due < b.due ? -1 : 1));
+  const completedMap: Record<string, number> = {};
+  let evaluated = 0;
+  for (const jb of jobs) {
+    if (jb.completed_date) { const ym = String(jb.completed_date).slice(0, 7); completedMap[ym] = (completedMap[ym] || 0) + 1; }
+    if (jb.eval_score !== null && jb.eval_score !== undefined) evaluated++;
+  }
+  const completedByMonth = Object.keys(completedMap).sort().map((m) => ({ month: m, n: completedMap[m] }));
 
   type WRow = { customer: string; bill: string | null; zoneM2: number; actM2: number | null; pct: number | null };
   let waste: {
@@ -136,5 +143,5 @@ export async function GET() {
     };
   } catch { /* defaults */ }
 
-  return NextResponse.json({ revenue, jobs: { total, byStage, bySource, byMonth, done, active, overdue }, upcoming: upcoming.slice(0, 8), overdueList, waste, updatedAt: new Date().toISOString() });
+  return NextResponse.json({ revenue, jobs: { total, byStage, bySource, byMonth, completedByMonth, done, active, overdue, evaluated }, upcoming: upcoming.slice(0, 8), overdueList, waste, updatedAt: new Date().toISOString() });
 }

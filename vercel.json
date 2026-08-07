@@ -1,3 +1,6 @@
 {
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "crons": [
+    { "path": "/api/sync-evaluations", "schedule": "0 1 * * *" }
+  ]
 }

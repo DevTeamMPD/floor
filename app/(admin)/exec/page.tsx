@@ -7,7 +7,7 @@ type NamedJob = { customer: string; product: string; due: string; stage: number 
 type WasteTop = { customer: string; bill: string | null; zoneM2: number; actM2: number | null; pct: number | null };
 type WasteStats = { count: number; avgPct: number | null; medianPct: number | null; normal: number; heavy: number; abnormal: number };
 type Exec = {
-  jobs: { total: number; byStage: StageN[]; bySource: Record<string, number>; byMonth: { month: string; n: number }[]; done: number; active: number; overdue: number };
+  jobs: { total: number; byStage: StageN[]; bySource: Record<string, number>; byMonth: { month: string; n: number }[]; completedByMonth: { month: string; n: number }[]; done: number; active: number; overdue: number; evaluated: number };
   upcoming: NamedJob[];
   overdueList: NamedJob[];
   waste: { withZones: number; withData: number; costSetup: boolean; totalWasteCost: number; top: WasteTop[]; stats: WasteStats };
@@ -150,6 +150,9 @@ export default function ExecPage() {
   }, [responses]);
 
   const maxStageN = useMemo(() => Math.max(1, ...(ex?.jobs.byStage ?? []).map((r) => r.n)), [ex]);
+  const cbm = ex?.jobs.completedByMonth ?? [];
+  const maxCbm = Math.max(1, ...cbm.map((r) => r.n));
+  const evaluated = ex?.jobs.evaluated ?? 0;
 
   if (loading && !ex) return <div className="text-slate-400 py-20 text-center">⏳ กำลังโหลด...</div>;
 
@@ -264,6 +267,11 @@ export default function ExecPage() {
         </div>
       </Card>
 
+      <Card mb>
+        <H title="งานติดตั้งเสร็จรายเดือน" right={<span className="text-[11px] text-slate-400">อิงวันเสร็จงาน (completed_date)</span>} />
+        {cbm.length ? <VBars bars={cbm.map((r) => ({ label: monthLabel(r.month), value: r.n }))} max={maxCbm} /> : <p className="text-sm text-slate-400">ยังไม่มีข้อมูลวันเสร็จงาน</p>}
+        <p className="text-[11px] text-slate-400 mt-2">มี {evaluated} งานถูกทำเครื่องหมาย “ประเมินแล้ว” ในระบบ (จากการ sync แบบประเมินเข้ากับเลขออเดอร์)</p>
+      </Card>
       <SectionTitle>ความพึงพอใจลูกค้า</SectionTitle>
       <Card>
         <H title="⭐ ภาพรวม CSAT" right={<a href="/dashboard" className="text-xs text-blue-600 hover:underline">รายละเอียดเต็ม →</a>} />
