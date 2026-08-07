@@ -1,0 +1,182 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+export const dynamic = "force-dynamic";
+
+const STAGES: { id: number; name: string }[] = [
+  { id: 1, name: "รับออเดอร์" },
+  { id: 2, name: "ติดต่อลูกค้า" },
+  { id: 3, name: "ยืนยันนัดหมาย" },
+  { id: 4, name: "เตรียมงาน" },
+  { id: 5, name: "ระหว่างติดตั้ง" },
+  { id: 6, name: "ตรวจสอบงาน" },
+  { id: 7, name: "เสร็จสิ้น" },
+];
+
+type Mov = { i140: number; r140: number; i110: number; r110: number };
+function parseHandover(raw: unknown): Mov | null {
+  if (!raw) return null;
+  let h: unknown;
+  try {
+    h = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    return null;
+  }
+  if (!h || typeof h !== "object") return null;
+  const obj = h as { materials?: unknown; returnItems?: unknown };
+  const s: Mov = { i140: 0, r140: 0, i110: 0, r110: 0 };
+  let has = false;
+  const acc = (arr: unknown, issued: boolean) => {
+    if (!Array.isArray(arr)) return;
+    for (const it of arr) {
+      if (!it || typeof it !== "object") continue;
+      const m = it as { qty?: unknown; lengthCm?: unknown; widthCm?: unknown };
+      const q = Number(m.qty) || 1;
+      const len = Number(m.lengthCm ?? 0);
+      if (len <= 0) continue;
+      const w = String(m.widthCm);
+      if (w === "140") { if (issued) s.i140 += q * len; else s.r140 += q * len; has = true; }
+      else if (w === "110") { if (issued) s.i110 += q * len; else s.r110 += q * len; has = true; }
+    }
+  };
+  acc(obj.materials, true);
+  acc(obj.returnItems, false);
+  return has ? s : null;
+}
+
+interface JobRow {
+  stage: number | null;
+  order_source: string | null;
+  order_date: string | null;
+  due_date: string | null;
+  customer_name: string | null;
+  product_name: string | null;
+  bill_no: string | null;
+  handover_data: unknown;
+  job_no: string;
+}
+interface ZoneRow { job_no: string; width_cm: number | null; length_cm: number | null; }
+
+export async function GET() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) {
+    return NextResponse.json({ error: "Supabase env missing" }, { status: 500 });
+  }
+  const supabase = createClient(url, key);
+  const today = new Date().toISOString().slice(0, 10);
+
+  // ── Revenue (monthly) ──
+  let revenue: { month: string; orders: number; qty: number; revenue: number }[] = [];
+  try {
+    const { data } = await supabase.from("v_floor_install_kpis").select("month,orders,qty,revenue");
+    revenue = (data ?? [])
+      .map((r) => ({
+        month: String(r.month).slice(0, 7),
+        orders: Number(r.orders) || 0,
+        qty: Number(r.qty) || 0,
+        revenue: Number(r.revenue) || 0,
+      }))
+      .sort((a, b) => (a.month < b.month ? -1 : 1));
+  } catch {
+    revenue = [];
+  }
+
+  // ── Jobs ──
+  const byStage = STAGES.map((s) => ({ ...s, n: 0 }));
+  const bySource: Record<string, number> = {};
+  const byMonthMap: Record<string, number> = {};
+  let total = 0, done = 0, active = 0, overdue = 0;
+  const upcoming: { customer: string; product: string; due: string; stage: number }[] = [];
+  const overdueList: { customer: string; product: string; due: string; stage: number }[] = [];
+  let jobs: JobRow[] = [];
+  try {
+    const { data } = await supabase
+      .from("install_jobs")
+      .select("job_no,stage,order_source,order_date,due_date,customer_name,product_name,bill_no,handover_data");
+    jobs = (data ?? []) as JobRow[];
+    total = jobs.length;
+    for (const j of jobs) {
+      const st = Number(j.stage) || 1;
+      const row = byStage.find((x) => x.id === st);
+      if (row) row.n++;
+      const src = j.order_source || "อื่นๆ";
+      bySource[src] = (bySource[src] || 0) + 1;
+      if (j.order_date) {
+        const ym = String(j.order_date).slice(0, 7);
+        byMonthMap[ym] = (byMonthMap[ym] || 0) + 1;
+      }
+      if (st === 7) done++;
+      else {
+        active++;
+        if (j.due_date && String(j.due_date) < today) {
+          overdue++;
+          overdueList.push({ customer: j.customer_name || "-", product: j.product_name || "", due: String(j.due_date), stage: st });
+        } else if (j.due_date && String(j.due_date) >= today) {
+          upcoming.push({ customer: j.customer_name || "-", product: j.product_name || "", due: String(j.due_date), stage: st });
+        }
+      }
+    }
+  } catch {
+    /* leave defaults */
+  }
+  const byMonth = Object.keys(byMonthMap).sort().map((m) => ({ month: m, n: byMonthMap[m] }));
+  upcoming.sort((a, b) => (a.due < b.due ? -1 : 1));
+
+  // ── Waste ──
+  let waste: {
+    withZones: number; withData: number; costSetup: boolean; totalWasteCost: number;
+    top: { customer: string; bill: string | null; zoneM2: number; actM2: number | null; pct: number | null }[];
+  } = { withZones: 0, withData: 0, costSetup: false, totalWasteCost: 0, top: [] };
+  try {
+    const [{ data: zones }, { data: mats }] = await Promise.all([
+      supabase.from("install_job_zones").select("job_no,width_cm,length_cm"),
+      supabase.from("materials").select("sku,unit_cost").in("sku", ["RS-140", "RS-110"]),
+    ]);
+    const c140 = Number((mats ?? []).find((m) => m.sku === "RS-140")?.unit_cost ?? 0);
+    const c110 = Number((mats ?? []).find((m) => m.sku === "RS-110")?.unit_cost ?? 0);
+    const zByJob: Record<string, ZoneRow[]> = {};
+    for (const z of (zones ?? []) as ZoneRow[]) {
+      (zByJob[String(z.job_no)] = zByJob[String(z.job_no)] ?? []).push(z);
+    }
+    let withZones = 0, withData = 0, totalWasteCost = 0;
+    const rows: { customer: string; bill: string | null; zoneM2: number; actM2: number | null; pct: number | null }[] = [];
+    for (const j of jobs) {
+      const jz = zByJob[String(j.job_no)] ?? [];
+      if (jz.length > 0) withZones++;
+      const zoneCm2 = jz.reduce((s, z) => {
+        const w = Number(z.width_cm) || 0, l = Number(z.length_cm) || 0;
+        return s + (w > 0 && l > 0 ? w * l : 0);
+      }, 0);
+      const mov = parseHandover(j.handover_data);
+      if (mov) withData++;
+      const a140 = mov ? mov.i140 - mov.r140 : null;
+      const a110 = mov ? mov.i110 - mov.r110 : null;
+      const actCm2 = a140 !== null && a110 !== null ? a140 * 140 + a110 * 110 : null;
+      if (a140 !== null && a110 !== null) totalWasteCost += a140 * c140 + a110 * c110;
+      const pct = actCm2 !== null && zoneCm2 > 0 ? ((actCm2 - zoneCm2) / zoneCm2) * 100 : null;
+      if (pct !== null) {
+        rows.push({
+          customer: j.customer_name || j.bill_no || j.job_no,
+          bill: j.bill_no,
+          zoneM2: Math.round((zoneCm2 / 10000) * 10) / 10,
+          actM2: actCm2 === null ? null : Math.round((actCm2 / 10000) * 10) / 10,
+          pct: Math.round(pct * 10) / 10,
+        });
+      }
+    }
+    rows.sort((a, b) => (b.pct ?? 0) - (a.pct ?? 0));
+    waste = { withZones, withData, costSetup: c140 > 0 && c110 > 0, totalWasteCost, top: rows.slice(0, 6) };
+  } catch {
+    /* leave defaults */
+  }
+
+  return NextResponse.json({
+    revenue,
+    jobs: { total, byStage, bySource, byMonth, done, active, overdue },
+    upcoming: upcoming.slice(0, 8),
+    overdueList,
+    waste,
+    updatedAt: new Date().toISOString(),
+  });
+}
