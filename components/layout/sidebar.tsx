@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV = [
+  { href: "/exec",            icon: "📈", label: "ภาพรวมผู้บริหาร" },
   { href: "/dashboard",       icon: "⭐", label: "แดชบอร์ดความพึงพอใจ" },
   { href: "/pipeline",        icon: "📌", label: "Pipeline" },
   { href: "/jobs",            icon: "💼", label: "งานทั้งหมด" },
@@ -21,9 +22,9 @@ const NAV = [
 
 // 5 most-used items for mobile bottom nav
 const BOTTOM_NAV = [
+  { href: "/exec",         icon: "📈", label: "ภาพรวม" },
   { href: "/pipeline",     icon: "📌", label: "Pipeline" },
   { href: "/queue",        icon: "🕑", label: "คิวงาน" },
-  { href: "/appointments", icon: "📅", label: "นัดหมาย" },
   { href: "/documents",    icon: "📄", label: "เอกสาร" },
 ];
 
