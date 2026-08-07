@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV = [
+  { href: "/dashboard",       icon: "📊", label: "แดชบอร์ดบ้านบอล" },
   { href: "/pipeline",        icon: "📌", label: "Pipeline" },
   { href: "/jobs",            icon: "💼", label: "งานทั้งหมด" },
   { href: "/queue",           icon: "🕑", label: "คิวงาน" },
