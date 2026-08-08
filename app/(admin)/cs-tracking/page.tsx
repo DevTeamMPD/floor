@@ -76,7 +76,7 @@ function EvalModal({ row, questions, onClose, onSaved }: {
     setSaving(true);
     try {
       const payload = {
-        job_no: row.job_no, score,
+        job_no: row.job_no, satisfaction_score: score,
         cs_name: csName.trim() || null,
         call_date: callDate || null,
         issues_text: issues.trim() || null,
@@ -191,7 +191,7 @@ function CsTrackingInner() {
         .select("job_no, customer_name, product_name, external_id, product_skus, closed_at, appt_date, customer_phone, stage")
         .eq("stage", 7)
         .order("closed_at", { ascending: false, nullsFirst: false }),
-      supabase.from("job_evaluations").select("*"),
+      supabase.from("job_evaluations").select("*, score:satisfaction_score"),
       supabase.from("evaluation_questions").select("id, question_text, order_index").eq("is_active", true).order("order_index"),
     ]);
     if (jobErr) toast.error(jobErr.message);
