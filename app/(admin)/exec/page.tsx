@@ -8,6 +8,8 @@ type WasteTop = { customer: string; bill: string | null; zoneM2: number; actM2: 
 type WasteStats = { count: number; avgPct: number | null; medianPct: number | null; normal: number; heavy: number; abnormal: number };
 type Exec = {
   jobs: { total: number; byStage: StageN[]; bySource: Record<string, number>; byMonth: { month: string; n: number }[]; completedByMonth: { month: string; n: number }[]; done: number; active: number; overdue: number; evaluated: number };
+  leadTime: { n: number; avgDays: number | null; medianDays: number | null; p90Days: number | null };
+  pipeline: { aging: { id: number; name: string; n: number; avgDays: number; maxDays: number }[]; stuck: { customer: string; product: string; stage: number; stageName: string; days: number }[] };
   upcoming: NamedJob[];
   overdueList: NamedJob[];
   waste: { withZones: number; withData: number; costSetup: boolean; totalWasteCost: number; top: WasteTop[]; stats: WasteStats };
@@ -22,6 +24,7 @@ const DIMS = ["บริการ", "คุณภาพงาน", "ความ
 const SOURCE_LABEL: Record<string, string> = { sales_txn: "ระบบขาย", manual: "สร้างเอง", shopee: "Shopee", lazada: "Lazada", tiktok: "TikTok", web: "เว็บ" };
 const SOURCE_COLOR: Record<string, string> = { sales_txn: C.blue, manual: C.amber, shopee: C.orange, lazada: C.purple, tiktok: C.red, web: C.green };
 const TARGET_CSAT = 4.5, TARGET_SATISFIED = 90, TARGET_DONE = 80;
+const TARGET_LEAD_DAYS = 60; // เป้า: รับออเดอร์ -> ปิดงาน ภายในกี่วัน (ปรับได้)
 
 const THEMES: { key: string; re: RegExp }[] = [
   { key: "กลิ่นกาว / กลิ่นแผ่น", re: /กลิ่น/ },
@@ -250,6 +253,22 @@ export default function ExecPage() {
       </Card>
 
       <SectionTitle>งานติดตั้ง</SectionTitle>
+      <Card mb>
+        <H title="⏱️ Lead time: รับออเดอร์ → ปิดงาน" right={<span className="text-[11px] text-slate-400">จาก {ex?.leadTime?.n ?? 0}/{j?.total ?? 0} งานที่มีวันปิดงาน</span>} />
+        {ex?.leadTime && ex.leadTime.n > 0 ? (
+          <>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <div className="text-2xl font-bold" style={{ color: (ex.leadTime.medianDays ?? 0) <= TARGET_LEAD_DAYS ? C.green : C.red }}>{ex.leadTime.medianDays} วัน</div>
+                <div className="text-[11px] text-slate-500">มัธยฐาน (เป้า ≤ {TARGET_LEAD_DAYS} วัน) {(ex.leadTime.medianDays ?? 0) <= TARGET_LEAD_DAYS ? "✓" : ""}</div>
+              </div>
+              <div><div className="text-2xl font-bold text-slate-700">{ex.leadTime.avgDays} วัน</div><div className="text-[11px] text-slate-500">เฉลี่ย</div></div>
+              <div><div className="text-2xl font-bold" style={{ color: C.amber }}>{ex.leadTime.p90Days} วัน</div><div className="text-[11px] text-slate-500">ช้าสุด 10% (p90)</div></div>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-3">นับจากวันรับออเดอร์ถึงวันปิดงาน · ยิ่งน้อยยิ่งดี</p>
+          </>
+        ) : <p className="text-sm text-slate-400">ยังไม่มีงานที่มีทั้งวันรับออเดอร์และวันปิดงานให้คำนวณ</p>}
+      </Card>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         <Card><H title="งานเข้าใหม่รายเดือน" />{bm.length ? <VBars bars={bm.map((r) => ({ label: monthLabel(r.month), value: r.n }))} max={maxMonthN} /> : <p className="text-sm text-slate-400">ไม่มีข้อมูล</p>}</Card>
         <Card><H title="ช่องทางที่มา" />{channelSegs.length ? <Donut segments={channelSegs} /> : <p className="text-sm text-slate-400">ไม่มีข้อมูล</p>}</Card>
@@ -265,12 +284,27 @@ export default function ExecPage() {
             </div>
           ))}
         </div>
+        {(ex?.pipeline?.stuck?.length ?? 0) > 0 && (
+          <div className="mt-3 rounded-lg bg-red-50 border border-red-100 p-3">
+            <div className="text-xs font-semibold text-red-700 mb-1.5">🐢 คอขวด — {ex!.pipeline.stuck.length} งานค้าง &gt; 30 วัน (ไม่ขยับสถานะ)</div>
+            <div className="space-y-1">
+              {ex!.pipeline.stuck.map((s, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  <span className="tag s-red shrink-0">{s.stage}. {s.stageName}</span>
+                  <span className="font-medium text-slate-800 truncate">{s.customer}</span>
+                  <span className="ml-auto font-bold text-red-600">{s.days} วัน</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-400 mt-2">นับจากวันที่อัปเดตสถานะล่าสุด (updated_at)</p>
+          </div>
+        )}
       </Card>
 
       <Card mb>
         <H title="งานติดตั้งเสร็จรายเดือน" right={<span className="text-[11px] text-slate-400">อิงวันเสร็จงาน (completed_date)</span>} />
         {cbm.length ? <VBars bars={cbm.map((r) => ({ label: monthLabel(r.month), value: r.n }))} max={maxCbm} /> : <p className="text-sm text-slate-400">ยังไม่มีข้อมูลวันเสร็จงาน</p>}
-        <p className="text-[11px] text-slate-400 mt-2">มี {evaluated} งานถูกทำเครื่องหมาย “ประเมินแล้ว” ในระบบ (จากการ sync แบบประเมินเข้ากับเลขออเดอร์)</p>
+        <p className="text-[11px] text-slate-400 mt-2">ประเมินแล้ว {evaluated}/{j?.done ?? 0} งานเสร็จ ({j?.done ? Math.round((evaluated / j.done) * 100) : 0}%) · sync แบบประเมินเข้ากับเลขออเดอร์อัตโนมัติ</p>
       </Card>
       <SectionTitle>ความพึงพอใจลูกค้า</SectionTitle>
       <Card>
@@ -377,7 +411,7 @@ export default function ExecPage() {
         {wasteAnalysis.length > 0 && <AnalysisBox title="บทวิเคราะห์ต้นทุนเศษ" lines={wasteAnalysis} accent={C.amber} />}
       </Card>
 
-      <div className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg px-3 py-2">ความครบของข้อมูล: มีข้อมูลปิดงาน {ex?.waste.withData ?? 0}/{j?.total ?? 0} งาน ({closingPct}%) · มีข้อมูลโซน {ex?.waste.withZones ?? 0}/{j?.total ?? 0} · แบบประเมิน CSAT {responses.length} รายการ — ตัวเลขบางส่วนคำนวณจากงานที่มีข้อมูลครบเท่านั้น</div>
+      <div className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg px-3 py-2">ความครบของข้อมูล: Lead time {ex?.leadTime?.n ?? 0}/{j?.total ?? 0} งาน · มีข้อมูลปิดงาน {ex?.waste.withData ?? 0}/{j?.total ?? 0} งาน ({closingPct}%) · มีข้อมูลโซน {ex?.waste.withZones ?? 0}/{j?.total ?? 0} · แบบประเมิน CSAT {responses.length} รายการ — ตัวเลขบางส่วนคำนวณจากงานที่มีข้อมูลครบเท่านั้น</div>
     </div>
   );
 }
