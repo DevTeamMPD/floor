@@ -102,14 +102,14 @@ function Donut({ segments }: { segments: { label: string; value: number; color: 
     </div>
   );
 }
-function VBars({ bars, max, color = ACCENT }: { bars: { label: string; value: number }[]; max: number; color?: string }) {
+function VBars({ bars, max, color = ACCENT, area = 60 }: { bars: { label: string; value: number }[]; max: number; color?: string; area?: number }) {
   return (
-    <div className="flex items-end gap-2 h-[64px]">
+    <div className="flex items-end gap-2.5">
       {bars.map((b, i) => (
-        <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
-          <span className="text-[9px] font-semibold" style={{ color: SUB, ...NUM }}>{b.value}</span>
-          <div className="w-full rounded-[3px]" style={{ height: `${(b.value / max) * 100}%`, minHeight: 3, background: color }} />
-          <span className="text-[8px]" style={{ color: MUT }}>{b.label}</span>
+        <div key={i} className="flex-1 flex flex-col items-center justify-end">
+          <span className="text-[10px] font-bold mb-1" style={{ color: SUB, ...NUM }}>{b.value}</span>
+          <div className="w-full rounded-t-[3px]" style={{ height: Math.max(4, Math.round((b.value / max) * area)), background: color }} />
+          <span className="text-[8.5px] mt-1.5" style={{ color: MUT }}>{b.label}</span>
         </div>
       ))}
     </div>
@@ -327,14 +327,15 @@ export default function ExecPage() {
 
           {/* col 2 */}
           <div className="flex flex-col gap-3 min-h-0">
-            <Panel title="งานเข้า / เสร็จ รายเดือน">
-              {bm.length ? <VBars bars={bm.map((r) => ({ label: monthLabel(r.month), value: r.n }))} max={maxMonthN} color={ACCENT} /> : <p className="text-xs" style={{ color: MUT }}>ไม่มีข้อมูล</p>}
-              <div className="text-[9.5px] mt-2 mb-1" style={{ color: MUT }}>งานเสร็จรายเดือน</div>
-              {cbm.length ? <VBars bars={cbm.map((r) => ({ label: monthLabel(r.month), value: r.n }))} max={maxCbm} color={ACCENT_L} /> : <p className="text-[10px]" style={{ color: MUT }}>ยังไม่มีวันเสร็จงาน</p>}
+            <Panel title="งานเข้าใหม่รายเดือน">
+              {bm.length ? <VBars bars={bm.map((r) => ({ label: monthLabel(r.month), value: r.n }))} max={maxMonthN} color={ACCENT} area={62} /> : <p className="text-xs" style={{ color: MUT }}>ไม่มีข้อมูล</p>}
+              <div className="text-[9.5px] mt-3 pt-2.5" style={{ color: MUT, borderTop: `1px solid ${HAIR}` }}>งานปิดจบต่อเดือน — {cbm.length ? cbm.map((r) => `${monthLabel(r.month)} ${r.n}`).join("  ·  ") : "—"}</div>
             </Panel>
-            <Panel title="ช่องทางที่มา และ แนวโน้ม CSAT" grow>
+            <Panel title="ช่องทางที่มา">
               {channelSegs.length ? <Donut segments={channelSegs} /> : <p className="text-xs" style={{ color: MUT }}>ไม่มีข้อมูล</p>}
-              <div className="text-[9.5px] mt-2.5" style={{ color: MUT }}>แนวโน้ม CSAT · เส้นประคือเป้า {TARGET_CSAT}</div>
+            </Panel>
+            <Panel title="แนวโน้ม CSAT รายเดือน" grow>
+              <div className="text-[9.5px] mb-1" style={{ color: MUT }}>คะแนนเฉลี่ยต่อเดือน · เส้นประคือเป้า {TARGET_CSAT}</div>
               {csatMonthly.length ? <LineChart points={csatMonthly.map((c) => ({ label: monthLabel(c.month), value: c.avg }))} max={5} target={TARGET_CSAT} /> : <p className="text-[10px]" style={{ color: MUT }}>ไม่มีข้อมูล</p>}
             </Panel>
           </div>
