@@ -18,26 +18,16 @@ type Exec = {
 type SResp = { timestamp: string; scores: (number | null)[]; overall: number | null; customer: string; comment: string; bill: string };
 type Survey = { responses: SResp[] };
 
-/* ---------- palette (dataviz reference) ---------- */
-const C = {
-  blue: "#2a78d6", aqua: "#1baf7a", violet: "#4a3aa7", orange: "#eb6834", magenta: "#e87ba4", yellow: "#eda100",
-  ink: "#0b0b0b", sub: "#52514e", muted: "#898781", line: "#e1e0d9",
-  good: "#0ca30c", warn: "#fab219", serious: "#ec835a", crit: "#d03b3b",
-};
-/* status skin: text / tint bg / border — reserved for good/watch/bad states */
-const ST = {
-  good: { fg: "#0b7a0b", bg: "rgba(12,163,12,0.10)", bd: "rgba(12,163,12,0.38)" },
-  warn: { fg: "#8a5d00", bg: "rgba(250,178,25,0.16)", bd: "rgba(230,150,0,0.48)" },
-  bad: { fg: "#b3312f", bg: "rgba(208,59,59,0.10)", bd: "rgba(208,59,59,0.42)" },
-  neutral: { fg: "#334155", bg: "rgba(100,116,139,0.08)", bd: "rgba(100,116,139,0.28)" },
-} as const;
-type Status = keyof typeof ST;
-
-const DIMS = ["บริการ", "คุณภาพงาน", "ความเรียบร้อย", "ตรงเวลา", "ความสุภาพ"];
+/* ---------- tokens (premium / minimal) ---------- */
+const INK = "#0a0a0a", SUB = "#52525b", MUT = "#a1a1aa", FAINT = "#d4d4d8", HAIR = "#ededed", TRACK = "#f4f4f5";
+const GOOD = "#059669", WARN = "#b45309", BAD = "#be123c", ACCENT = "#4f46e5", ACCENT_L = "#c7d2fe";
+const SHADOW = "0 1px 2px rgba(17,24,39,0.04), 0 6px 16px rgba(17,24,39,0.05)";
+const CHANNEL: Record<string, string> = { sales_txn: ACCENT, manual: "#a1a1aa", shopee: "#ea580c", lazada: "#7c3aed", tiktok: BAD, web: GOOD };
 const SOURCE_LABEL: Record<string, string> = { sales_txn: "ระบบขาย", manual: "สร้างเอง", shopee: "Shopee", lazada: "Lazada", tiktok: "TikTok", web: "เว็บ" };
-const SOURCE_COLOR: Record<string, string> = { sales_txn: C.blue, manual: C.yellow, shopee: C.orange, lazada: C.violet, tiktok: C.crit, web: C.aqua };
+const DIMS = ["บริการ", "คุณภาพงาน", "ความเรียบร้อย", "ตรงเวลา", "ความสุภาพ"];
 const TARGET_CSAT = 4.5, TARGET_SATISFIED = 90, TARGET_DONE = 80;
-const TARGET_LEAD_DAYS = 60; // เป้า: รับออเดอร์ -> ปิดงาน ภายในกี่วัน (ปรับได้)
+const TARGET_LEAD_DAYS = 60;
+const NUM: React.CSSProperties = { fontVariantNumeric: "tabular-nums" };
 
 const THEMES: { key: string; re: RegExp }[] = [
   { key: "กลิ่นกาว / กลิ่นแผ่น", re: /กลิ่น/ },
@@ -55,30 +45,28 @@ function monthLabel(ym: string): string {
   const names = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
   return `${names[Number(m)] || m}${String(Number(y) + 543).slice(-2)}`;
 }
-function avgColor(v: number): string { if (v >= 4.5) return C.good; if (v >= 4) return C.blue; if (v >= 3) return C.warn; return C.crit; }
-function wasteColor(pct: number): string { return pct > 50 ? C.crit : pct > 20 ? C.warn : C.good; }
+function avgColor(v: number): string { if (v >= 4.5) return GOOD; if (v >= 4) return ACCENT; if (v >= 3) return WARN; return BAD; }
+function wasteColor(pct: number): string { return pct > 50 ? BAD : pct > 20 ? WARN : GOOD; }
 function pctDelta(cur: number, prev: number | null): number | null { if (prev === null || prev === 0) return null; return ((cur - prev) / prev) * 100; }
 function isoMonth(ts: string): string | null { const d = new Date(ts); if (isNaN(d.getTime())) return null; return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
 
 /* ---------- SVG charts ---------- */
 function LineChart({ points, max = 5, target }: { points: { label: string; value: number }[]; max?: number; target?: number }) {
-  const W = 340, H = 116, padL = 6, padR = 6, padT = 14, padB = 18;
+  const W = 340, H = 108, padL = 6, padR = 6, padT = 14, padB = 18;
   const n = points.length, iw = W - padL - padR, ih = H - padT - padB;
   const x = (i: number) => (n <= 1 ? padL + iw / 2 : padL + (i / (n - 1)) * iw);
   const y = (v: number) => padT + ih - (Math.max(0, Math.min(max, v)) / max) * ih;
   const line = points.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
-  const area = n > 0 ? `${line} L${x(n - 1).toFixed(1)},${(padT + ih).toFixed(1)} L${x(0).toFixed(1)},${(padT + ih).toFixed(1)} Z` : "";
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="xMidYMid meet" style={{ maxHeight: 112 }}>
-      {[0, 0.5, 1].map((g) => <line key={g} x1={padL} x2={W - padR} y1={padT + ih * g} y2={padT + ih * g} stroke={C.line} strokeWidth="1" />)}
-      {target !== undefined && <line x1={padL} x2={W - padR} y1={y(target)} y2={y(target)} stroke={C.muted} strokeWidth="1" strokeDasharray="3 3" />}
-      {area && <path d={area} fill={C.blue} opacity="0.10" />}
-      <path d={line} fill="none" stroke={C.blue} strokeWidth="2.5" strokeLinejoin="round" />
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="xMidYMid meet" style={{ maxHeight: 104 }}>
+      {[0, 0.5, 1].map((g) => <line key={g} x1={padL} x2={W - padR} y1={padT + ih * g} y2={padT + ih * g} stroke={TRACK} strokeWidth="1" />)}
+      {target !== undefined && <line x1={padL} x2={W - padR} y1={y(target)} y2={y(target)} stroke={FAINT} strokeWidth="1" strokeDasharray="3 3" />}
+      <path d={line} fill="none" stroke={ACCENT} strokeWidth="1.75" strokeLinejoin="round" />
       {points.map((p, i) => (
         <g key={i}>
-          <circle cx={x(i)} cy={y(p.value)} r="3.2" fill={avgColor(p.value)} />
-          <text x={x(i)} y={y(p.value) - 5} textAnchor="middle" fontSize="9" fontWeight="700" fill={avgColor(p.value)}>{p.value.toFixed(2)}</text>
-          <text x={x(i)} y={H - 5} textAnchor="middle" fontSize="8" fill={C.muted}>{p.label}</text>
+          <circle cx={x(i)} cy={y(p.value)} r="2.6" fill={ACCENT} />
+          <text x={x(i)} y={y(p.value) - 5} textAnchor="middle" fontSize="9" fontWeight="600" fill={SUB} style={NUM}>{p.value.toFixed(2)}</text>
+          <text x={x(i)} y={H - 5} textAnchor="middle" fontSize="8" fill={MUT}>{p.label}</text>
         </g>
       ))}
     </svg>
@@ -86,37 +74,37 @@ function LineChart({ points, max = 5, target }: { points: { label: string; value
 }
 function Donut({ segments }: { segments: { label: string; value: number; color: string }[] }) {
   const total = segments.reduce((s, x) => s + x.value, 0) || 1;
-  const r = 40, cx = 52, cy = 52, sw = 15, Ci = 2 * Math.PI * r;
+  const r = 41, cx = 52, cy = 52, sw = 10, Ci = 2 * Math.PI * r;
   let acc = 0;
   return (
-    <div className="flex items-center gap-3">
-      <svg viewBox="0 0 104 104" width="86" height="86" className="shrink-0">
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke={C.line} strokeWidth={sw} />
-        {segments.map((s, i) => { const len = (s.value / total) * Ci; const el = <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={sw} strokeDasharray={`${len} ${Ci - len}`} strokeDashoffset={-acc} transform={`rotate(-90 ${cx} ${cy})`} strokeLinecap="butt" />; acc += len; return el; })}
-        <text x={cx} y={cy - 1} textAnchor="middle" fontSize="20" fontWeight="800" fill={C.ink}>{total}</text>
-        <text x={cx} y={cy + 13} textAnchor="middle" fontSize="8" fill={C.muted}>งาน</text>
+    <div className="flex items-center gap-4">
+      <svg viewBox="0 0 104 104" width="80" height="80" className="shrink-0">
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke={TRACK} strokeWidth={sw} />
+        {segments.map((s, i) => { const len = (s.value / total) * Ci; const el = <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={sw} strokeDasharray={`${len} ${Ci - len}`} strokeDashoffset={-acc} transform={`rotate(-90 ${cx} ${cy})`} />; acc += len; return el; })}
+        <text x={cx} y={cy - 1} textAnchor="middle" fontSize="20" fontWeight="700" fill={INK} style={NUM}>{total}</text>
+        <text x={cx} y={cy + 12} textAnchor="middle" fontSize="8" fill={MUT}>งาน</text>
       </svg>
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         {segments.map((s, i) => (
-          <div key={i} className="flex items-center gap-1.5 text-[11px]">
-            <span className="w-2.5 h-2.5 rounded-sm" style={{ background: s.color }} />
-            <span style={{ color: C.sub }}>{s.label}</span>
-            <strong style={{ color: C.ink }}>{s.value}</strong>
-            <span style={{ color: C.muted }}>({Math.round((s.value / total) * 100)}%)</span>
+          <div key={i} className="flex items-center gap-2 text-[11px]">
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: s.color }} />
+            <span style={{ color: SUB }}>{s.label}</span>
+            <strong style={{ color: INK, ...NUM }}>{s.value}</strong>
+            <span style={{ color: MUT, ...NUM }}>({Math.round((s.value / total) * 100)}%)</span>
           </div>
         ))}
       </div>
     </div>
   );
 }
-function VBars({ bars, max, color = C.blue }: { bars: { label: string; value: number }[]; max: number; color?: string }) {
+function VBars({ bars, max, color = ACCENT }: { bars: { label: string; value: number }[]; max: number; color?: string }) {
   return (
-    <div className="flex items-end gap-1.5 h-[70px]">
+    <div className="flex items-end gap-2 h-[64px]">
       {bars.map((b, i) => (
-        <div key={i} className="flex-1 flex flex-col items-center justify-end gap-0.5">
-          <span className="text-[9px] font-bold" style={{ color: C.sub }}>{b.value}</span>
-          <div className="w-full rounded-t-[3px]" style={{ height: `${(b.value / max) * 100}%`, minHeight: 2, background: color }} />
-          <span className="text-[8px]" style={{ color: C.muted }}>{b.label}</span>
+        <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
+          <span className="text-[9px] font-medium" style={{ color: SUB, ...NUM }}>{b.value}</span>
+          <div className="w-full rounded-[2px]" style={{ height: `${(b.value / max) * 100}%`, minHeight: 2, background: color }} />
+          <span className="text-[8px]" style={{ color: MUT }}>{b.label}</span>
         </div>
       ))}
     </div>
@@ -141,7 +129,6 @@ export default function ExecPage() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  // fit the 1280x720 (16:9) board to the available area
   const wrapRef = useRef<HTMLDivElement>(null);
   const [boxfit, setBoxfit] = useState({ s: 1, left: 0 });
   useEffect(() => {
@@ -173,13 +160,8 @@ export default function ExecPage() {
   }, [responses]);
   const themeDetail = useMemo(() => {
     const real = responses.filter((r) => r.comment && r.comment !== "-" && r.comment !== "ไม่มี" && r.comment.length > 2);
-    const out: { key: string; n: number; example: string; who: string }[] = [];
-    for (const t of THEMES) {
-      const matches = real.filter((r) => t.re.test(r.comment));
-      if (!matches.length) continue;
-      const worst = [...matches].sort((a, b) => (a.overall ?? 5) - (b.overall ?? 5))[0];
-      out.push({ key: t.key, n: matches.length, example: worst.comment, who: worst.customer || "-" });
-    }
+    const out: { key: string; n: number }[] = [];
+    for (const t of THEMES) { const m = real.filter((r) => t.re.test(r.comment)); if (m.length) out.push({ key: t.key, n: m.length }); }
     return out.sort((a, b) => b.n - a.n);
   }, [responses]);
 
@@ -188,7 +170,7 @@ export default function ExecPage() {
   const maxCbm = Math.max(1, ...cbm.map((r) => r.n));
   const evaluated = ex?.jobs.evaluated ?? 0;
 
-  if (loading && !ex) return <div className="py-20 text-center" style={{ color: C.muted }}>⏳ กำลังโหลด...</div>;
+  if (loading && !ex) return <div className="py-20 text-center" style={{ color: MUT }}>กำลังโหลด…</div>;
 
   const j = ex?.jobs;
   const donePct = j && j.total ? Math.round((j.done / j.total) * 100) : 0;
@@ -219,11 +201,19 @@ export default function ExecPage() {
     parts.push(`งานเสร็จ ${donePct}%`);
     if (leadMed != null) parts.push(`Lead time ${leadMed} วัน`);
     if (flagCount > 0) parts.push(`${flagCount} เคสต้องตาม`);
-    if (themeDetail.length) parts.push(`ปัญหาเด่น: ${themeDetail[0].key} (${themeDetail[0].n})`);
+    if (themeDetail.length) parts.push(`ปัญหาเด่น ${themeDetail[0].key} (${themeDetail[0].n})`);
     return parts.join("   ·   ");
   })();
 
-  const channelSegs = Object.entries(ex?.jobs.bySource ?? {}).map(([s, n]) => ({ label: SOURCE_LABEL[s] || s, value: n, color: SOURCE_COLOR[s] || C.muted }));
+  const channelSegs = Object.entries(ex?.jobs.bySource ?? {}).map(([s, n]) => ({ label: SOURCE_LABEL[s] || s, value: n, color: CHANNEL[s] || MUT }));
+
+  const heroes = [
+    { label: "งานเสร็จสิ้น", value: `${donePct}`, unit: "%", color: donePct >= TARGET_DONE ? GOOD : WARN, note: `เป้า ${TARGET_DONE}%${donePct >= TARGET_DONE ? " · ผ่าน" : ""}` },
+    { label: "ความพึงพอใจ CSAT", value: responses.length ? csatAvg.toFixed(2) : "—", unit: "/5", color: csatAvg >= TARGET_CSAT ? GOOD : csatAvg >= 4 ? WARN : BAD, note: `เป้า ${TARGET_CSAT}${csatAvg >= TARGET_CSAT ? " · ผ่าน" : ""}` },
+    { label: "Lead time มัธยฐาน", value: leadMed != null ? `${leadMed}` : "—", unit: "วัน", color: leadHit ? GOOD : BAD, note: leadHit ? `ในเป้า ${TARGET_LEAD_DAYS} วัน` : `เกินเป้า ${TARGET_LEAD_DAYS} วัน` },
+    { label: "คอขวด ค้าง 30 วัน+", value: `${stuckN}`, unit: "งาน", color: stuckN === 0 ? GOOD : BAD, note: stuckN === 0 ? "ไม่มีงานค้าง" : "ต้องเร่งจัดการ" },
+    { label: "เคสต้องติดตาม", value: `${flagCount}`, unit: "", color: flagCount === 0 ? GOOD : WARN, note: flagCount === 0 ? "ไม่มี" : "เกินกำหนด + คะแนนต่ำ" },
+  ];
 
   return (
     <div ref={wrapRef} className="w-full relative" style={{ height: 720 * boxfit.s }}>
@@ -233,151 +223,151 @@ export default function ExecPage() {
           body { background: #fff !important; }
           body * { visibility: hidden !important; }
           .exec-board, .exec-board * { visibility: visible !important; }
-          .exec-board { position: fixed !important; left: 0 !important; top: 0 !important; margin: 0 !important; transform: none !important; box-shadow: none !important; }
+          .exec-board { position: fixed !important; left: 0 !important; top: 0 !important; margin: 0 !important; transform: none !important; }
+          .exec-card { box-shadow: none !important; border: 1px solid ${HAIR} !important; }
           .no-print { display: none !important; }
         }
       ` }} />
-      <div className="exec-board absolute top-0 rounded-2xl overflow-hidden flex flex-col"
-        style={{ width: 1280, height: 720, transform: `scale(${boxfit.s})`, transformOrigin: "top left", marginLeft: boxfit.left, padding: 16, background: "#eef1f6", boxShadow: "0 10px 40px rgba(15,23,42,0.12)" }}>
+      <div className="exec-board absolute top-0 overflow-hidden flex flex-col"
+        style={{ width: 1280, height: 720, transform: `scale(${boxfit.s})`, transformOrigin: "top left", marginLeft: boxfit.left, padding: 28, background: "#f7f7f6", fontFamily: 'system-ui,-apple-system,"Segoe UI",sans-serif' }}>
 
-        {/* ===== HEADER (mood band) ===== */}
-        <div className="rounded-xl px-4 py-2.5 flex items-center gap-3 shrink-0 text-white" style={{ background: "linear-gradient(100deg,#4f46e5,#2563eb 55%,#0ea5e9)" }}>
-          <span className="text-2xl">📈</span>
-          <div>
-            <h1 className="text-lg font-extrabold leading-tight">ภาพรวมผู้บริหาร — งานติดตั้ง MPD</h1>
-            <div className="text-[11px] text-white/80">อัปเดต {ex?.updatedAt ? new Date(ex.updatedAt).toLocaleString("th-TH", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" }) : "-"}</div>
-          </div>
+        {/* header */}
+        <div className="flex items-baseline gap-3 shrink-0 px-1">
+          <h1 className="text-[19px] font-semibold tracking-tight" style={{ color: INK }}>ภาพรวมผู้บริหาร<span className="font-normal" style={{ color: MUT }}>&nbsp;&nbsp;งานติดตั้ง MPD</span></h1>
+          <span className="text-[11px]" style={{ color: MUT, ...NUM }}>อัปเดต {ex?.updatedAt ? new Date(ex.updatedAt).toLocaleString("th-TH", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" }) : "-"}</span>
           <div className="ml-auto flex gap-2 no-print">
-            <button onClick={load} className="px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-white text-xs font-medium">🔄 โหลดใหม่</button>
-            <button onClick={() => window.print()} className="px-2.5 py-1 rounded-lg bg-white text-blue-700 text-xs font-bold hover:bg-blue-50">🖨️ บันทึกเป็นสไลด์</button>
+            <button onClick={load} className="px-3 py-1.5 rounded-lg text-xs bg-white" style={{ color: SUB, boxShadow: SHADOW }}>โหลดใหม่</button>
+            <button onClick={() => window.print()} className="px-3 py-1.5 rounded-lg text-xs font-medium text-white" style={{ background: INK }}>บันทึกเป็นสไลด์</button>
           </div>
         </div>
 
-        {/* ===== SUMMARY (สรุป) ===== */}
+        {/* summary */}
         {insight && (
-          <div className="mt-2 rounded-xl px-3.5 py-2 flex items-center gap-2 shrink-0" style={{ background: "rgba(79,70,229,0.08)", border: "1px solid rgba(79,70,229,0.20)" }}>
-            <span className="text-xs font-extrabold px-2 py-0.5 rounded-md text-white shrink-0" style={{ background: "#4f46e5" }}>สรุปวันนี้</span>
-            <span className="text-[13px] font-medium" style={{ color: "#312e81" }}>{insight}</span>
+          <div className="mt-3.5 shrink-0 flex items-start gap-2.5 pl-3" style={{ borderLeft: `2px solid ${ACCENT}` }}>
+            <span className="text-[10px] font-semibold uppercase mt-0.5 shrink-0" style={{ color: ACCENT, letterSpacing: "0.08em" }}>สรุปวันนี้</span>
+            <span className="text-[12.5px]" style={{ color: SUB, ...NUM }}>{insight}</span>
           </div>
         )}
 
-        {/* ===== HERO (จุดสำคัญ) — big, status-colored ===== */}
-        <div className="grid grid-cols-5 gap-2.5 mt-2.5 shrink-0">
-          <Hero icon="✅" label="งานเสร็จสิ้น" value={`${donePct}`} unit="%" status={donePct >= TARGET_DONE ? "good" : "warn"} chip={donePct >= TARGET_DONE ? `ผ่านเป้า ${TARGET_DONE}% ✓` : `เป้า ${TARGET_DONE}%`} />
-          <Hero icon="⭐" label="ความพึงพอใจ CSAT" value={responses.length ? csatAvg.toFixed(2) : "—"} unit="/5" status={csatAvg >= TARGET_CSAT ? "good" : csatAvg >= 4 ? "warn" : "bad"} chip={csatAvg >= TARGET_CSAT ? `ผ่านเป้า ${TARGET_CSAT} ✓` : `เป้า ${TARGET_CSAT}`} delta={csatDelta} />
-          <Hero icon="⏱️" label="Lead time (มัธยฐาน)" value={leadMed != null ? `${leadMed}` : "—"} unit="วัน" status={leadHit ? "good" : "bad"} chip={leadHit ? `≤ เป้า ${TARGET_LEAD_DAYS} วัน ✓` : `เกินเป้า ${TARGET_LEAD_DAYS} วัน ✕`} />
-          <Hero icon="🐢" label="คอขวด (ค้าง >30 วัน)" value={`${stuckN}`} unit="งาน" status={stuckN === 0 ? "good" : "bad"} chip={stuckN === 0 ? "ไม่มีงานค้าง ✓" : "ต้องเร่งจัดการ"} />
-          <Hero icon="🚩" label="เคสต้องติดตาม" value={`${flagCount}`} unit="เคส" status={flagCount === 0 ? "good" : "warn"} chip={flagCount === 0 ? "ไม่มี ✓" : "เกินกำหนด + คะแนนต่ำ"} />
+        {/* hero — floating card, dividers, color only on the number */}
+        <div className="exec-card bg-white rounded-2xl mt-3.5 shrink-0 grid grid-cols-5" style={{ boxShadow: SHADOW }}>
+          {heroes.map((h, i) => (
+            <div key={i} className="px-5 py-4" style={{ borderLeft: i ? `1px solid ${HAIR}` : "none" }}>
+              <div className="text-[10.5px] uppercase" style={{ color: MUT, letterSpacing: "0.04em" }}>{h.label}</div>
+              <div className="mt-2 leading-none flex items-baseline gap-1"><span className="text-[34px] font-semibold tracking-tight" style={{ color: h.color, ...NUM }}>{h.value}</span>{h.unit && <span className="text-sm font-medium" style={{ color: h.color }}>{h.unit}</span>}</div>
+              <div className="text-[10.5px] mt-2" style={{ color: MUT }}>{h.note}</div>
+            </div>
+          ))}
         </div>
 
-        {/* context micro-stats */}
-        <div className="flex items-center gap-4 mt-1.5 px-1 shrink-0 text-[11px]" style={{ color: C.muted }}>
+        {/* context micro row */}
+        <div className="flex items-center gap-6 mt-3 shrink-0 text-[11px] px-1" style={{ color: MUT }}>
           <Micro label="งานเข้าเดือนนี้" value={`${lastJobs?.n ?? 0}`} delta={jobDelta} />
           <Micro label="งานเข้าสะสม" value={`${j?.total ?? 0}`} />
           <Micro label="กำลังดำเนินงาน" value={`${j?.active ?? 0}`} />
           <Micro label="ประเมินแล้ว" value={`${evaluated}/${j?.done ?? 0} (${evalCoverage}%)`} />
-          <Micro label="พึงพอใจ 4-5 ดาว" value={`${satisfied}%`} />
+          <Micro label="พึงพอใจ 4-5" value={`${satisfied}%`} />
         </div>
 
-        {/* ===== DETAIL (รายละเอียด) — 3 columns ===== */}
-        <div className="grid grid-cols-3 gap-2.5 mt-2.5 flex-1 min-h-0">
+        {/* detail — 3 columns */}
+        <div className="grid grid-cols-3 gap-4 mt-3.5 flex-1 min-h-0">
 
           {/* col 1 */}
-          <div className="flex flex-col gap-2.5 min-h-0">
-            <Panel title="สถานะงานใน Pipeline" accent={C.violet} grow>
-              <div className="space-y-1">
+          <div className="flex flex-col gap-4 min-h-0">
+            <Panel title="สถานะงานใน Pipeline" grow>
+              <div className="space-y-2">
                 {(ex?.jobs.byStage ?? []).map((s) => (
-                  <div key={s.id} className="flex items-center gap-1.5 text-[10px]">
-                    <span className="w-[74px] shrink-0 truncate" style={{ color: C.sub }}>{s.id}.{s.name}</span>
-                    <div className="flex-1 h-3 rounded bg-slate-100 overflow-hidden"><div className="h-full rounded" style={{ width: `${(s.n / maxStageN) * 100}%`, background: s.id === 7 ? C.good : C.violet }} /></div>
-                    <span className="w-6 shrink-0 text-right font-bold" style={{ color: C.ink }}>{s.n}</span>
+                  <div key={s.id} className="flex items-center gap-2.5 text-[10.5px]">
+                    <span className="w-[78px] shrink-0 truncate" style={{ color: SUB }}>{s.id}. {s.name}</span>
+                    <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: TRACK }}><div className="h-full rounded-full" style={{ width: `${(s.n / maxStageN) * 100}%`, background: s.id === 7 ? GOOD : FAINT }} /></div>
+                    <span className="w-6 shrink-0 text-right font-medium" style={{ color: INK, ...NUM }}>{s.n}</span>
                   </div>
                 ))}
               </div>
               {stuckN > 0 && (
-                <div className="mt-2 rounded-lg p-1.5" style={{ background: ST.bad.bg, border: `1px solid ${ST.bad.bd}` }}>
-                  <div className="text-[10px] font-bold mb-1" style={{ color: ST.bad.fg }}>🐢 คอขวด {stuckN} งานค้าง &gt;30 วัน — ต้องเร่ง</div>
+                <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${HAIR}` }}>
+                  <div className="text-[10.5px] font-medium mb-2" style={{ color: BAD }}>คอขวด · {stuckN} งานค้างเกิน 30 วัน</div>
                   {ex!.pipeline.stuck.slice(0, 3).map((s, i) => (
-                    <div key={i} className="flex items-center gap-1.5 text-[10px]">
-                      <span className="shrink-0 text-[9px] font-semibold px-1 py-0.5 rounded" style={{ background: "rgba(208,59,59,0.14)", color: ST.bad.fg }}>{s.stage}.{s.stageName}</span>
-                      <span className="font-medium truncate" style={{ color: C.ink }}>{s.customer}</span>
-                      <span className="ml-auto font-extrabold" style={{ color: ST.bad.fg }}>{s.days} วัน</span>
+                    <div key={i} className="flex items-center gap-2.5 text-[10px] mb-1">
+                      <span className="shrink-0" style={{ color: MUT }}>{s.stage}. {s.stageName}</span>
+                      <span className="font-medium truncate" style={{ color: SUB }}>{s.customer}</span>
+                      <span className="ml-auto font-medium" style={{ color: BAD, ...NUM }}>{s.days} วัน</span>
                     </div>
                   ))}
                 </div>
               )}
             </Panel>
-            <Panel title="⏱️ รายละเอียด Lead time" accent={C.blue}>
+            <Panel title="Lead time · รับออเดอร์ ถึง ปิดงาน">
               {ex?.leadTime && ex.leadTime.n > 0 ? (
-                <div className="grid grid-cols-3 gap-1 text-center">
-                  <div><div className="text-xl font-extrabold" style={{ color: leadHit ? C.good : C.crit }}>{ex.leadTime.medianDays}</div><div className="text-[9px]" style={{ color: C.muted }}>มัธยฐาน</div></div>
-                  <div><div className="text-xl font-extrabold" style={{ color: C.sub }}>{ex.leadTime.avgDays}</div><div className="text-[9px]" style={{ color: C.muted }}>เฉลี่ย</div></div>
-                  <div><div className="text-xl font-extrabold" style={{ color: C.serious }}>{ex.leadTime.p90Days}</div><div className="text-[9px]" style={{ color: C.muted }}>ช้าสุด 10%</div></div>
+                <div className="grid grid-cols-3 text-center">
+                  <div style={{ borderRight: `1px solid ${HAIR}` }}><div className="text-[24px] font-semibold" style={{ color: leadHit ? GOOD : BAD, ...NUM }}>{ex.leadTime.medianDays}</div><div className="text-[9.5px] mt-0.5" style={{ color: MUT }}>มัธยฐาน</div></div>
+                  <div style={{ borderRight: `1px solid ${HAIR}` }}><div className="text-[24px] font-semibold" style={{ color: SUB, ...NUM }}>{ex.leadTime.avgDays}</div><div className="text-[9.5px] mt-0.5" style={{ color: MUT }}>เฉลี่ย</div></div>
+                  <div><div className="text-[24px] font-semibold" style={{ color: SUB, ...NUM }}>{ex.leadTime.p90Days}</div><div className="text-[9.5px] mt-0.5" style={{ color: MUT }}>ช้าสุด 10%</div></div>
                 </div>
-              ) : <p className="text-xs" style={{ color: C.muted }}>ไม่มีข้อมูลวันปิดงาน</p>}
-              <div className="text-[9px] mt-1.5" style={{ color: C.muted }}>นับจากรับออเดอร์ถึงปิดงาน · จาก {ex?.leadTime?.n ?? 0}/{j?.total ?? 0} งาน · ยิ่งน้อยยิ่งดี</div>
+              ) : <p className="text-xs" style={{ color: MUT }}>ไม่มีข้อมูลวันปิดงาน</p>}
+              <div className="text-[9.5px] mt-2.5" style={{ color: MUT }}>หน่วยเป็นวัน · จาก {ex?.leadTime?.n ?? 0}/{j?.total ?? 0} งาน · ยิ่งน้อยยิ่งดี</div>
             </Panel>
           </div>
 
           {/* col 2 */}
-          <div className="flex flex-col gap-2.5 min-h-0">
-            <Panel title="งานเข้า / เสร็จ รายเดือน" accent={C.blue}>
-              {bm.length ? <VBars bars={bm.map((r) => ({ label: monthLabel(r.month), value: r.n }))} max={maxMonthN} color={C.blue} /> : <p className="text-xs" style={{ color: C.muted }}>ไม่มีข้อมูล</p>}
-              <div className="text-[9px] mt-1" style={{ color: C.muted }}>งานเสร็จรายเดือน (completed_date)</div>
-              {cbm.length ? <VBars bars={cbm.map((r) => ({ label: monthLabel(r.month), value: r.n }))} max={maxCbm} color={C.aqua} /> : <p className="text-[10px]" style={{ color: C.muted }}>ยังไม่มีวันเสร็จงาน</p>}
+          <div className="flex flex-col gap-4 min-h-0">
+            <Panel title="งานเข้า / เสร็จ รายเดือน">
+              {bm.length ? <VBars bars={bm.map((r) => ({ label: monthLabel(r.month), value: r.n }))} max={maxMonthN} color={ACCENT} /> : <p className="text-xs" style={{ color: MUT }}>ไม่มีข้อมูล</p>}
+              <div className="text-[9.5px] mt-2 mb-1" style={{ color: MUT }}>งานเสร็จรายเดือน</div>
+              {cbm.length ? <VBars bars={cbm.map((r) => ({ label: monthLabel(r.month), value: r.n }))} max={maxCbm} color={ACCENT_L} /> : <p className="text-[10px]" style={{ color: MUT }}>ยังไม่มีวันเสร็จงาน</p>}
             </Panel>
-            <Panel title="ช่องทางที่มา + แนวโน้ม CSAT" accent={C.orange} grow>
-              {channelSegs.length ? <Donut segments={channelSegs} /> : <p className="text-xs" style={{ color: C.muted }}>ไม่มีข้อมูล</p>}
-              <div className="text-[9px] mt-1.5" style={{ color: C.muted }}>แนวโน้ม CSAT (เส้นประ = เป้า {TARGET_CSAT})</div>
-              {csatMonthly.length ? <LineChart points={csatMonthly.map((c) => ({ label: monthLabel(c.month), value: c.avg }))} max={5} target={TARGET_CSAT} /> : <p className="text-[10px]" style={{ color: C.muted }}>ไม่มีข้อมูล</p>}
+            <Panel title="ช่องทางที่มา และ แนวโน้ม CSAT" grow>
+              {channelSegs.length ? <Donut segments={channelSegs} /> : <p className="text-xs" style={{ color: MUT }}>ไม่มีข้อมูล</p>}
+              <div className="text-[9.5px] mt-2.5" style={{ color: MUT }}>แนวโน้ม CSAT · เส้นประคือเป้า {TARGET_CSAT}</div>
+              {csatMonthly.length ? <LineChart points={csatMonthly.map((c) => ({ label: monthLabel(c.month), value: c.avg }))} max={5} target={TARGET_CSAT} /> : <p className="text-[10px]" style={{ color: MUT }}>ไม่มีข้อมูล</p>}
             </Panel>
           </div>
 
           {/* col 3 */}
-          <div className="flex flex-col gap-2.5 min-h-0">
-            <Panel title="⭐ ความพึงพอใจรายด้าน" accent={C.good}>
-              <div className="space-y-0.5">
+          <div className="flex flex-col gap-4 min-h-0">
+            <Panel title="ความพึงพอใจรายด้าน">
+              <div className="space-y-1.5">
                 {DIMS.map((d, i) => (
-                  <div key={d} className="flex items-center gap-1.5 text-[10px]">
-                    <span className="w-16 shrink-0" style={{ color: C.sub }}>{d}</span>
-                    <div className="relative flex-1 h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                  <div key={d} className="flex items-center gap-2.5 text-[10.5px]">
+                    <span className="w-16 shrink-0" style={{ color: SUB }}>{d}</span>
+                    <div className="relative flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: TRACK }}>
                       <div className="h-full rounded-full" style={{ width: `${(dimAvg[i] / 5) * 100}%`, background: avgColor(dimAvg[i]) }} />
-                      <div className="absolute top-0 bottom-0 w-0.5" style={{ left: `${(TARGET_CSAT / 5) * 100}%`, background: C.muted }} />
+                      <div className="absolute top-0 bottom-0 w-px" style={{ left: `${(TARGET_CSAT / 5) * 100}%`, background: FAINT }} />
                     </div>
-                    <span className="w-7 shrink-0 text-right font-bold" style={{ color: avgColor(dimAvg[i]) }}>{dimAvg[i].toFixed(2)}</span>
-                    <span className="w-5 shrink-0 text-right text-[9px]" style={{ color: dimLow[i] ? C.crit : "#cbd5e1" }}>{dimLow[i] || "-"}</span>
+                    <span className="w-7 shrink-0 text-right font-medium" style={{ color: INK, ...NUM }}>{dimAvg[i].toFixed(2)}</span>
+                    <span className="w-3 shrink-0 text-right text-[9px]" style={{ color: dimLow[i] ? BAD : "transparent", ...NUM }}>{dimLow[i] || "0"}</span>
                   </div>
                 ))}
               </div>
-              <div className="text-[9px] mt-1" style={{ color: C.muted }}>อ่อนสุด: <b style={{ color: C.crit }}>{DIMS[worstIdx]}</b> ({dimAvg[worstIdx]?.toFixed(2)}) · เด่นสุด: {DIMS[bestIdx]} ({dimAvg[bestIdx]?.toFixed(2)})</div>
+              <div className="text-[9.5px] mt-2" style={{ color: MUT }}>อ่อนสุด {DIMS[worstIdx]} ({dimAvg[worstIdx]?.toFixed(2)}) · เด่นสุด {DIMS[bestIdx]} ({dimAvg[bestIdx]?.toFixed(2)})</div>
             </Panel>
 
-            <Panel title="♻️ ต้นทุนเศษ" accent={C.warn}>
+            <Panel title="ต้นทุนเศษ">
               {ws && ws.count > 0 ? (
                 <>
-                  <div className="flex justify-between text-[10px] mb-1"><span style={{ color: C.sub }}>{ws.count} งาน · เฉลี่ย {ws.avgPct}% · กลาง {ws.medianPct}%</span><span className="font-extrabold" style={{ color: ex?.waste.costSetup ? C.crit : C.muted }}>{ex?.waste.costSetup ? baht(ex.waste.totalWasteCost) : "ยังไม่ตั้งราคา"}</span></div>
-                  <div className="flex h-3 rounded overflow-hidden" style={{ background: "#eef1f6" }}>
-                    {ws.normal > 0 && <div style={{ width: `${(ws.normal / wsTotal) * 100}%`, background: C.good }} />}
-                    {ws.heavy > 0 && <div style={{ width: `${(ws.heavy / wsTotal) * 100}%`, background: C.warn }} />}
-                    {ws.abnormal > 0 && <div style={{ width: `${(ws.abnormal / wsTotal) * 100}%`, background: C.crit }} />}
+                  <div className="flex justify-between items-baseline text-[10.5px] mb-2"><span style={{ color: SUB, ...NUM }}>{ws.count} งาน · เฉลี่ย {ws.avgPct}% · กลาง {ws.medianPct}%</span><span className="font-semibold" style={{ color: ex?.waste.costSetup ? BAD : MUT, ...NUM }}>{ex?.waste.costSetup ? baht(ex.waste.totalWasteCost) : "ยังไม่ตั้งราคา"}</span></div>
+                  <div className="flex h-1.5 rounded-full overflow-hidden" style={{ background: TRACK }}>
+                    {ws.normal > 0 && <div style={{ width: `${(ws.normal / wsTotal) * 100}%`, background: GOOD }} />}
+                    {ws.heavy > 0 && <div style={{ width: `${(ws.heavy / wsTotal) * 100}%`, background: WARN }} />}
+                    {ws.abnormal > 0 && <div style={{ width: `${(ws.abnormal / wsTotal) * 100}%`, background: BAD }} />}
                   </div>
-                  <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 mt-1 text-[9px]">
-                    <Legend color={C.good} label={`ปกติ ≤20% (${ws.normal})`} />
-                    <Legend color={C.warn} label={`เปลือง 20-50% (${ws.heavy})`} />
-                    <Legend color={C.crit} label={`ผิดปกติ >50% (${ws.abnormal})`} />
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[9.5px]">
+                    <Legend color={GOOD} label={`ปกติ ≤20% (${ws.normal})`} />
+                    <Legend color={WARN} label={`เปลือง 20-50% (${ws.heavy})`} />
+                    <Legend color={BAD} label={`ผิดปกติ >50% (${ws.abnormal})`} />
                   </div>
                 </>
-              ) : <p className="text-xs" style={{ color: C.muted }}>ยังไม่มีข้อมูล %เศษ</p>}
+              ) : <p className="text-xs" style={{ color: MUT }}>ยังไม่มีข้อมูล %เศษ</p>}
             </Panel>
 
-            <Panel title="🚨 ต้องดูวันนี้" accent={C.crit} grow>
-              {flagCount === 0 ? <p className="text-xs" style={{ color: C.muted }}>ไม่มีรายการเร่งด่วน ✅</p> : (
-                <div className="space-y-1">
+            <Panel title="ต้องดูวันนี้" grow>
+              {flagCount === 0 ? <p className="text-xs" style={{ color: MUT }}>ไม่มีรายการเร่งด่วน</p> : (
+                <div className="space-y-2">
                   {(ex?.overdueList ?? []).slice(0, 2).map((o, i) => (
-                    <div key={`o${i}`} className="flex items-center gap-1.5 text-[10px]"><span className="shrink-0 text-[9px] font-semibold px-1 py-0.5 rounded" style={{ background: ST.bad.bg, color: ST.bad.fg }}>เกินกำหนด</span><span className="font-medium truncate" style={{ color: C.ink }}>{o.customer}</span><span className="ml-auto" style={{ color: C.muted }}>นัด {o.due}</span></div>
+                    <div key={`o${i}`} className="flex items-center gap-2.5 text-[10.5px]"><span className="shrink-0 font-medium" style={{ color: BAD }}>เกินกำหนด</span><span className="font-medium truncate" style={{ color: INK }}>{o.customer}</span><span className="ml-auto" style={{ color: MUT, ...NUM }}>นัด {o.due}</span></div>
                   ))}
                   {lowList.slice(0, 4).map((r, i) => (
-                    <div key={`c${i}`} className="flex items-center gap-1.5 text-[10px]"><span className="shrink-0 text-[9px] font-semibold px-1 py-0.5 rounded" style={{ background: ST.warn.bg, color: ST.warn.fg }}>คะแนนต่ำ</span><span className="font-medium shrink-0" style={{ color: C.ink }}>{r.customer || "-"}</span><span className="truncate" style={{ color: C.muted }}>{r.comment}</span>{r.overall !== null && <span className="ml-auto font-extrabold shrink-0" style={{ color: avgColor(r.overall) }}>{r.overall.toFixed(1)}</span>}</div>
+                    <div key={`c${i}`} className="flex items-center gap-2.5 text-[10.5px]"><span className="shrink-0 font-medium" style={{ color: WARN }}>คะแนนต่ำ</span><span className="font-medium shrink-0" style={{ color: INK }}>{r.customer || "-"}</span><span className="truncate" style={{ color: MUT }}>{r.comment}</span>{r.overall !== null && <span className="ml-auto font-semibold shrink-0" style={{ color: avgColor(r.overall), ...NUM }}>{r.overall.toFixed(1)}</span>}</div>
                   ))}
                 </div>
               )}
@@ -386,12 +376,12 @@ export default function ExecPage() {
         </div>
 
         {/* footer */}
-        <div className="text-[9px] mt-2 shrink-0 flex flex-wrap gap-x-3" style={{ color: C.muted }}>
+        <div className="text-[9.5px] mt-3.5 shrink-0 flex flex-wrap gap-x-4 px-1" style={{ color: MUT, ...NUM }}>
           <span>ความครบข้อมูล — Lead time {ex?.leadTime?.n ?? 0}/{j?.total ?? 0}</span>
-          <span>· ปิดงาน {ex?.waste.withData ?? 0}/{j?.total ?? 0} ({closingPct}%)</span>
-          <span>· โซน {ex?.waste.withZones ?? 0}/{j?.total ?? 0}</span>
-          <span>· ประเมินแล้ว {evaluated}/{j?.done ?? 0} ({evalCoverage}%)</span>
-          <span>· CSAT {responses.length} รายการ</span>
+          <span>ปิดงาน {ex?.waste.withData ?? 0}/{j?.total ?? 0} ({closingPct}%)</span>
+          <span>โซน {ex?.waste.withZones ?? 0}/{j?.total ?? 0}</span>
+          <span>ประเมินแล้ว {evaluated}/{j?.done ?? 0} ({evalCoverage}%)</span>
+          <span>CSAT {responses.length} รายการ</span>
         </div>
       </div>
     </div>
@@ -399,35 +389,17 @@ export default function ExecPage() {
 }
 
 /* ---------- components ---------- */
-function Hero({ icon, label, value, unit, chip, status, delta }: { icon: string; label: string; value: string; unit?: string; chip?: string; status: Status; delta?: number | null }) {
-  const s = ST[status];
-  let d = null;
-  if (delta !== undefined && delta !== null && Math.round(delta) !== 0) { const up = delta > 0; d = <span className="text-[10px] font-bold" style={{ color: up ? C.good : C.crit }}>{up ? "▲" : "▼"}{Math.abs(Math.round(delta))}%</span>; }
-  return (
-    <div className="rounded-xl px-3 py-2 border flex flex-col justify-between" style={{ background: s.bg, borderColor: s.bd, minHeight: 88 }}>
-      <div className="flex items-center justify-between gap-1">
-        <span className="text-[11px] font-semibold" style={{ color: C.sub }}>{icon} {label}</span>
-        {d}
-      </div>
-      <div className="leading-none mt-0.5">
-        <span className="text-[34px] font-extrabold tracking-tight" style={{ color: s.fg }}>{value}</span>
-        {unit && <span className="text-base font-bold ml-1" style={{ color: s.fg }}>{unit}</span>}
-      </div>
-      {chip && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md self-start mt-0.5" style={{ color: s.fg, background: "rgba(255,255,255,0.65)" }}>{chip}</span>}
-    </div>
-  );
-}
 function Micro({ label, value, delta }: { label: string; value: string; delta?: number | null }) {
   let d = null;
-  if (delta !== undefined && delta !== null && Math.round(delta) !== 0) { const up = delta > 0; d = <span className="font-bold" style={{ color: up ? C.good : C.crit }}>{up ? "▲" : "▼"}{Math.abs(Math.round(delta))}%</span>; }
-  return <span className="flex items-center gap-1"><span>{label}</span><b style={{ color: C.sub }}>{value}</b>{d}</span>;
+  if (delta !== undefined && delta !== null && Math.round(delta) !== 0) { const up = delta > 0; d = <span className="font-medium" style={{ color: up ? GOOD : BAD, ...NUM }}>{up ? "▲" : "▼"}{Math.abs(Math.round(delta))}%</span>; }
+  return <span className="flex items-center gap-1.5"><span>{label}</span><b style={{ color: SUB, ...NUM }}>{value}</b>{d}</span>;
 }
-function Panel({ title, accent, grow, children }: { title: string; accent: string; grow?: boolean; children: React.ReactNode }) {
+function Panel({ title, grow, children }: { title: string; grow?: boolean; children: React.ReactNode }) {
   return (
-    <div className={`bg-white rounded-xl p-2.5 shadow-sm ${grow ? "flex-1 min-h-0 overflow-hidden" : ""} flex flex-col`} style={{ borderTop: `3px solid ${accent}` }}>
-      <h2 className="text-[12px] font-bold mb-1.5 shrink-0" style={{ color: C.ink }}>{title}</h2>
+    <div className={`exec-card bg-white rounded-2xl px-4 py-3.5 ${grow ? "flex-1 min-h-0 overflow-hidden" : ""} flex flex-col`} style={{ boxShadow: SHADOW }}>
+      <h2 className="text-[10.5px] font-semibold uppercase mb-3 shrink-0" style={{ color: MUT, letterSpacing: "0.06em" }}>{title}</h2>
       <div className="min-h-0 flex-1">{children}</div>
     </div>
   );
 }
-function Legend({ color, label }: { color: string; label: string }) { return <span className="flex items-center gap-1" style={{ color: C.sub }}><span className="w-2 h-2 rounded-sm" style={{ background: color }} />{label}</span>; }
+function Legend({ color, label }: { color: string; label: string }) { return <span className="flex items-center gap-1.5" style={{ color: SUB, ...NUM }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />{label}</span>; }
