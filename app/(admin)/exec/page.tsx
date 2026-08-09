@@ -18,11 +18,24 @@ type Exec = {
 type SResp = { timestamp: string; scores: (number | null)[]; overall: number | null; customer: string; comment: string; bill: string };
 type Survey = { responses: SResp[] };
 
-/* ---------- palette ---------- */
-const C = { blue: "#2563EB", green: "#15935E", amber: "#C2820E", orange: "#E8833A", red: "#C0392B", purple: "#7C3AED", slate: "#64748B", line: "#E2E8F0" };
+/* ---------- palette (dataviz reference) ---------- */
+const C = {
+  blue: "#2a78d6", aqua: "#1baf7a", violet: "#4a3aa7", orange: "#eb6834", magenta: "#e87ba4", yellow: "#eda100",
+  ink: "#0b0b0b", sub: "#52514e", muted: "#898781", line: "#e1e0d9",
+  good: "#0ca30c", warn: "#fab219", serious: "#ec835a", crit: "#d03b3b",
+};
+/* status skin: text / tint bg / border — reserved for good/watch/bad states */
+const ST = {
+  good: { fg: "#0b7a0b", bg: "rgba(12,163,12,0.10)", bd: "rgba(12,163,12,0.38)" },
+  warn: { fg: "#8a5d00", bg: "rgba(250,178,25,0.16)", bd: "rgba(230,150,0,0.48)" },
+  bad: { fg: "#b3312f", bg: "rgba(208,59,59,0.10)", bd: "rgba(208,59,59,0.42)" },
+  neutral: { fg: "#334155", bg: "rgba(100,116,139,0.08)", bd: "rgba(100,116,139,0.28)" },
+} as const;
+type Status = keyof typeof ST;
+
 const DIMS = ["บริการ", "คุณภาพงาน", "ความเรียบร้อย", "ตรงเวลา", "ความสุภาพ"];
 const SOURCE_LABEL: Record<string, string> = { sales_txn: "ระบบขาย", manual: "สร้างเอง", shopee: "Shopee", lazada: "Lazada", tiktok: "TikTok", web: "เว็บ" };
-const SOURCE_COLOR: Record<string, string> = { sales_txn: C.blue, manual: C.amber, shopee: C.orange, lazada: C.purple, tiktok: C.red, web: C.green };
+const SOURCE_COLOR: Record<string, string> = { sales_txn: C.blue, manual: C.yellow, shopee: C.orange, lazada: C.violet, tiktok: C.crit, web: C.aqua };
 const TARGET_CSAT = 4.5, TARGET_SATISFIED = 90, TARGET_DONE = 80;
 const TARGET_LEAD_DAYS = 60; // เป้า: รับออเดอร์ -> ปิดงาน ภายในกี่วัน (ปรับได้)
 
@@ -42,30 +55,30 @@ function monthLabel(ym: string): string {
   const names = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
   return `${names[Number(m)] || m}${String(Number(y) + 543).slice(-2)}`;
 }
-function avgColor(v: number): string { if (v >= 4.5) return C.green; if (v >= 4) return C.blue; if (v >= 3) return C.amber; return C.red; }
-function wasteColor(pct: number): string { return pct > 50 ? C.red : pct > 20 ? C.amber : C.green; }
+function avgColor(v: number): string { if (v >= 4.5) return C.good; if (v >= 4) return C.blue; if (v >= 3) return C.warn; return C.crit; }
+function wasteColor(pct: number): string { return pct > 50 ? C.crit : pct > 20 ? C.warn : C.good; }
 function pctDelta(cur: number, prev: number | null): number | null { if (prev === null || prev === 0) return null; return ((cur - prev) / prev) * 100; }
 function isoMonth(ts: string): string | null { const d = new Date(ts); if (isNaN(d.getTime())) return null; return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
 
 /* ---------- SVG charts ---------- */
 function LineChart({ points, max = 5, target }: { points: { label: string; value: number }[]; max?: number; target?: number }) {
-  const W = 340, H = 120, padL = 6, padR = 6, padT = 14, padB = 18;
+  const W = 340, H = 116, padL = 6, padR = 6, padT = 14, padB = 18;
   const n = points.length, iw = W - padL - padR, ih = H - padT - padB;
   const x = (i: number) => (n <= 1 ? padL + iw / 2 : padL + (i / (n - 1)) * iw);
   const y = (v: number) => padT + ih - (Math.max(0, Math.min(max, v)) / max) * ih;
   const line = points.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
   const area = n > 0 ? `${line} L${x(n - 1).toFixed(1)},${(padT + ih).toFixed(1)} L${x(0).toFixed(1)},${(padT + ih).toFixed(1)} Z` : "";
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="xMidYMid meet" style={{ maxHeight: 118 }}>
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="xMidYMid meet" style={{ maxHeight: 112 }}>
       {[0, 0.5, 1].map((g) => <line key={g} x1={padL} x2={W - padR} y1={padT + ih * g} y2={padT + ih * g} stroke={C.line} strokeWidth="1" />)}
-      {target !== undefined && <line x1={padL} x2={W - padR} y1={y(target)} y2={y(target)} stroke={C.slate} strokeWidth="1" strokeDasharray="3 3" />}
-      {area && <path d={area} fill={C.blue} opacity="0.08" />}
-      <path d={line} fill="none" stroke={C.blue} strokeWidth="2" strokeLinejoin="round" />
+      {target !== undefined && <line x1={padL} x2={W - padR} y1={y(target)} y2={y(target)} stroke={C.muted} strokeWidth="1" strokeDasharray="3 3" />}
+      {area && <path d={area} fill={C.blue} opacity="0.10" />}
+      <path d={line} fill="none" stroke={C.blue} strokeWidth="2.5" strokeLinejoin="round" />
       {points.map((p, i) => (
         <g key={i}>
-          <circle cx={x(i)} cy={y(p.value)} r="3" fill={avgColor(p.value)} />
+          <circle cx={x(i)} cy={y(p.value)} r="3.2" fill={avgColor(p.value)} />
           <text x={x(i)} y={y(p.value) - 5} textAnchor="middle" fontSize="9" fontWeight="700" fill={avgColor(p.value)}>{p.value.toFixed(2)}</text>
-          <text x={x(i)} y={H - 5} textAnchor="middle" fontSize="8" fill={C.slate}>{p.label}</text>
+          <text x={x(i)} y={H - 5} textAnchor="middle" fontSize="8" fill={C.muted}>{p.label}</text>
         </g>
       ))}
     </svg>
@@ -77,33 +90,33 @@ function Donut({ segments }: { segments: { label: string; value: number; color: 
   let acc = 0;
   return (
     <div className="flex items-center gap-3">
-      <svg viewBox="0 0 104 104" width="88" height="88" className="shrink-0">
+      <svg viewBox="0 0 104 104" width="86" height="86" className="shrink-0">
         <circle cx={cx} cy={cy} r={r} fill="none" stroke={C.line} strokeWidth={sw} />
-        {segments.map((s, i) => { const len = (s.value / total) * Ci; const el = <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={sw} strokeDasharray={`${len} ${Ci - len}`} strokeDashoffset={-acc} transform={`rotate(-90 ${cx} ${cy})`} />; acc += len; return el; })}
-        <text x={cx} y={cy - 1} textAnchor="middle" fontSize="20" fontWeight="800" fill="#0F172A">{total}</text>
-        <text x={cx} y={cy + 13} textAnchor="middle" fontSize="8" fill={C.slate}>งาน</text>
+        {segments.map((s, i) => { const len = (s.value / total) * Ci; const el = <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={sw} strokeDasharray={`${len} ${Ci - len}`} strokeDashoffset={-acc} transform={`rotate(-90 ${cx} ${cy})`} strokeLinecap="butt" />; acc += len; return el; })}
+        <text x={cx} y={cy - 1} textAnchor="middle" fontSize="20" fontWeight="800" fill={C.ink}>{total}</text>
+        <text x={cx} y={cy + 13} textAnchor="middle" fontSize="8" fill={C.muted}>งาน</text>
       </svg>
       <div className="space-y-1">
         {segments.map((s, i) => (
           <div key={i} className="flex items-center gap-1.5 text-[11px]">
             <span className="w-2.5 h-2.5 rounded-sm" style={{ background: s.color }} />
-            <span className="text-slate-600">{s.label}</span>
-            <strong className="text-slate-800">{s.value}</strong>
-            <span className="text-slate-400">({Math.round((s.value / total) * 100)}%)</span>
+            <span style={{ color: C.sub }}>{s.label}</span>
+            <strong style={{ color: C.ink }}>{s.value}</strong>
+            <span style={{ color: C.muted }}>({Math.round((s.value / total) * 100)}%)</span>
           </div>
         ))}
       </div>
     </div>
   );
 }
-function VBars({ bars, max }: { bars: { label: string; value: number }[]; max: number }) {
+function VBars({ bars, max, color = C.blue }: { bars: { label: string; value: number }[]; max: number; color?: string }) {
   return (
-    <div className="flex items-end gap-1.5 h-20">
+    <div className="flex items-end gap-1.5 h-[70px]">
       {bars.map((b, i) => (
         <div key={i} className="flex-1 flex flex-col items-center justify-end gap-0.5">
-          <span className="text-[9px] font-bold text-slate-700">{b.value}</span>
-          <div className="w-full rounded-t" style={{ height: `${(b.value / max) * 100}%`, minHeight: 2, background: C.blue }} />
-          <span className="text-[8px] text-slate-400">{b.label}</span>
+          <span className="text-[9px] font-bold" style={{ color: C.sub }}>{b.value}</span>
+          <div className="w-full rounded-t-[3px]" style={{ height: `${(b.value / max) * 100}%`, minHeight: 2, background: color }} />
+          <span className="text-[8px]" style={{ color: C.muted }}>{b.label}</span>
         </div>
       ))}
     </div>
@@ -128,9 +141,9 @@ export default function ExecPage() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  // ---- fit the 1280x720 (16:9) board to the available area ----
+  // fit the 1280x720 (16:9) board to the available area
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState({ s: 1, left: 0 });
+  const [boxfit, setBoxfit] = useState({ s: 1, left: 0 });
   useEffect(() => {
     function fit() {
       const el = wrapRef.current; if (!el) return;
@@ -138,7 +151,7 @@ export default function ExecPage() {
       const availH = window.innerHeight - el.getBoundingClientRect().top - 16;
       const s = Math.min(availW / 1280, availH / 720);
       const use = s > 0 && isFinite(s) ? s : 1;
-      setBox({ s: use, left: Math.max(0, (availW - 1280 * use) / 2) });
+      setBoxfit({ s: use, left: Math.max(0, (availW - 1280 * use) / 2) });
     }
     fit();
     const t = setTimeout(fit, 120);
@@ -175,7 +188,7 @@ export default function ExecPage() {
   const maxCbm = Math.max(1, ...cbm.map((r) => r.n));
   const evaluated = ex?.jobs.evaluated ?? 0;
 
-  if (loading && !ex) return <div className="text-slate-400 py-20 text-center">⏳ กำลังโหลด...</div>;
+  if (loading && !ex) return <div className="py-20 text-center" style={{ color: C.muted }}>⏳ กำลังโหลด...</div>;
 
   const j = ex?.jobs;
   const donePct = j && j.total ? Math.round((j.done / j.total) * 100) : 0;
@@ -193,7 +206,9 @@ export default function ExecPage() {
   const bestIdx = dimAvg.length ? dimAvg.indexOf(Math.max(...dimAvg)) : 0;
   const ws = ex?.waste.stats;
   const wsTotal = ws ? Math.max(1, ws.count) : 1;
-  const leadHit = (ex?.leadTime?.medianDays ?? 0) <= TARGET_LEAD_DAYS;
+  const stuckN = ex?.pipeline?.stuck?.length ?? 0;
+  const leadMed = ex?.leadTime?.medianDays ?? null;
+  const leadHit = leadMed !== null && leadMed <= TARGET_LEAD_DAYS;
   const evalCoverage = j?.done ? Math.round((evaluated / j.done) * 100) : 0;
 
   const insight = (() => {
@@ -202,16 +217,16 @@ export default function ExecPage() {
     if (lastJobs) { const d = jobDelta === null ? "" : ` (${jobDelta > 0 ? "▲" : jobDelta < 0 ? "▼" : "→"}${Math.abs(Math.round(jobDelta))}%)`; parts.push(`เดือน${monthLabel(lastJobs.month)} งานเข้า ${lastJobs.n}${d}`); }
     if (responses.length) parts.push(`CSAT ${csatAvg.toFixed(2)}${csatDelta === null ? "" : ` (${csatDelta > 0 ? "▲" : csatDelta < 0 ? "▼" : "→"})`}`);
     parts.push(`งานเสร็จ ${donePct}%`);
-    if (ex?.leadTime?.medianDays != null) parts.push(`Lead time ${ex.leadTime.medianDays} วัน`);
+    if (leadMed != null) parts.push(`Lead time ${leadMed} วัน`);
     if (flagCount > 0) parts.push(`${flagCount} เคสต้องตาม`);
     if (themeDetail.length) parts.push(`ปัญหาเด่น: ${themeDetail[0].key} (${themeDetail[0].n})`);
-    return parts.join("  ·  ");
+    return parts.join("   ·   ");
   })();
 
-  const channelSegs = Object.entries(ex?.jobs.bySource ?? {}).map(([s, n]) => ({ label: SOURCE_LABEL[s] || s, value: n, color: SOURCE_COLOR[s] || C.slate }));
+  const channelSegs = Object.entries(ex?.jobs.bySource ?? {}).map(([s, n]) => ({ label: SOURCE_LABEL[s] || s, value: n, color: SOURCE_COLOR[s] || C.muted }));
 
   return (
-    <div ref={wrapRef} className="w-full relative" style={{ height: 720 * box.s }}>
+    <div ref={wrapRef} className="w-full relative" style={{ height: 720 * boxfit.s }}>
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
           @page { size: 1280px 720px; margin: 0; }
@@ -222,134 +237,147 @@ export default function ExecPage() {
           .no-print { display: none !important; }
         }
       ` }} />
-      <div className="exec-board absolute top-0 bg-white text-slate-800 rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col"
-        style={{ width: 1280, height: 720, transform: `scale(${box.s})`, transformOrigin: "top left", marginLeft: box.left, padding: 18 }}>
+      <div className="exec-board absolute top-0 rounded-2xl overflow-hidden flex flex-col"
+        style={{ width: 1280, height: 720, transform: `scale(${boxfit.s})`, transformOrigin: "top left", marginLeft: boxfit.left, padding: 16, background: "#eef1f6", boxShadow: "0 10px 40px rgba(15,23,42,0.12)" }}>
 
-        {/* header */}
-        <div className="flex items-center gap-3 shrink-0">
-          <h1 className="text-lg font-bold">📈 ภาพรวมผู้บริหาร — งานติดตั้ง MPD</h1>
-          <span className="text-[11px] text-slate-400">อัปเดต {ex?.updatedAt ? new Date(ex.updatedAt).toLocaleString("th-TH", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" }) : "-"}</span>
+        {/* ===== HEADER (mood band) ===== */}
+        <div className="rounded-xl px-4 py-2.5 flex items-center gap-3 shrink-0 text-white" style={{ background: "linear-gradient(100deg,#4f46e5,#2563eb 55%,#0ea5e9)" }}>
+          <span className="text-2xl">📈</span>
+          <div>
+            <h1 className="text-lg font-extrabold leading-tight">ภาพรวมผู้บริหาร — งานติดตั้ง MPD</h1>
+            <div className="text-[11px] text-white/80">อัปเดต {ex?.updatedAt ? new Date(ex.updatedAt).toLocaleString("th-TH", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" }) : "-"}</div>
+          </div>
           <div className="ml-auto flex gap-2 no-print">
-            <button onClick={load} className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-xs font-medium hover:bg-slate-200">🔄 โหลดใหม่</button>
-            <button onClick={() => window.print()} className="px-2.5 py-1 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700">🖨️ บันทึกเป็นสไลด์</button>
+            <button onClick={load} className="px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-white text-xs font-medium">🔄 โหลดใหม่</button>
+            <button onClick={() => window.print()} className="px-2.5 py-1 rounded-lg bg-white text-blue-700 text-xs font-bold hover:bg-blue-50">🖨️ บันทึกเป็นสไลด์</button>
           </div>
         </div>
 
-        {/* insight */}
-        {insight && <div className="mt-2 bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-100 text-indigo-900 rounded-lg px-3 py-1.5 text-[12px] shrink-0"><span className="font-semibold">สรุปวันนี้</span> — {insight}</div>}
+        {/* ===== SUMMARY (สรุป) ===== */}
+        {insight && (
+          <div className="mt-2 rounded-xl px-3.5 py-2 flex items-center gap-2 shrink-0" style={{ background: "rgba(79,70,229,0.08)", border: "1px solid rgba(79,70,229,0.20)" }}>
+            <span className="text-xs font-extrabold px-2 py-0.5 rounded-md text-white shrink-0" style={{ background: "#4f46e5" }}>สรุปวันนี้</span>
+            <span className="text-[13px] font-medium" style={{ color: "#312e81" }}>{insight}</span>
+          </div>
+        )}
 
-        {/* KPI strip */}
-        <div className="grid grid-cols-6 gap-2 mt-2 shrink-0">
-          <Kpi icon="🆕" label="งานเข้าเดือนนี้" value={String(lastJobs?.n ?? 0)} color={C.blue} delta={jobDelta} />
-          <Kpi icon="📦" label="งานเข้าสะสม" value={String(j?.total ?? 0)} color="#334155" />
-          <Kpi icon="🔧" label="กำลังดำเนินงาน" value={String(j?.active ?? 0)} color={C.amber} />
-          <Kpi icon="✅" label="เสร็จสิ้น" value={`${donePct}%`} color={C.green} />
-          <Kpi icon="⭐" label="CSAT เฉลี่ย" value={responses.length ? csatAvg.toFixed(2) : "—"} color={avgColor(csatAvg)} delta={csatDelta} />
-          <Kpi icon="🚩" label="ต้องติดตาม" value={String(flagCount)} color={flagCount > 0 ? C.red : C.green} />
+        {/* ===== HERO (จุดสำคัญ) — big, status-colored ===== */}
+        <div className="grid grid-cols-5 gap-2.5 mt-2.5 shrink-0">
+          <Hero icon="✅" label="งานเสร็จสิ้น" value={`${donePct}`} unit="%" status={donePct >= TARGET_DONE ? "good" : "warn"} chip={donePct >= TARGET_DONE ? `ผ่านเป้า ${TARGET_DONE}% ✓` : `เป้า ${TARGET_DONE}%`} />
+          <Hero icon="⭐" label="ความพึงพอใจ CSAT" value={responses.length ? csatAvg.toFixed(2) : "—"} unit="/5" status={csatAvg >= TARGET_CSAT ? "good" : csatAvg >= 4 ? "warn" : "bad"} chip={csatAvg >= TARGET_CSAT ? `ผ่านเป้า ${TARGET_CSAT} ✓` : `เป้า ${TARGET_CSAT}`} delta={csatDelta} />
+          <Hero icon="⏱️" label="Lead time (มัธยฐาน)" value={leadMed != null ? `${leadMed}` : "—"} unit="วัน" status={leadHit ? "good" : "bad"} chip={leadHit ? `≤ เป้า ${TARGET_LEAD_DAYS} วัน ✓` : `เกินเป้า ${TARGET_LEAD_DAYS} วัน ✕`} />
+          <Hero icon="🐢" label="คอขวด (ค้าง >30 วัน)" value={`${stuckN}`} unit="งาน" status={stuckN === 0 ? "good" : "bad"} chip={stuckN === 0 ? "ไม่มีงานค้าง ✓" : "ต้องเร่งจัดการ"} />
+          <Hero icon="🚩" label="เคสต้องติดตาม" value={`${flagCount}`} unit="เคส" status={flagCount === 0 ? "good" : "warn"} chip={flagCount === 0 ? "ไม่มี ✓" : "เกินกำหนด + คะแนนต่ำ"} />
         </div>
 
-        {/* body: 3 columns */}
-        <div className="grid grid-cols-3 gap-3 mt-3 flex-1 min-h-0">
+        {/* context micro-stats */}
+        <div className="flex items-center gap-4 mt-1.5 px-1 shrink-0 text-[11px]" style={{ color: C.muted }}>
+          <Micro label="งานเข้าเดือนนี้" value={`${lastJobs?.n ?? 0}`} delta={jobDelta} />
+          <Micro label="งานเข้าสะสม" value={`${j?.total ?? 0}`} />
+          <Micro label="กำลังดำเนินงาน" value={`${j?.active ?? 0}`} />
+          <Micro label="ประเมินแล้ว" value={`${evaluated}/${j?.done ?? 0} (${evalCoverage}%)`} />
+          <Micro label="พึงพอใจ 4-5 ดาว" value={`${satisfied}%`} />
+        </div>
 
-          {/* col 1 — งานติดตั้ง */}
-          <div className="flex flex-col gap-3 min-h-0">
-            <Panel title="⏱️ Lead time: รับออเดอร์ → ปิดงาน" right={`${ex?.leadTime?.n ?? 0}/${j?.total ?? 0} งาน`}>
-              {ex?.leadTime && ex.leadTime.n > 0 ? (
-                <div className="grid grid-cols-3 gap-1 text-center">
-                  <div><div className="text-2xl font-bold" style={{ color: leadHit ? C.green : C.red }}>{ex.leadTime.medianDays}</div><div className="text-[10px] text-slate-500">มัธยฐาน {leadHit ? "✓" : ""}<br />(เป้า ≤{TARGET_LEAD_DAYS})</div></div>
-                  <div><div className="text-2xl font-bold text-slate-700">{ex.leadTime.avgDays}</div><div className="text-[10px] text-slate-500">เฉลี่ย (วัน)</div></div>
-                  <div><div className="text-2xl font-bold" style={{ color: C.amber }}>{ex.leadTime.p90Days}</div><div className="text-[10px] text-slate-500">ช้าสุด 10%<br />(p90)</div></div>
-                </div>
-              ) : <p className="text-xs text-slate-400">ไม่มีข้อมูลวันปิดงาน</p>}
-            </Panel>
-            <Panel title="สถานะงานใน Pipeline" grow>
+        {/* ===== DETAIL (รายละเอียด) — 3 columns ===== */}
+        <div className="grid grid-cols-3 gap-2.5 mt-2.5 flex-1 min-h-0">
+
+          {/* col 1 */}
+          <div className="flex flex-col gap-2.5 min-h-0">
+            <Panel title="สถานะงานใน Pipeline" accent={C.violet} grow>
               <div className="space-y-1">
                 {(ex?.jobs.byStage ?? []).map((s) => (
                   <div key={s.id} className="flex items-center gap-1.5 text-[10px]">
-                    <span className="w-20 shrink-0 text-slate-600 truncate">{s.id}.{s.name}</span>
-                    <div className="flex-1 h-3 rounded bg-slate-100 overflow-hidden"><div className="h-full rounded" style={{ width: `${(s.n / maxStageN) * 100}%`, background: s.id === 7 ? C.green : C.purple }} /></div>
-                    <span className="w-6 shrink-0 text-right font-medium text-slate-700">{s.n}</span>
+                    <span className="w-[74px] shrink-0 truncate" style={{ color: C.sub }}>{s.id}.{s.name}</span>
+                    <div className="flex-1 h-3 rounded bg-slate-100 overflow-hidden"><div className="h-full rounded" style={{ width: `${(s.n / maxStageN) * 100}%`, background: s.id === 7 ? C.good : C.violet }} /></div>
+                    <span className="w-6 shrink-0 text-right font-bold" style={{ color: C.ink }}>{s.n}</span>
                   </div>
                 ))}
               </div>
-              {(ex?.pipeline?.stuck?.length ?? 0) > 0 && (
-                <div className="mt-2 rounded-md bg-red-50 border border-red-100 p-1.5">
-                  <div className="text-[10px] font-semibold text-red-700 mb-1">🐢 คอขวด {ex!.pipeline.stuck.length} งานค้าง &gt;30 วัน</div>
+              {stuckN > 0 && (
+                <div className="mt-2 rounded-lg p-1.5" style={{ background: ST.bad.bg, border: `1px solid ${ST.bad.bd}` }}>
+                  <div className="text-[10px] font-bold mb-1" style={{ color: ST.bad.fg }}>🐢 คอขวด {stuckN} งานค้าง &gt;30 วัน — ต้องเร่ง</div>
                   {ex!.pipeline.stuck.slice(0, 3).map((s, i) => (
                     <div key={i} className="flex items-center gap-1.5 text-[10px]">
-                      <span className="tag s-red shrink-0 text-[9px]">{s.stage}.{s.stageName}</span>
-                      <span className="font-medium text-slate-800 truncate">{s.customer}</span>
-                      <span className="ml-auto font-bold text-red-600">{s.days} วัน</span>
+                      <span className="shrink-0 text-[9px] font-semibold px-1 py-0.5 rounded" style={{ background: "rgba(208,59,59,0.14)", color: ST.bad.fg }}>{s.stage}.{s.stageName}</span>
+                      <span className="font-medium truncate" style={{ color: C.ink }}>{s.customer}</span>
+                      <span className="ml-auto font-extrabold" style={{ color: ST.bad.fg }}>{s.days} วัน</span>
                     </div>
                   ))}
                 </div>
               )}
             </Panel>
-          </div>
-
-          {/* col 2 — รายเดือน / ช่องทาง / เทรนด์ */}
-          <div className="flex flex-col gap-3 min-h-0">
-            <Panel title="งานเข้า / เสร็จ รายเดือน">
-              {bm.length ? <VBars bars={bm.map((r) => ({ label: monthLabel(r.month), value: r.n }))} max={maxMonthN} /> : <p className="text-xs text-slate-400">ไม่มีข้อมูล</p>}
-              <div className="text-[10px] text-slate-400 mt-1">เสร็จรายเดือน (completed_date):</div>
-              {cbm.length ? <VBars bars={cbm.map((r) => ({ label: monthLabel(r.month), value: r.n }))} max={maxCbm} /> : <p className="text-[10px] text-slate-400">ยังไม่มีวันเสร็จงาน</p>}
-            </Panel>
-            <Panel title="ช่องทางที่มา" grow>
-              {channelSegs.length ? <Donut segments={channelSegs} /> : <p className="text-xs text-slate-400">ไม่มีข้อมูล</p>}
-              <div className="text-[10px] text-slate-400 mt-2">แนวโน้ม CSAT (เส้นประ = เป้า {TARGET_CSAT})</div>
-              {csatMonthly.length ? <LineChart points={csatMonthly.map((c) => ({ label: monthLabel(c.month), value: c.avg }))} max={5} target={TARGET_CSAT} /> : <p className="text-[10px] text-slate-400">ไม่มีข้อมูล</p>}
+            <Panel title="⏱️ รายละเอียด Lead time" accent={C.blue}>
+              {ex?.leadTime && ex.leadTime.n > 0 ? (
+                <div className="grid grid-cols-3 gap-1 text-center">
+                  <div><div className="text-xl font-extrabold" style={{ color: leadHit ? C.good : C.crit }}>{ex.leadTime.medianDays}</div><div className="text-[9px]" style={{ color: C.muted }}>มัธยฐาน</div></div>
+                  <div><div className="text-xl font-extrabold" style={{ color: C.sub }}>{ex.leadTime.avgDays}</div><div className="text-[9px]" style={{ color: C.muted }}>เฉลี่ย</div></div>
+                  <div><div className="text-xl font-extrabold" style={{ color: C.serious }}>{ex.leadTime.p90Days}</div><div className="text-[9px]" style={{ color: C.muted }}>ช้าสุด 10%</div></div>
+                </div>
+              ) : <p className="text-xs" style={{ color: C.muted }}>ไม่มีข้อมูลวันปิดงาน</p>}
+              <div className="text-[9px] mt-1.5" style={{ color: C.muted }}>นับจากรับออเดอร์ถึงปิดงาน · จาก {ex?.leadTime?.n ?? 0}/{j?.total ?? 0} งาน · ยิ่งน้อยยิ่งดี</div>
             </Panel>
           </div>
 
-          {/* col 3 — CSAT / เศษ / ต้องดูวันนี้ */}
-          <div className="flex flex-col gap-3 min-h-0">
-            <Panel title="⭐ ความพึงพอใจ (CSAT)">
-              <div className="grid grid-cols-3 gap-1 mb-1.5 text-center">
-                <div><div className="text-lg font-bold" style={{ color: avgColor(csatAvg) }}>{responses.length ? csatAvg.toFixed(2) : "—"}</div><div className="text-[9px] text-slate-500">เฉลี่ย /5</div></div>
-                <div><div className="text-lg font-bold" style={{ color: C.green }}>{satisfied}%</div><div className="text-[9px] text-slate-500">พึงพอใจ 4-5</div></div>
-                <div><div className="text-lg font-bold" style={{ color: lowList.length ? C.red : C.green }}>{lowList.length}</div><div className="text-[9px] text-slate-500">เคสคะแนนต่ำ</div></div>
-              </div>
+          {/* col 2 */}
+          <div className="flex flex-col gap-2.5 min-h-0">
+            <Panel title="งานเข้า / เสร็จ รายเดือน" accent={C.blue}>
+              {bm.length ? <VBars bars={bm.map((r) => ({ label: monthLabel(r.month), value: r.n }))} max={maxMonthN} color={C.blue} /> : <p className="text-xs" style={{ color: C.muted }}>ไม่มีข้อมูล</p>}
+              <div className="text-[9px] mt-1" style={{ color: C.muted }}>งานเสร็จรายเดือน (completed_date)</div>
+              {cbm.length ? <VBars bars={cbm.map((r) => ({ label: monthLabel(r.month), value: r.n }))} max={maxCbm} color={C.aqua} /> : <p className="text-[10px]" style={{ color: C.muted }}>ยังไม่มีวันเสร็จงาน</p>}
+            </Panel>
+            <Panel title="ช่องทางที่มา + แนวโน้ม CSAT" accent={C.orange} grow>
+              {channelSegs.length ? <Donut segments={channelSegs} /> : <p className="text-xs" style={{ color: C.muted }}>ไม่มีข้อมูล</p>}
+              <div className="text-[9px] mt-1.5" style={{ color: C.muted }}>แนวโน้ม CSAT (เส้นประ = เป้า {TARGET_CSAT})</div>
+              {csatMonthly.length ? <LineChart points={csatMonthly.map((c) => ({ label: monthLabel(c.month), value: c.avg }))} max={5} target={TARGET_CSAT} /> : <p className="text-[10px]" style={{ color: C.muted }}>ไม่มีข้อมูล</p>}
+            </Panel>
+          </div>
+
+          {/* col 3 */}
+          <div className="flex flex-col gap-2.5 min-h-0">
+            <Panel title="⭐ ความพึงพอใจรายด้าน" accent={C.good}>
               <div className="space-y-0.5">
                 {DIMS.map((d, i) => (
                   <div key={d} className="flex items-center gap-1.5 text-[10px]">
-                    <span className="w-16 shrink-0 text-slate-600">{d}</span>
-                    <div className="relative flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+                    <span className="w-16 shrink-0" style={{ color: C.sub }}>{d}</span>
+                    <div className="relative flex-1 h-2.5 rounded-full bg-slate-100 overflow-hidden">
                       <div className="h-full rounded-full" style={{ width: `${(dimAvg[i] / 5) * 100}%`, background: avgColor(dimAvg[i]) }} />
-                      <div className="absolute top-0 bottom-0 w-0.5 bg-slate-400" style={{ left: `${(TARGET_CSAT / 5) * 100}%` }} />
+                      <div className="absolute top-0 bottom-0 w-0.5" style={{ left: `${(TARGET_CSAT / 5) * 100}%`, background: C.muted }} />
                     </div>
                     <span className="w-7 shrink-0 text-right font-bold" style={{ color: avgColor(dimAvg[i]) }}>{dimAvg[i].toFixed(2)}</span>
+                    <span className="w-5 shrink-0 text-right text-[9px]" style={{ color: dimLow[i] ? C.crit : "#cbd5e1" }}>{dimLow[i] || "-"}</span>
                   </div>
                 ))}
               </div>
-              <div className="text-[9px] text-slate-400 mt-1">ด้านอ่อนสุด: {DIMS[worstIdx]} ({dimAvg[worstIdx]?.toFixed(2)}) · เด่นสุด: {DIMS[bestIdx]} ({dimAvg[bestIdx]?.toFixed(2)})</div>
+              <div className="text-[9px] mt-1" style={{ color: C.muted }}>อ่อนสุด: <b style={{ color: C.crit }}>{DIMS[worstIdx]}</b> ({dimAvg[worstIdx]?.toFixed(2)}) · เด่นสุด: {DIMS[bestIdx]} ({dimAvg[bestIdx]?.toFixed(2)})</div>
             </Panel>
 
-            <Panel title="♻️ ต้นทุนเศษ">
+            <Panel title="♻️ ต้นทุนเศษ" accent={C.warn}>
               {ws && ws.count > 0 ? (
                 <>
-                  <div className="flex justify-between text-[10px] mb-1"><span className="text-slate-500">{ws.count} งาน · เฉลี่ย {ws.avgPct}% · กลาง {ws.medianPct}%</span><span className="font-bold" style={{ color: ex?.waste.costSetup ? C.red : "#94A3B8" }}>{ex?.waste.costSetup ? baht(ex.waste.totalWasteCost) : "ยังไม่ตั้งราคา"}</span></div>
-                  <div className="flex h-3 rounded overflow-hidden bg-slate-100">
-                    {ws.normal > 0 && <div style={{ width: `${(ws.normal / wsTotal) * 100}%`, background: C.green }} />}
-                    {ws.heavy > 0 && <div style={{ width: `${(ws.heavy / wsTotal) * 100}%`, background: C.amber }} />}
-                    {ws.abnormal > 0 && <div style={{ width: `${(ws.abnormal / wsTotal) * 100}%`, background: C.red }} />}
+                  <div className="flex justify-between text-[10px] mb-1"><span style={{ color: C.sub }}>{ws.count} งาน · เฉลี่ย {ws.avgPct}% · กลาง {ws.medianPct}%</span><span className="font-extrabold" style={{ color: ex?.waste.costSetup ? C.crit : C.muted }}>{ex?.waste.costSetup ? baht(ex.waste.totalWasteCost) : "ยังไม่ตั้งราคา"}</span></div>
+                  <div className="flex h-3 rounded overflow-hidden" style={{ background: "#eef1f6" }}>
+                    {ws.normal > 0 && <div style={{ width: `${(ws.normal / wsTotal) * 100}%`, background: C.good }} />}
+                    {ws.heavy > 0 && <div style={{ width: `${(ws.heavy / wsTotal) * 100}%`, background: C.warn }} />}
+                    {ws.abnormal > 0 && <div style={{ width: `${(ws.abnormal / wsTotal) * 100}%`, background: C.crit }} />}
                   </div>
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[9px]">
-                    <Legend color={C.green} label={`ปกติ ≤20% (${ws.normal})`} />
-                    <Legend color={C.amber} label={`เปลือง 20-50% (${ws.heavy})`} />
-                    <Legend color={C.red} label={`ผิดปกติ >50% (${ws.abnormal})`} />
+                  <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 mt-1 text-[9px]">
+                    <Legend color={C.good} label={`ปกติ ≤20% (${ws.normal})`} />
+                    <Legend color={C.warn} label={`เปลือง 20-50% (${ws.heavy})`} />
+                    <Legend color={C.crit} label={`ผิดปกติ >50% (${ws.abnormal})`} />
                   </div>
                 </>
-              ) : <p className="text-xs text-slate-400">ยังไม่มีข้อมูล %เศษ</p>}
+              ) : <p className="text-xs" style={{ color: C.muted }}>ยังไม่มีข้อมูล %เศษ</p>}
             </Panel>
 
-            <Panel title="🚨 ต้องดูวันนี้" grow>
-              {flagCount === 0 ? <p className="text-xs text-slate-400">ไม่มีรายการเร่งด่วน ✅</p> : (
+            <Panel title="🚨 ต้องดูวันนี้" accent={C.crit} grow>
+              {flagCount === 0 ? <p className="text-xs" style={{ color: C.muted }}>ไม่มีรายการเร่งด่วน ✅</p> : (
                 <div className="space-y-1">
-                  {(ex?.overdueList ?? []).slice(0, 3).map((o, i) => (
-                    <div key={`o${i}`} className="flex items-center gap-1.5 text-[10px]"><span className="tag s-red shrink-0 text-[9px]">เกินกำหนด</span><span className="font-medium text-slate-800 truncate">{o.customer}</span><span className="ml-auto text-slate-400">นัด {o.due}</span></div>
+                  {(ex?.overdueList ?? []).slice(0, 2).map((o, i) => (
+                    <div key={`o${i}`} className="flex items-center gap-1.5 text-[10px]"><span className="shrink-0 text-[9px] font-semibold px-1 py-0.5 rounded" style={{ background: ST.bad.bg, color: ST.bad.fg }}>เกินกำหนด</span><span className="font-medium truncate" style={{ color: C.ink }}>{o.customer}</span><span className="ml-auto" style={{ color: C.muted }}>นัด {o.due}</span></div>
                   ))}
-                  {lowList.slice(0, 5).map((r, i) => (
-                    <div key={`c${i}`} className="flex items-center gap-1.5 text-[10px]"><span className="tag s-amber shrink-0 text-[9px]">คะแนนต่ำ</span><span className="font-medium text-slate-800 shrink-0">{r.customer || "-"}</span><span className="text-slate-500 truncate">{r.comment}</span>{r.overall !== null && <span className="ml-auto font-bold shrink-0" style={{ color: avgColor(r.overall) }}>{r.overall.toFixed(1)}</span>}</div>
+                  {lowList.slice(0, 4).map((r, i) => (
+                    <div key={`c${i}`} className="flex items-center gap-1.5 text-[10px]"><span className="shrink-0 text-[9px] font-semibold px-1 py-0.5 rounded" style={{ background: ST.warn.bg, color: ST.warn.fg }}>คะแนนต่ำ</span><span className="font-medium shrink-0" style={{ color: C.ink }}>{r.customer || "-"}</span><span className="truncate" style={{ color: C.muted }}>{r.comment}</span>{r.overall !== null && <span className="ml-auto font-extrabold shrink-0" style={{ color: avgColor(r.overall) }}>{r.overall.toFixed(1)}</span>}</div>
                   ))}
                 </div>
               )}
@@ -357,9 +385,9 @@ export default function ExecPage() {
           </div>
         </div>
 
-        {/* footer coverage */}
-        <div className="text-[9px] text-slate-400 mt-2 shrink-0 flex flex-wrap gap-x-3">
-          <span>ความครบข้อมูล: Lead time {ex?.leadTime?.n ?? 0}/{j?.total ?? 0}</span>
+        {/* footer */}
+        <div className="text-[9px] mt-2 shrink-0 flex flex-wrap gap-x-3" style={{ color: C.muted }}>
+          <span>ความครบข้อมูล — Lead time {ex?.leadTime?.n ?? 0}/{j?.total ?? 0}</span>
           <span>· ปิดงาน {ex?.waste.withData ?? 0}/{j?.total ?? 0} ({closingPct}%)</span>
           <span>· โซน {ex?.waste.withZones ?? 0}/{j?.total ?? 0}</span>
           <span>· ประเมินแล้ว {evaluated}/{j?.done ?? 0} ({evalCoverage}%)</span>
@@ -371,17 +399,35 @@ export default function ExecPage() {
 }
 
 /* ---------- components ---------- */
-function Panel({ title, right, grow, children }: { title: string; right?: string; grow?: boolean; children: React.ReactNode }) {
+function Hero({ icon, label, value, unit, chip, status, delta }: { icon: string; label: string; value: string; unit?: string; chip?: string; status: Status; delta?: number | null }) {
+  const s = ST[status];
+  let d = null;
+  if (delta !== undefined && delta !== null && Math.round(delta) !== 0) { const up = delta > 0; d = <span className="text-[10px] font-bold" style={{ color: up ? C.good : C.crit }}>{up ? "▲" : "▼"}{Math.abs(Math.round(delta))}%</span>; }
   return (
-    <div className={`bg-white border border-slate-100 rounded-lg p-2.5 ${grow ? "flex-1 min-h-0 overflow-hidden" : ""} flex flex-col`}>
-      <div className="flex items-center justify-between mb-1.5 shrink-0"><h2 className="text-[12px] font-semibold text-slate-700">{title}</h2>{right && <span className="text-[10px] text-slate-400">{right}</span>}</div>
+    <div className="rounded-xl px-3 py-2 border flex flex-col justify-between" style={{ background: s.bg, borderColor: s.bd, minHeight: 88 }}>
+      <div className="flex items-center justify-between gap-1">
+        <span className="text-[11px] font-semibold" style={{ color: C.sub }}>{icon} {label}</span>
+        {d}
+      </div>
+      <div className="leading-none mt-0.5">
+        <span className="text-[34px] font-extrabold tracking-tight" style={{ color: s.fg }}>{value}</span>
+        {unit && <span className="text-base font-bold ml-1" style={{ color: s.fg }}>{unit}</span>}
+      </div>
+      {chip && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md self-start mt-0.5" style={{ color: s.fg, background: "rgba(255,255,255,0.65)" }}>{chip}</span>}
+    </div>
+  );
+}
+function Micro({ label, value, delta }: { label: string; value: string; delta?: number | null }) {
+  let d = null;
+  if (delta !== undefined && delta !== null && Math.round(delta) !== 0) { const up = delta > 0; d = <span className="font-bold" style={{ color: up ? C.good : C.crit }}>{up ? "▲" : "▼"}{Math.abs(Math.round(delta))}%</span>; }
+  return <span className="flex items-center gap-1"><span>{label}</span><b style={{ color: C.sub }}>{value}</b>{d}</span>;
+}
+function Panel({ title, accent, grow, children }: { title: string; accent: string; grow?: boolean; children: React.ReactNode }) {
+  return (
+    <div className={`bg-white rounded-xl p-2.5 shadow-sm ${grow ? "flex-1 min-h-0 overflow-hidden" : ""} flex flex-col`} style={{ borderTop: `3px solid ${accent}` }}>
+      <h2 className="text-[12px] font-bold mb-1.5 shrink-0" style={{ color: C.ink }}>{title}</h2>
       <div className="min-h-0 flex-1">{children}</div>
     </div>
   );
 }
-function Legend({ color, label }: { color: string; label: string }) { return <span className="flex items-center gap-1 text-slate-500"><span className="w-2 h-2 rounded-sm" style={{ background: color }} />{label}</span>; }
-function Kpi({ icon, label, value, color, delta }: { icon: string; label: string; value: string; color: string; delta?: number | null }) {
-  let d = null;
-  if (delta !== undefined && delta !== null) { const up = delta > 0, flat = Math.round(delta) === 0; const c = flat ? "#94A3B8" : up ? C.green : C.red; d = <span className="text-[10px] font-semibold" style={{ color: c }}>{flat ? "→" : up ? "▲" : "▼"}{Math.abs(Math.round(delta))}%</span>; }
-  return <div className="bg-white border border-slate-100 rounded-lg px-2.5 py-1.5"><div className="flex items-center justify-between"><span className="text-xs">{icon}</span>{d}</div><div className="text-xl font-bold leading-tight" style={{ color }}>{value}</div><div className="text-[10px] text-slate-500 leading-tight">{label}</div></div>;
-}
+function Legend({ color, label }: { color: string; label: string }) { return <span className="flex items-center gap-1" style={{ color: C.sub }}><span className="w-2 h-2 rounded-sm" style={{ background: color }} />{label}</span>; }
