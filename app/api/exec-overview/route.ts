@@ -42,7 +42,7 @@ function parseHandover(raw: unknown): Mov | null {
 
 interface JobRow {
   stage: number | null; order_source: string | null; order_date: string | null; due_date: string | null;
-  customer_name: string | null; product_name: string | null; bill_no: string | null; handover_data: unknown; completed_date: string | null; eval_score: number | null; job_no: string;
+  customer_name: string | null; product_name: string | null; bill_no: string | null; handover_data: unknown; completed_date: string | null; eval_score: number | null; job_no: string; updated_at: string | null;
 }
 interface ZoneRow { job_no: string; width_cm: number | null; length_cm: number | null; }
 
@@ -67,7 +67,7 @@ export async function GET() {
   const overdueList: { customer: string; product: string; due: string; stage: number }[] = [];
   let jobs: JobRow[] = [];
   try {
-    const { data } = await supabase.from("install_jobs").select("job_no,stage,order_source,order_date,due_date,customer_name,product_name,bill_no,handover_data,completed_date,eval_score");
+    const { data } = await supabase.from("install_jobs").select("job_no,stage,order_source,order_date,due_date,customer_name,product_name,bill_no,handover_data,completed_date,eval_score,updated_at");
     jobs = (data ?? []) as JobRow[];
     total = jobs.length;
     for (const jb of jobs) {
@@ -94,6 +94,41 @@ export async function GET() {
     if (jb.eval_score !== null && jb.eval_score !== undefined) evaluated++;
   }
   const completedByMonth = Object.keys(completedMap).sort().map((m) => ({ month: m, n: completedMap[m] }));
+
+  // ---- lead time (รับออเดอร์ -> ปิดงาน) + pipeline aging/bottleneck ----
+  const nowMs = Date.now();
+  const DAY = 86400000;
+  const leadDays: number[] = [];
+  const agingByStage: Record<number, { n: number; sum: number; max: number }> = {};
+  const stuck: { customer: string; product: string; stage: number; stageName: string; days: number }[] = [];
+  for (const jb of jobs) {
+    const st = Number(jb.stage) || 1;
+    if (jb.order_date && jb.completed_date) {
+      const o = new Date(String(jb.order_date)).getTime();
+      const c = new Date(String(jb.completed_date)).getTime();
+      if (!isNaN(o) && !isNaN(c) && c >= o) leadDays.push(Math.round((c - o) / DAY));
+    }
+    if (st !== 7 && jb.updated_at) {
+      const u = new Date(String(jb.updated_at)).getTime();
+      if (!isNaN(u)) {
+        const days = Math.floor((nowMs - u) / DAY);
+        const a = agingByStage[st] ?? { n: 0, sum: 0, max: 0 };
+        a.n++; a.sum += days; if (days > a.max) a.max = days;
+        agingByStage[st] = a;
+        if (days > 30) stuck.push({ customer: jb.customer_name || jb.job_no, product: jb.product_name || "", stage: st, stageName: STAGES.find((s) => s.id === st)?.name || String(st), days });
+      }
+    }
+  }
+  leadDays.sort((a, b) => a - b);
+  const pctl = (arr: number[], p: number): number | null => (arr.length ? arr[Math.min(arr.length - 1, Math.floor(p * (arr.length - 1)))] : null);
+  const leadTime = {
+    n: leadDays.length,
+    avgDays: leadDays.length ? Math.round(leadDays.reduce((a, b) => a + b, 0) / leadDays.length) : null,
+    medianDays: pctl(leadDays, 0.5),
+    p90Days: pctl(leadDays, 0.9),
+  };
+  const pipelineAging = Object.keys(agingByStage).map((k) => { const id = Number(k); const a = agingByStage[id]; return { id, name: STAGES.find((s) => s.id === id)?.name || k, n: a.n, avgDays: Math.round(a.sum / a.n), maxDays: a.max }; }).sort((x, y) => x.id - y.id);
+  stuck.sort((a, b) => b.days - a.days);
 
   type WRow = { customer: string; bill: string | null; zoneM2: number; actM2: number | null; pct: number | null };
   let waste: {
@@ -143,5 +178,5 @@ export async function GET() {
     };
   } catch { /* defaults */ }
 
-  return NextResponse.json({ revenue, jobs: { total, byStage, bySource, byMonth, completedByMonth, done, active, overdue, evaluated }, upcoming: upcoming.slice(0, 8), overdueList, waste, updatedAt: new Date().toISOString() });
+  return NextResponse.json({ revenue, jobs: { total, byStage, bySource, byMonth, completedByMonth, done, active, overdue, evaluated }, leadTime, pipeline: { aging: pipelineAging, stuck: stuck.slice(0, 8) }, upcoming: upcoming.slice(0, 8), overdueList, waste, updatedAt: new Date().toISOString() });
 }
