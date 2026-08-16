@@ -39,6 +39,24 @@ export default function JobCard({ job, onClick }: Props) {
       </div>
       <div className="text-xs text-slate-500 mb-2">{job.customer}</div>
 
+      {/* เฟส A: ค้างที่ใคร + ธง */}
+      {job.waitingOn && job.waitingOn !== "ไม่ได้ค้าง" && (
+        <div className="mb-1.5">
+          <span className="tag s-amber text-[10px]">
+            🕒 {job.waitingOn}
+            {job.waitingSince ? ` · ${Math.max(0, Math.floor((Date.now() - new Date(job.waitingSince).getTime()) / 86400000))} วัน` : ""}
+          </span>
+        </div>
+      )}
+      {(job.needsSurvey || job.needsRedesign || job.hasDefect || job.isClaim) && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {job.needsSurvey && <span className="tag s-red text-[10px]">ประเมินพื้นที่</span>}
+          {job.needsRedesign && <span className="tag s-red text-[10px]">แก้แบบ</span>}
+          {job.hasDefect && <span className="tag s-red text-[10px]">Defect</span>}
+          {job.isClaim && <span className="tag s-red text-[10px]">เคลม</span>}
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <span className="text-xs text-slate-400">{formatDate(job.due) !== "—" ? `ด ${formatDate(job.due)}` : ""}</span>
         {job.evalScore != null && (
