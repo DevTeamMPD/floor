@@ -16,6 +16,15 @@ const SHIFT_OPTIONS = [
   { value: "allday", label: "🌞 ทั้งวัน" },
 ] as const;
 
+// ชนิดพื้นที่มี (4 รายการ) — เลือกแล้วเติม SKU ให้อัตโนมัติ
+const PRODUCTS = [
+  { sku: "LDSSF001", name: "[Whitebuzz] Rollsafe 1.6cm บริการติดตั้งแผ่นรองกันลื่น" },
+  { sku: "LDSSF002", name: "[Organic beige] Rollsafe 1.6cm บริการติดตั้งแผ่นรองกันลื่น" },
+  { sku: "LDSSF003", name: "[Barky beige] Safespace 0.6cm บริการติดตั้งแผ่นรองกันลื่น" },
+  { sku: "LDSSF004", name: "[Whitebuzz] Safespace 0.6cm บริการติดตั้งแผ่นรองกันลื่น" },
+] as const;
+const PROD_OTHER = "__other__";
+
 export default function CreateOrderModal({ onClose, onCreated }: Props) {
   const supabase = createClient();
   const [form, setForm] = useState({
@@ -34,6 +43,7 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
   const [exists, setExists] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [otherProduct, setOtherProduct] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -169,13 +179,30 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
           </div>
 
           <div>
-            <label className="text-xs font-medium text-slate-600 block mb-1">ชื่อสินค้า</label>
-            <input
-              value={form.product_name}
-              onChange={(e) => set("product_name", e.target.value)}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            <label className="text-xs font-medium text-slate-600 block mb-1">ชนิดพื้น</label>
+            <select
+              value={otherProduct ? PROD_OTHER : form.product_name}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === PROD_OTHER) { setOtherProduct(true); set("product_name", ""); set("sku", ""); }
+                else { setOtherProduct(false); const p = PRODUCTS.find((x) => x.name === v); set("product_name", v); set("sku", p?.sku ?? ""); }
+              }}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
               required
-            />
+            >
+              <option value="" disabled>— เลือกชนิดพื้น —</option>
+              {PRODUCTS.map((p) => <option key={p.sku} value={p.name}>{p.name} ({p.sku})</option>)}
+              <option value={PROD_OTHER}>อื่นๆ (พิมพ์เอง)</option>
+            </select>
+            {otherProduct && (
+              <input
+                value={form.product_name}
+                onChange={(e) => set("product_name", e.target.value)}
+                placeholder="ระบุชื่อสินค้า"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                required
+              />
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
