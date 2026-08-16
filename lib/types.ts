@@ -69,4 +69,11 @@ export interface InstallJob {
   locationUrl?: string;
   apptShift?: "morning" | "afternoon" | "allday";
   apptDate?: string;
+  // เฟส A: รออยู่ที่ใคร + ธง (คู่ขนานกับ stage)
+  waitingOn?: string;
+  waitingSince?: string;
+  needsSurvey?: boolean;
+  hasDefect?: boolean;
+  needsRedesign?: boolean;
+  isClaim?: boolean;
 }

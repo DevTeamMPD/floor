@@ -50,6 +50,30 @@ const FLOOR_CONDITIONS = [
   { id: "prep", label: "ต้องเตรียมพื้น" },
 ];
 
+// เฟส A: รออยู่ที่ใคร + ธง (คู่ขนานกับ stage — ไม่ใช่สถานะ)
+const WAITING_OPTIONS = ["ไม่ได้ค้าง", "รอลูกค้า", "รอเซล", "รอคลัง/ผลิต", "รอช่าง", "รอ QC", "รอประเมินพื้นที่"];
+type FlagState = { needs_survey: boolean; has_defect: boolean; needs_redesign: boolean; is_claim: boolean };
+const FLAG_DEFS: { key: keyof FlagState; label: string }[] = [
+  { key: "needs_survey", label: "ต้องประเมินพื้นที่" },
+  { key: "needs_redesign", label: "แก้แบบ/หน้างานไม่ตรง" },
+  { key: "has_defect", label: "มี Defect" },
+  { key: "is_claim", label: "งานเคลม" },
+];
+
+// เฟส B: activity log
+interface ActivityRow { id: number; action: string; field: string | null; old_value: string | null; new_value: string | null; created_at: string }
+const ACT_FIELD_LABEL: Record<string, string> = {
+  stage: "สเตจ", status: "สถานะ", waiting_on: "รออยู่ที่", needs_survey: "ธง ประเมินพื้นที่",
+  has_defect: "ธง Defect", needs_redesign: "ธง แก้แบบ", is_claim: "ธง เคลม",
+  appt_date: "วันนัด", eval_score: "คะแนนประเมิน", closed_at: "ปิดงาน",
+};
+function fmtActVal(field: string | null, v: string | null): string {
+  if (v == null || v === "") return "—";
+  if (field === "stage") return IP_STAGES[Number(v) - 1]?.name ?? v;
+  if (v === "true") return "✓"; if (v === "false") return "—";
+  return v;
+}
+
 interface SurveyData {
   cutTypes: string[];
   weldType: string;
@@ -89,8 +113,9 @@ interface QCData {
 
 export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const supabase = createClient();
-  const [tab, setTab] = useState<"info" | "stages" | "survey" | "qc" | "close">("info");
+  const [tab, setTab] = useState<"info" | "stages" | "survey" | "qc" | "close" | "log">("info");
   const [saving, setSaving] = useState(false);
+  const [activity, setActivity] = useState<ActivityRow[]>([]);
 
   // Survey state
   const [survey, setSurvey] = useState<SurveyData>({
@@ -111,10 +136,17 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   // S3 reschedule state
   const [newApptDate, setNewApptDate] = useState(job.apptDate ?? "");
 
+  // เฟส A: waiting_on + flags
+  const [waitingOn, setWaitingOn] = useState<string>("ไม่ได้ค้าง");
+  const [waitingSince, setWaitingSince] = useState<string | null>(null);
+  const [flags, setFlags] = useState<FlagState>({ needs_survey: false, has_defect: false, needs_redesign: false, is_claim: false });
+
   // Load saved data
   useEffect(() => {
     if (job.id) {
-      supabase.from("install_jobs").select("survey_data, qc_data").eq("job_no", job.jobNo).single().then(({ data }) => {
+      supabase.from("install_jobs")
+        .select("survey_data, qc_data, waiting_on, waiting_since, needs_survey, has_defect, needs_redesign, is_claim")
+        .eq("job_no", job.jobNo).single().then(({ data }) => {
         if (data?.survey_data) {
           try { setSurvey(JSON.parse(data.survey_data)); } catch {}
         }
@@ -126,9 +158,45 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
             setQcNotes(qc.notes ?? "");
           } catch {}
         }
+        if (data) {
+          setWaitingOn(data.waiting_on ?? "ไม่ได้ค้าง");
+          setWaitingSince(data.waiting_since ?? null);
+          setFlags({
+            needs_survey: !!data.needs_survey, has_defect: !!data.has_defect,
+            needs_redesign: !!data.needs_redesign, is_claim: !!data.is_claim,
+          });
+        }
       });
     }
   }, [job.id, job.jobNo]);
+
+  // เฟส A: บันทึก waiting_on / ธง (ตั้ง waiting_since เมื่อ waiting_on เปลี่ยน)
+  async function saveWaiting(nextWaiting?: string, nextFlags?: FlagState) {
+    const w = nextWaiting ?? waitingOn;
+    const f = nextFlags ?? flags;
+    let since = waitingSince;
+    if (nextWaiting !== undefined && nextWaiting !== waitingOn) {
+      since = nextWaiting === "ไม่ได้ค้าง" ? null : new Date().toISOString();
+    }
+    const { error } = await supabase.from("install_jobs").update({
+      waiting_on: w, waiting_since: since,
+      needs_survey: f.needs_survey, has_defect: f.has_defect,
+      needs_redesign: f.needs_redesign, is_claim: f.is_claim,
+    }).eq("job_no", job.jobNo);
+    if (error) { toast.error("บันทึกไม่สำเร็จ"); return; }
+    setWaitingOn(w); setWaitingSince(since); setFlags(f);
+    toast.success("อัปเดตแล้ว"); onRefresh();
+  }
+
+  // เฟส B: โหลดประวัติเมื่อเปิดแท็บ "ประวัติ"
+  useEffect(() => {
+    if (tab === "log" && job.jobNo) {
+      supabase.from("job_activity")
+        .select("id, action, field, old_value, new_value, created_at")
+        .eq("job_no", job.jobNo).order("created_at", { ascending: false }).limit(100)
+        .then(({ data }) => setActivity((data as ActivityRow[]) ?? []));
+    }
+  }, [tab, job.jobNo]);
 
   async function saveSurvey() {
     setSaving(true);
@@ -266,9 +334,42 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
           </span>
         </div>
 
+        {/* เฟส A: รออยู่ที่ใคร + ธง (เห็นทุกแท็บ) */}
+        <div className="px-4 py-2 border-b bg-gray-50/60 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 shrink-0">รออยู่ที่:</span>
+            <select
+              value={waitingOn}
+              onChange={(e) => saveWaiting(e.target.value)}
+              className={`text-xs border rounded-lg px-2 py-1 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-400 ${waitingOn !== "ไม่ได้ค้าง" ? "border-amber-300 bg-amber-50 text-amber-800 font-medium" : "border-gray-200 text-gray-600"}`}
+            >
+              {WAITING_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+            {waitingOn !== "ไม่ได้ค้าง" && waitingSince && (
+              <span className="text-xs font-semibold text-amber-700 shrink-0 whitespace-nowrap">
+                ค้างมา {Math.max(0, Math.floor((Date.now() - new Date(waitingSince).getTime()) / 86400000))} วัน
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {FLAG_DEFS.map((fd) => {
+              const on = flags[fd.key];
+              return (
+                <button
+                  key={fd.key}
+                  onClick={() => saveWaiting(undefined, { ...flags, [fd.key]: !on })}
+                  className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${on ? "bg-red-100 border-red-300 text-red-700 font-medium" : "bg-white border-gray-200 text-gray-400 hover:border-gray-300"}`}
+                >
+                  {on ? "●" : "○"} {fd.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Tabs */}
         <div className="flex text-sm border-b overflow-x-auto">
-          {(["info", "stages", "survey", "qc", "close"] as const).map((t) => (
+          {(["info", "stages", "survey", "qc", "close", "log"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -282,7 +383,8 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                : t === "stages" ? "สเตจ"
                : t === "survey" ? "สำรวจ"
                : t === "qc" ? "QC"
-               : "ปิดงาน"}
+               : t === "close" ? "ปิดงาน"
+               : "ประวัติ"}
             </button>
           ))}
         </div>
@@ -659,6 +761,30 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
               >
                 ✅ ปิดงาน &amp; คัดลอกลิงก์ประเมิน
               </button>
+            </div>
+          )}
+
+          {/* LOG — ประวัติงาน (เฟส B) */}
+          {tab === "log" && (
+            <div className="space-y-2">
+              {activity.length === 0 ? (
+                <p className="text-sm text-gray-400">ยังไม่มีประวัติการเปลี่ยนแปลง</p>
+              ) : activity.map((a) => (
+                <div key={a.id} className="flex items-start gap-2 text-xs border-b border-gray-100 pb-2">
+                  <span className="text-gray-400 shrink-0 w-[86px]">
+                    {new Date(a.created_at).toLocaleString("th-TH", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                  <div className="flex-1 leading-relaxed">
+                    <span className="font-medium text-gray-700">{ACT_FIELD_LABEL[a.field ?? ""] ?? a.field}</span>
+                    {a.action === "created" ? (
+                      <span className="text-green-600"> · สร้างงาน</span>
+                    ) : (
+                      <span className="text-gray-500"> : {fmtActVal(a.field, a.old_value)} → <span className="text-gray-800 font-medium">{fmtActVal(a.field, a.new_value)}</span></span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <p className="text-[10px] text-gray-400 pt-1">บันทึกอัตโนมัติทุกการเปลี่ยนแปลง · ล่าสุด 100 รายการ</p>
             </div>
           )}
 

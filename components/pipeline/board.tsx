@@ -49,6 +49,12 @@ function mapRow(row: Record<string, unknown>): InstallJob {
     locationUrl: row.location_url as string,
     apptShift: row.appt_shift as InstallJob["apptShift"],
     apptDate: row.appt_date as string,
+    waitingOn: row.waiting_on as string,
+    waitingSince: row.waiting_since as string,
+    needsSurvey: !!row.needs_survey,
+    hasDefect: !!row.has_defect,
+    needsRedesign: !!row.needs_redesign,
+    isClaim: !!row.is_claim,
   };
 }
 
