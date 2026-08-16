@@ -82,6 +82,7 @@ interface SurveyData {
   wetZone: boolean;
   areaSqm: string;
   notes: string;
+  photos?: string[];
   savedAt?: string;
 }
 
@@ -126,7 +127,9 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     wetZone: false,
     areaSqm: "",
     notes: "",
+    photos: [],
   });
+  const [uploading, setUploading] = useState(false);
 
   // QC state
   const [qcResults, setQcResults] = useState<Record<number, QCResult>>({});
@@ -135,6 +138,11 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
   // S3 reschedule state
   const [newApptDate, setNewApptDate] = useState(job.apptDate ?? "");
+  // นัดช่าง -> คิวงาน (ตาราง appointments)
+  const [techs, setTechs] = useState<{ id: string; name: string }[]>([]);
+  const [apptTechId, setApptTechId] = useState("");
+  const [apptStart, setApptStart] = useState("09:00");
+  const [apptEnd, setApptEnd] = useState("12:00");
 
   // เฟส A: waiting_on + flags
   const [waitingOn, setWaitingOn] = useState<string>("ไม่ได้ค้าง");
@@ -169,6 +177,12 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       });
     }
   }, [job.id, job.jobNo]);
+
+  // โหลดรายชื่อทีมช่าง (active) สำหรับนัดคิว
+  useEffect(() => {
+    supabase.from("tech_teams").select("id, name").eq("is_active", true).order("name")
+      .then(({ data }) => setTechs((data as { id: string; name: string }[]) ?? []));
+  }, []);
 
   // เฟส A: บันทึก waiting_on / ธง (ตั้ง waiting_since เมื่อ waiting_on เปลี่ยน)
   async function saveWaiting(nextWaiting?: string, nextFlags?: FlagState) {
@@ -214,6 +228,34 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       toast.error("บันทึกไม่สำเร็จ: " + msg);
     }
     setSaving(false);
+  }
+
+  // แนบรูปหน้างาน -> Supabase Storage (bucket job-photos, public)
+  function surveyPhotoUrl(path: string): string {
+    return supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl;
+  }
+  async function handleSurveyUpload(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    const added: string[] = [];
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const safe = f.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = `survey/${job.jobNo}/${Date.now()}-${i}-${safe}`;
+        const { error } = await supabase.storage.from("job-photos").upload(path, f, { upsert: false, contentType: f.type || "image/jpeg" });
+        if (error) throw error;
+        added.push(path);
+      }
+      setSurvey((s) => ({ ...s, photos: [...(s.photos ?? []), ...added] }));
+      toast.success(`อัปโหลด ${added.length} รูปแล้ว — อย่าลืมกดบันทึก`);
+    } catch (e: unknown) {
+      toast.error("อัปโหลดรูปไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
+    }
+    setUploading(false);
+  }
+  function removeSurveyPhoto(path: string) {
+    setSurvey((s) => ({ ...s, photos: (s.photos ?? []).filter((p) => p !== path) }));
   }
 
   async function saveQC() {
@@ -276,6 +318,27 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "เกิดข้อผิดพลาด";
       toast.error(msg);
+    }
+    setSaving(false);
+  }
+
+  // นัดช่าง + เข้าคิว: สร้างเรคอร์ดใน appointments (คิวช่าง) + เซ็ต appt_date บนงาน
+  async function bookTech() {
+    if (!newApptDate) { toast.error("กรุณาเลือกวันนัด"); return; }
+    if (!apptTechId) { toast.error("กรุณาเลือกทีมช่าง"); return; }
+    setSaving(true);
+    try {
+      const slotStart = new Date(`${newApptDate}T${apptStart || "09:00"}:00`).toISOString();
+      const slotEnd = new Date(`${newApptDate}T${apptEnd || "12:00"}:00`).toISOString();
+      const { error: aerr } = await supabase.from("appointments").insert({
+        job_id: job.jobNo, tech_id: apptTechId, slot_start: slotStart, slot_end: slotEnd, status: "proposed",
+      });
+      if (aerr) throw aerr;
+      await supabase.from("install_jobs").update({ appt_date: newApptDate }).eq("job_no", job.jobNo);
+      toast.success("นัดช่างเข้าคิวแล้ว — ดูได้ที่หน้า นัดหมาย/คิวงาน");
+      onRefresh();
+    } catch (e: unknown) {
+      toast.error("นัดช่างไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
     }
     setSaving(false);
   }
@@ -490,6 +553,32 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                   >
                     {saving ? "กำลังบันทึก..." : "📅 บันทึกวันนัด"}
                   </button>
+
+                  {/* นัดช่าง -> เข้าคิวงาน (appointments) */}
+                  <div className="pt-3 mt-1 border-t border-indigo-200 space-y-2">
+                    <p className="text-xs font-semibold text-indigo-800">👷 นัดช่าง + เข้าคิวงาน</p>
+                    <select
+                      value={apptTechId}
+                      onChange={(e) => setApptTechId(e.target.value)}
+                      className="w-full border border-indigo-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    >
+                      <option value="">— เลือกทีมช่าง —</option>
+                      {techs.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                    <div className="flex items-center gap-2">
+                      <input type="time" value={apptStart} onChange={(e) => setApptStart(e.target.value)} className="flex-1 border border-indigo-200 rounded-lg px-2 py-2 text-sm bg-white" />
+                      <span className="text-xs text-indigo-500">ถึง</span>
+                      <input type="time" value={apptEnd} onChange={(e) => setApptEnd(e.target.value)} className="flex-1 border border-indigo-200 rounded-lg px-2 py-2 text-sm bg-white" />
+                    </div>
+                    <button
+                      onClick={bookTech}
+                      disabled={saving || !newApptDate || !apptTechId}
+                      className="w-full bg-cyan-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-cyan-700 disabled:opacity-50 transition-colors"
+                    >
+                      {saving ? "กำลังบันทึก..." : "👷 นัดช่าง + เข้าคิว"}
+                    </button>
+                    <p className="text-[11px] text-indigo-500">สร้างคิวในตาราง นัดหมาย/คิวงาน (สถานะ: รอยืนยัน)</p>
+                  </div>
                 </div>
               )}
 
@@ -630,6 +719,33 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                   value={survey.notes}
                   onChange={(e) => setSurvey((s) => ({ ...s, notes: e.target.value }))}
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-1">รูปหน้างาน</label>
+                <div className="flex gap-2 mb-2">
+                  <label className="flex-1 cursor-pointer text-center border border-blue-200 text-blue-700 rounded-lg py-2 text-sm hover:bg-blue-50">
+                    📷 ถ่ายรูป
+                    <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { handleSurveyUpload(e.target.files); e.target.value = ""; }} />
+                  </label>
+                  <label className="flex-1 cursor-pointer text-center border border-slate-200 text-slate-700 rounded-lg py-2 text-sm hover:bg-slate-50">
+                    🖼️ เลือกรูป
+                    <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { handleSurveyUpload(e.target.files); e.target.value = ""; }} />
+                  </label>
+                </div>
+                {uploading && <p className="text-xs text-gray-400 mb-2">กำลังอัปโหลด...</p>}
+                {(survey.photos?.length ?? 0) > 0 && (
+                  <div className="grid grid-cols-3 gap-2">
+                    {survey.photos!.map((p) => (
+                      <div key={p} className="relative">
+                        <a href={surveyPhotoUrl(p)} target="_blank" rel="noopener noreferrer">
+                          <img src={surveyPhotoUrl(p)} alt="รูปหน้างาน" className="w-full h-20 object-cover rounded-lg border border-gray-200" />
+                        </a>
+                        <button onClick={() => removeSurveyPhoto(p)} className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-5 h-5 text-xs leading-none flex items-center justify-center">×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {survey.savedAt && (
