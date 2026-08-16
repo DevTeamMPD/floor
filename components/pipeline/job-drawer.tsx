@@ -234,7 +234,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   function surveyPhotoUrl(path: string): string {
     return supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl;
   }
-  async function handleSurveyUpload(files: FileList | null) {
+  async function handleSurveyUpload(files: File[]) {
     if (!files || files.length === 0) return;
     setUploading(true);
     const added: string[] = [];
@@ -726,11 +726,11 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 <div className="flex gap-2 mb-2">
                   <label className="flex-1 cursor-pointer text-center border border-blue-200 text-blue-700 rounded-lg py-2 text-sm hover:bg-blue-50">
                     📷 ถ่ายรูป
-                    <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { handleSurveyUpload(e.target.files); e.target.value = ""; }} />
+                    <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; handleSurveyUpload(fs); }} />
                   </label>
                   <label className="flex-1 cursor-pointer text-center border border-slate-200 text-slate-700 rounded-lg py-2 text-sm hover:bg-slate-50">
                     🖼️ เลือกรูป
-                    <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { handleSurveyUpload(e.target.files); e.target.value = ""; }} />
+                    <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; handleSurveyUpload(fs); }} />
                   </label>
                 </div>
                 {uploading && <p className="text-xs text-gray-400 mb-2">กำลังอัปโหลด...</p>}
