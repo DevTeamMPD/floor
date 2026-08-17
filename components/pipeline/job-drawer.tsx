@@ -121,9 +121,40 @@ interface MatUsage {
   savedAt?: string;
 }
 
+// เฟส 4: ใบสั่งงาน (S2) — หัวหน้าช่างระบุของที่ต้องหยิบ + คำนวณความยาวจากโซน
+interface PickNewItem { width: "110" | "140"; length_cm: string; qty: string; note: string }
+interface PickRemnant { mat_type: string; width_bin: string; length_cm: string; note: string }
+interface PickPlan {
+  newItems: PickNewItem[];
+  remnants: PickRemnant[];
+  note: string;
+  savedAt?: string;
+}
+interface ZoneRow { zone_name: string; width_cm: number; length_cm: number }
+// ความยาวแผ่นที่ต้องใช้ต่อโซน (roll 140/110) — อิงตรรกะเดียวกับหน้าต้นทุนเศษ (ยังไม่หักสิ่งกีดขวาง)
+function stripLenForZone(dimA: number, dimB: number): { total140: number; total110: number } {
+  function orient(stripLen: number, cover: number) {
+    const nPairs = Math.floor(cover / 250);
+    const rem = cover % 250;
+    let n140 = nPairs, n110 = nPairs;
+    if (rem > 0 && rem <= 110) n110 += 1;
+    else if (rem > 110) { n140 += 1; n110 += 1; }
+    return { total140: n140 * stripLen, total110: n110 * stripLen };
+  }
+  const a = orient(dimA, dimB), b = orient(dimB, dimA);
+  return a.total140 + a.total110 <= b.total140 + b.total110 ? a : b;
+}
+function sumZoneStrips(zones: ZoneRow[]): { total140: number; total110: number } {
+  return zones.reduce((acc, z) => {
+    if (z.width_cm <= 0 || z.length_cm <= 0) return acc;
+    const c = stripLenForZone(z.width_cm, z.length_cm);
+    return { total140: acc.total140 + c.total140, total110: acc.total110 + c.total110 };
+  }, { total140: 0, total110: 0 });
+}
+
 export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const supabase = createClient();
-  const [tab, setTab] = useState<"info" | "stages" | "survey" | "qc" | "close" | "log">("info");
+  const [tab, setTab] = useState<"info" | "stages" | "survey" | "log">("info");
   const [saving, setSaving] = useState(false);
   const [activity, setActivity] = useState<ActivityRow[]>([]);
 
@@ -145,6 +176,13 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
   // เฟส 2: ใบส่งงาน
   const [dispatchToken, setDispatchToken] = useState<string | null>(null);
+
+  // เฟส 4: ใบสั่งงาน (S2) — pick plan + zones
+  const [pickPlan, setPickPlan] = useState<PickPlan>({ newItems: [], remnants: [], note: "" });
+  const [zones, setZones] = useState<ZoneRow[]>([]);
+
+  // ดูรูปขยายที่โซนซ้าย (A) โดย drawer (B) ยังกดได้
+  const [preview, setPreview] = useState<string | null>(null);
 
   // QC state
   const [qcResults, setQcResults] = useState<Record<number, QCResult>>({});
@@ -168,7 +206,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   useEffect(() => {
     if (job.id) {
       supabase.from("install_jobs")
-        .select("survey_data, qc_data, material_usage, waiting_on, waiting_since, needs_survey, has_defect, needs_redesign, is_claim")
+        .select("survey_data, qc_data, material_usage, pick_plan, waiting_on, waiting_since, needs_survey, has_defect, needs_redesign, is_claim")
         .eq("job_no", job.jobNo).single().then(({ data }) => {
         if (data?.survey_data) {
           try { setSurvey(JSON.parse(data.survey_data)); } catch {}
@@ -177,6 +215,12 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
           try {
             const mu = typeof data.material_usage === "string" ? JSON.parse(data.material_usage) : data.material_usage;
             if (mu) setMatUsage({ noRemnant: !!mu.noRemnant, pieces: mu.pieces ?? [], note: mu.note ?? "", savedAt: mu.savedAt });
+          } catch {}
+        }
+        if (data?.pick_plan) {
+          try {
+            const pp = typeof data.pick_plan === "string" ? JSON.parse(data.pick_plan) : data.pick_plan;
+            if (pp) setPickPlan({ newItems: pp.newItems ?? [], remnants: pp.remnants ?? [], note: pp.note ?? "", savedAt: pp.savedAt });
           } catch {}
         }
         if (data?.qc_data) {
@@ -211,6 +255,13 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     supabase.from("dispatch_notes").select("share_token").eq("job_no", job.jobNo)
       .order("created_at", { ascending: false }).limit(1)
       .then(({ data }) => { if (data && data[0]) setDispatchToken(data[0].share_token as string); });
+  }, [job.jobNo]);
+
+  // เฟส 4: โหลดโซนของงาน (คำนวณความยาวแผ่นที่ต้องใช้)
+  useEffect(() => {
+    if (!job.jobNo) return;
+    supabase.from("install_job_zones").select("zone_name, width_cm, length_cm").eq("job_no", job.jobNo)
+      .then(({ data }) => setZones((data as ZoneRow[]) ?? []));
   }, [job.jobNo]);
 
   // เฟส A: บันทึก waiting_on / ธง (ตั้ง waiting_since เมื่อ waiting_on เปลี่ยน)
@@ -445,6 +496,30 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     setSaving(false);
   }
 
+  // เฟส 4: ใบสั่งงาน (S2) — คำนวณความยาวที่ต้องใช้จากโซน + บันทึกของที่ต้องหยิบ
+  const req = sumZoneStrips(zones);
+  function addNewItem() { setPickPlan((p) => ({ ...p, newItems: [...p.newItems, { width: "140", length_cm: "", qty: "1", note: "" }] })); }
+  function setNewItem(i: number, k: keyof PickNewItem, v: string) { setPickPlan((p) => ({ ...p, newItems: p.newItems.map((x, idx) => idx === i ? { ...x, [k]: v } : x) })); }
+  function removeNewItem(i: number) { setPickPlan((p) => ({ ...p, newItems: p.newItems.filter((_, idx) => idx !== i) })); }
+  function addPickRemnant() { setPickPlan((p) => ({ ...p, remnants: [...p.remnants, { mat_type: job.product ?? "", width_bin: "", length_cm: "", note: "" }] })); }
+  function setPickRemnant(i: number, k: keyof PickRemnant, v: string) { setPickPlan((p) => ({ ...p, remnants: p.remnants.map((x, idx) => idx === i ? { ...x, [k]: v } : x) })); }
+  function removePickRemnant(i: number) { setPickPlan((p) => ({ ...p, remnants: p.remnants.filter((_, idx) => idx !== i) })); }
+  async function savePickPlan() {
+    setSaving(true);
+    try {
+      const payload = { ...pickPlan, savedAt: new Date().toISOString() };
+      const { error } = await supabase.from("install_jobs")
+        .update({ pick_plan: JSON.stringify(payload) }).eq("job_no", job.jobNo);
+      if (error) throw error;
+      setPickPlan(payload);
+      toast.success("บันทึกใบสั่งงานแล้ว — จะแสดงในใบส่งงาน");
+      onRefresh();
+    } catch (e: unknown) {
+      toast.error("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
+    }
+    setSaving(false);
+  }
+
   // Advance stage
   async function advanceStage() {
     if (job.stage >= 6) return;
@@ -490,6 +565,22 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+      {/* โซน A: รูปขยายฝั่งซ้าย — drawer (โซน B) ยังกดได้ */}
+      {preview && (
+        <div
+          className="hidden md:flex fixed inset-y-0 left-0 z-40 flex-col items-center justify-center p-4 bg-black/70"
+          style={{ right: "32rem" }}
+          onClick={(e) => { e.stopPropagation(); setPreview(null); }}
+        >
+          <img src={preview} alt="รูปขยาย" className="max-w-full max-h-[88vh] object-contain rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
+          <button
+            onClick={(e) => { e.stopPropagation(); setPreview(null); }}
+            className="mt-3 bg-white/90 text-slate-800 rounded-full px-4 py-1.5 text-sm font-medium hover:bg-white"
+          >
+            ปิดรูป ✕
+          </button>
+        </div>
+      )}
       <div
         className="w-full max-w-lg h-full bg-white shadow-2xl flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
@@ -545,7 +636,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
         {/* Tabs */}
         <div className="flex text-sm border-b overflow-x-auto">
-          {(["info", "stages", "survey", "qc", "close", "log"] as const).map((t) => (
+          {(["info", "stages", "survey", "log"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -558,8 +649,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
               {t === "info" ? "ข้อมูล"
                : t === "stages" ? "สเตจ"
                : t === "survey" ? "สำรวจ"
-               : t === "qc" ? "QC"
-               : t === "close" ? "ปิดงาน"
                : "ประวัติ"}
             </button>
           ))}
@@ -707,6 +796,57 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                     </button>
                     <p className="text-[11px] text-indigo-500">สร้างคิวในตาราง นัดหมาย/คิวงาน (สถานะ: รอยืนยัน)</p>
                   </div>
+                </div>
+              )}
+
+              {/* S2: ใบสั่งงาน (หัวหน้าช่าง) — ของที่ต้องหยิบ + คำนวณความยาว */}
+              {job.stage === 2 && (
+                <div className="border-2 border-amber-300 rounded-xl p-4 bg-amber-50 space-y-3">
+                  <p className="text-sm font-semibold text-amber-900">🧰 ใบสั่งงาน (หัวหน้าช่างระบุของที่ต้องหยิบ)</p>
+
+                  <div className="bg-white rounded-lg p-2.5 text-xs text-slate-700 border border-amber-200">
+                    <p className="font-medium text-amber-800 mb-1">📐 ความยาวแผ่นที่ห้องต้องใช้ (อ้างอิงจากโซน)</p>
+                    {zones.length === 0 ? (
+                      <p className="text-slate-400">ยังไม่มีข้อมูลโซน — ไปกำหนดโซนที่หน้า “ต้นทุนเศษ” เพื่อคำนวณ</p>
+                    ) : (
+                      <p>รวม {zones.length} โซน · หน้ากว้าง 140: <b>{req.total140.toLocaleString()}</b> ซม. · หน้ากว้าง 110: <b>{req.total110.toLocaleString()}</b> ซม.</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-amber-800">🆕 ของใหม่ที่ต้องเบิก</p>
+                    {pickPlan.newItems.map((it, i) => (
+                      <div key={i} className="flex items-center gap-1.5">
+                        <select value={it.width} onChange={(e) => setNewItem(i, "width", e.target.value)} className="border border-amber-200 rounded px-1.5 py-1 text-sm bg-white">
+                          <option value="140">140</option>
+                          <option value="110">110</option>
+                        </select>
+                        <input value={it.length_cm} onChange={(e) => setNewItem(i, "length_cm", e.target.value)} placeholder="ยาว(ซม.)" inputMode="decimal" className="w-20 border border-amber-200 rounded px-1.5 py-1 text-sm" />
+                        <input value={it.qty} onChange={(e) => setNewItem(i, "qty", e.target.value)} placeholder="จำนวน" inputMode="numeric" className="w-16 border border-amber-200 rounded px-1.5 py-1 text-sm" />
+                        <input value={it.note} onChange={(e) => setNewItem(i, "note", e.target.value)} placeholder="หมายเหตุ" className="flex-1 border border-amber-200 rounded px-1.5 py-1 text-sm" />
+                        <button onClick={() => removeNewItem(i)} className="text-red-400 hover:text-red-600 text-xs px-1">✕</button>
+                      </div>
+                    ))}
+                    <button onClick={addNewItem} className="w-full border border-dashed border-amber-400 text-amber-700 rounded-lg py-1.5 text-sm hover:bg-amber-100">+ เพิ่มของใหม่</button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-amber-800">♻️ เศษที่ให้หยิบไปใช้</p>
+                    {pickPlan.remnants.map((it, i) => (
+                      <div key={i} className="flex items-center gap-1.5">
+                        <input value={it.mat_type} onChange={(e) => setPickRemnant(i, "mat_type", e.target.value)} placeholder="ชนิด" className="flex-1 border border-amber-200 rounded px-1.5 py-1 text-sm" />
+                        <input value={it.width_bin} onChange={(e) => setPickRemnant(i, "width_bin", e.target.value)} placeholder="กว้าง" inputMode="numeric" className="w-16 border border-amber-200 rounded px-1.5 py-1 text-sm" />
+                        <input value={it.length_cm} onChange={(e) => setPickRemnant(i, "length_cm", e.target.value)} placeholder="ยาว" inputMode="decimal" className="w-16 border border-amber-200 rounded px-1.5 py-1 text-sm" />
+                        <button onClick={() => removePickRemnant(i)} className="text-red-400 hover:text-red-600 text-xs px-1">✕</button>
+                      </div>
+                    ))}
+                    <button onClick={addPickRemnant} className="w-full border border-dashed border-amber-400 text-amber-700 rounded-lg py-1.5 text-sm hover:bg-amber-100">+ เพิ่มเศษที่ใช้</button>
+                  </div>
+
+                  <textarea value={pickPlan.note} onChange={(e) => setPickPlan((p) => ({ ...p, note: e.target.value }))} rows={2} placeholder="หมายเหตุถึงทีมช่าง" className="w-full border border-amber-200 rounded-lg px-2 py-1.5 text-sm bg-white" />
+                  <button onClick={savePickPlan} disabled={saving} className="w-full bg-amber-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-amber-700 disabled:opacity-50">
+                    {saving ? "กำลังบันทึก..." : pickPlan.savedAt ? "🧰 บันทึกใบสั่งงานอีกครั้ง" : "🧰 บันทึกใบสั่งงาน"}
+                  </button>
                 </div>
               )}
 
@@ -940,9 +1080,9 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                   <div className="grid grid-cols-3 gap-2">
                     {survey.photos!.map((p) => (
                       <div key={p} className="relative">
-                        <a href={surveyPhotoUrl(p)} target="_blank" rel="noopener noreferrer">
-                          <img src={surveyPhotoUrl(p)} alt="รูปหน้างาน" className="w-full h-20 object-cover rounded-lg border border-gray-200" />
-                        </a>
+                        <button type="button" onClick={() => setPreview(surveyPhotoUrl(p))} className="block w-full" title="กดเพื่อดูรูปขยายด้านซ้าย">
+                          <img src={surveyPhotoUrl(p)} alt="รูปหน้างาน" className="w-full h-20 object-cover rounded-lg border border-gray-200 hover:ring-2 hover:ring-blue-400" />
+                        </button>
                         <button onClick={() => removeSurveyPhoto(p)} className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-5 h-5 text-xs leading-none flex items-center justify-center">×</button>
                       </div>
                     ))}
@@ -962,122 +1102,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
               >
                 {saving ? "กำลังบันทึก..." : "💾 บันทึกข้อมูลสำรวจ"}
-              </button>
-            </div>
-          )}
-
-          {/* QC */}
-          {tab === "qc" && (
-            <div className="space-y-4">
-              <div className="text-xs text-gray-500 bg-blue-50 border border-blue-200 rounded p-2">
-                เกณฑ์ตรวจรับงาน 15 ข้อ ตาม SOP — ใช้ตอนติดตั้งสำเร็จ (S4)
-              </div>
-
-              <div className="flex gap-3 text-xs">
-                <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-600">ตอบแล้ว {qcAnswered}/15</span>
-                <span className="px-2 py-1 rounded-full bg-green-100 text-green-700">ผ่าน {qcPass}</span>
-                <span className="px-2 py-1 rounded-full bg-red-100 text-red-700">ไม่ผ่าน {qcFail}</span>
-              </div>
-
-              <div className="space-y-2">
-                {QC_ITEMS.map(({ id, label, spec }) => (
-                  <div key={id} className="border rounded-lg p-3 space-y-1.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-gray-800">
-                          <span className="text-gray-400 mr-1">{id}.</span>{label}
-                        </p>
-                        <p className="text-xs text-gray-500">{spec}</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      {(["pass", "fail", "na"] as QCResult[]).map((v) => (
-                        <button
-                          key={v as string}
-                          onClick={() =>
-                            setQcResults((r) => ({
-                              ...r,
-                              [id]: r[id] === v ? null : v,
-                            }))
-                          }
-                          className={`flex-1 py-1 rounded text-xs font-medium transition-colors border ${
-                            qcResults[id] === v
-                              ? v === "pass"
-                                ? "bg-green-500 text-white border-green-500"
-                                : v === "fail"
-                                ? "bg-red-500 text-white border-red-500"
-                                : "bg-gray-400 text-white border-gray-400"
-                              : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
-                          }`}
-                        >
-                          {v === "pass" ? "ผ่าน" : v === "fail" ? "ไม่ผ่าน" : "N/A"}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">ผู้ตรวจ</label>
-                <input
-                  type="text"
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="ชื่อผู้ตรวจ"
-                  value={qcInspector}
-                  onChange={(e) => setQcInspector(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-800 mb-1">หมายเหตุ QC</label>
-                <textarea
-                  rows={3}
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                  placeholder="ประเด็นที่พบ หรือข้อสังเกต..."
-                  value={qcNotes}
-                  onChange={(e) => setQcNotes(e.target.value)}
-                />
-              </div>
-
-              {qcFail > 0 && (
-                <div className="text-xs bg-red-50 border border-red-200 rounded p-2 text-red-700">
-                  ⚠️ มี {qcFail} รายการที่ยังไม่ผ่าน — กรุณาแก้ไขก่อนปิดงาน
-                </div>
-              )}
-
-              <button
-                onClick={saveQC}
-                disabled={saving}
-                className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
-              >
-                {saving ? "กำลังบันทึก..." : "💾 บันทึก QC"}
-              </button>
-            </div>
-          )}
-
-          {/* CLOSE */}
-          {tab === "close" && (
-            <div className="space-y-4">
-              {qcFail > 0 && (
-                <div className="text-sm bg-red-50 border border-red-200 rounded-lg p-3 text-red-700">
-                  ⚠️ มี {qcFail} รายการ QC ที่ยังไม่ผ่าน — แนะนำแก้ไขก่อนปิดงาน
-                </div>
-              )}
-              <div className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3 space-y-1">
-                <p>การปิดงานจะ:</p>
-                <ul className="list-disc list-inside space-y-0.5 text-gray-700">
-                  <li>เปลี่ยน Stage เป็น <strong>เสร็จสิ้น</strong></li>
-                  <li>บันทึกวันที่ปิดงาน</li>
-                  <li>สร้างลิงก์ประเมินและคัดลอกไปยัง Clipboard</li>
-                </ul>
-              </div>
-              <button
-                onClick={closeJob}
-                disabled={saving}
-                className="w-full bg-green-600 text-white rounded-lg py-3 text-sm font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors"
-              >
-                ✅ ปิดงาน &amp; คัดลอกลิงก์ประเมิน
               </button>
             </div>
           )}

@@ -17,6 +17,7 @@ interface JobRow {
   appt_date: string | null;
   appt_shift: string | null;
   survey_data: string | null;
+  pick_plan: string | null;
 }
 
 interface Survey {
@@ -25,6 +26,24 @@ interface Survey {
   wetZone?: boolean;
   notes?: string;
   photos?: string[];
+}
+
+interface PickNewItem { width: string; length_cm: string; qty: string; note: string }
+interface PickRemnant { mat_type: string; width_bin: string; length_cm: string; note: string }
+interface PickPlan { newItems?: PickNewItem[]; remnants?: PickRemnant[]; note?: string }
+interface ZoneRow { zone_name: string; width_cm: number; length_cm: number }
+
+function stripLenForZone(dimA: number, dimB: number): { total140: number; total110: number } {
+  function orient(stripLen: number, cover: number) {
+    const nPairs = Math.floor(cover / 250);
+    const rem = cover % 250;
+    let n140 = nPairs, n110 = nPairs;
+    if (rem > 0 && rem <= 110) n110 += 1;
+    else if (rem > 110) { n140 += 1; n110 += 1; }
+    return { total140: n140 * stripLen, total110: n110 * stripLen };
+  }
+  const a = orient(dimA, dimB), b = orient(dimB, dimA);
+  return a.total140 + a.total110 <= b.total140 + b.total110 ? a : b;
 }
 
 export default function DispatchPage() {
@@ -36,6 +55,8 @@ export default function DispatchPage() {
   const [survey, setSurvey] = useState<Survey | null>(null);
   const [tech, setTech] = useState<string | null>(null);
   const [note, setNote] = useState<string>("");
+  const [pick, setPick] = useState<PickPlan | null>(null);
+  const [req, setReq] = useState<{ total140: number; total110: number } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -45,11 +66,22 @@ export default function DispatchPage() {
       if (!dn) { setState("invalid"); return; }
       setNote(dn.note ?? "");
       const { data: j } = await supabase.from("install_jobs")
-        .select("job_no, customer_name, customer_phone, address, location_url, product_name, product_skus, appt_date, appt_shift, survey_data")
+        .select("job_no, customer_name, customer_phone, address, location_url, product_name, product_skus, appt_date, appt_shift, survey_data, pick_plan")
         .eq("job_no", dn.job_no).maybeSingle();
       if (!j) { setState("invalid"); return; }
       setJob(j as JobRow);
       if (j.survey_data) { try { setSurvey(JSON.parse(j.survey_data)); } catch {} }
+      if (j.pick_plan) { try { setPick(typeof j.pick_plan === "string" ? JSON.parse(j.pick_plan) : j.pick_plan); } catch {} }
+      const { data: zs } = await supabase.from("install_job_zones")
+        .select("zone_name, width_cm, length_cm").eq("job_no", dn.job_no);
+      if (zs && zs.length) {
+        const r = (zs as ZoneRow[]).reduce((acc, z) => {
+          if (z.width_cm <= 0 || z.length_cm <= 0) return acc;
+          const c = stripLenForZone(z.width_cm, z.length_cm);
+          return { total140: acc.total140 + c.total140, total110: acc.total110 + c.total110 };
+        }, { total140: 0, total110: 0 });
+        setReq(r);
+      }
       const { data: appt } = await supabase.from("appointments")
         .select("tech_id, slot_start").eq("job_id", dn.job_no)
         .order("slot_start", { ascending: false }).limit(1);
@@ -118,13 +150,49 @@ export default function DispatchPage() {
               </tbody>
             </table>
             {survey.photos && survey.photos.length > 0 && (
-              <div className="grid grid-cols-3 gap-2 mt-2">
+              <div className="mt-2 space-y-3">
                 {survey.photos.map((p, i) => (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img key={i} src={photoUrl(p)} alt={`survey-${i}`} className="w-full h-24 object-cover rounded-lg border" />
+                  <img key={i} src={photoUrl(p)} alt={`survey-${i}`} className="w-full max-h-[70vh] object-contain rounded-lg border bg-slate-50 print:max-h-none print:h-auto print:break-after-page" />
                 ))}
               </div>
             )}
+          </section>
+        )}
+
+        {pick && ((pick.newItems && pick.newItems.length > 0) || (pick.remnants && pick.remnants.length > 0) || req) && (
+          <section>
+            <h2 className="text-sm font-semibold text-slate-700 mb-1">ใบสั่งงาน — ของที่ต้องหยิบ</h2>
+            {req && (
+              <p className="text-sm mb-2">📐 ความยาวแผ่นที่ห้องต้องใช้ (อ้างอิงโซน): หน้ากว้าง 140 = <b>{req.total140.toLocaleString()}</b> ซม. · หน้ากว้าง 110 = <b>{req.total110.toLocaleString()}</b> ซม.</p>
+            )}
+            {pick.newItems && pick.newItems.length > 0 && (
+              <div className="mb-2">
+                <p className="text-xs font-semibold text-slate-600 mb-1">🆕 ของใหม่ที่ต้องเบิก</p>
+                <table className="w-full text-sm border-collapse">
+                  <thead><tr className="text-left text-slate-500 border-b"><th className="py-1 pr-2">หน้ากว้าง</th><th className="py-1 pr-2">ยาว (ซม.)</th><th className="py-1 pr-2">จำนวน</th><th className="py-1">หมายเหตุ</th></tr></thead>
+                  <tbody>
+                    {pick.newItems.map((it, i) => (
+                      <tr key={i} className="border-b last:border-0"><td className="py-1 pr-2">{it.width} ซม.</td><td className="py-1 pr-2">{it.length_cm || "—"}</td><td className="py-1 pr-2">{it.qty || "—"}</td><td className="py-1">{it.note || "—"}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {pick.remnants && pick.remnants.length > 0 && (
+              <div className="mb-2">
+                <p className="text-xs font-semibold text-slate-600 mb-1">♻️ เศษที่ให้หยิบไปใช้</p>
+                <table className="w-full text-sm border-collapse">
+                  <thead><tr className="text-left text-slate-500 border-b"><th className="py-1 pr-2">ชนิด</th><th className="py-1 pr-2">กว้าง</th><th className="py-1">ยาว (ซม.)</th></tr></thead>
+                  <tbody>
+                    {pick.remnants.map((it, i) => (
+                      <tr key={i} className="border-b last:border-0"><td className="py-1 pr-2">{it.mat_type || "—"}</td><td className="py-1 pr-2">{it.width_bin || "—"}</td><td className="py-1">{it.length_cm || "—"}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {pick.note && <p className="text-sm whitespace-pre-wrap">📝 {pick.note}</p>}
           </section>
         )}
 
