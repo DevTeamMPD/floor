@@ -4,13 +4,12 @@ import { createClient } from "@supabase/supabase-js";
 export const dynamic = "force-dynamic";
 
 const STAGES: { id: number; name: string }[] = [
-  { id: 1, name: "รับออเดอร์" },
-  { id: 2, name: "ติดต่อลูกค้า" },
-  { id: 3, name: "ยืนยันนัดหมาย" },
-  { id: 4, name: "เตรียมงาน" },
-  { id: 5, name: "ระหว่างติดตั้ง" },
-  { id: 6, name: "ตรวจสอบงาน" },
-  { id: 7, name: "เสร็จสิ้น" },
+  { id: 1, name: "รับ order" },
+  { id: 2, name: "ยืนยันนัด + ใบส่งงาน" },
+  { id: 3, name: "ระหว่างติดตั้ง" },
+  { id: 4, name: "ติดตั้งสำเร็จ" },
+  { id: 5, name: "รอประเมินหลังการขาย" },
+  { id: 6, name: "เสร็จสิ้น" },
 ];
 
 type Mov = { i140: number; r140: number; i110: number; r110: number };
@@ -77,7 +76,7 @@ export async function GET() {
       const src = jb.order_source || "อื่นๆ";
       bySource[src] = (bySource[src] || 0) + 1;
       if (jb.order_date) { const ym = String(jb.order_date).slice(0, 7); byMonthMap[ym] = (byMonthMap[ym] || 0) + 1; }
-      if (st === 7) done++;
+      if (st === 6) done++;
       else {
         active++;
         if (jb.due_date && String(jb.due_date) < today) { overdue++; overdueList.push({ customer: jb.customer_name || "-", product: jb.product_name || "", due: String(jb.due_date), stage: st }); }
@@ -108,7 +107,7 @@ export async function GET() {
       const c = new Date(String(jb.completed_date)).getTime();
       if (!isNaN(o) && !isNaN(c) && c >= o) leadDays.push(Math.round((c - o) / DAY));
     }
-    if (st !== 7 && jb.updated_at) {
+    if (st !== 6 && jb.updated_at) {
       const u = new Date(String(jb.updated_at)).getTime();
       if (!isNaN(u)) {
         const days = Math.floor((nowMs - u) / DAY);

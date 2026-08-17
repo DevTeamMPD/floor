@@ -112,6 +112,15 @@ interface QCData {
   savedAt?: string;
 }
 
+// เฟส 3: เศษคงเหลือ (S4) — บันทึกง่าย + เข้าคลังเศษ (remnant_stock)
+interface RemnantPiece { mat_type: string; width_bin: string; length_cm: string; note: string }
+interface MatUsage {
+  noRemnant: boolean;
+  pieces: RemnantPiece[];
+  note: string;
+  savedAt?: string;
+}
+
 export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const supabase = createClient();
   const [tab, setTab] = useState<"info" | "stages" | "survey" | "qc" | "close" | "log">("info");
@@ -130,6 +139,12 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     photos: [],
   });
   const [uploading, setUploading] = useState(false);
+
+  // เฟส 3: เศษคงเหลือ (S4)
+  const [matUsage, setMatUsage] = useState<MatUsage>({ noRemnant: false, pieces: [], note: "" });
+
+  // เฟส 2: ใบส่งงาน
+  const [dispatchToken, setDispatchToken] = useState<string | null>(null);
 
   // QC state
   const [qcResults, setQcResults] = useState<Record<number, QCResult>>({});
@@ -153,10 +168,16 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   useEffect(() => {
     if (job.id) {
       supabase.from("install_jobs")
-        .select("survey_data, qc_data, waiting_on, waiting_since, needs_survey, has_defect, needs_redesign, is_claim")
+        .select("survey_data, qc_data, material_usage, waiting_on, waiting_since, needs_survey, has_defect, needs_redesign, is_claim")
         .eq("job_no", job.jobNo).single().then(({ data }) => {
         if (data?.survey_data) {
           try { setSurvey(JSON.parse(data.survey_data)); } catch {}
+        }
+        if (data?.material_usage) {
+          try {
+            const mu = typeof data.material_usage === "string" ? JSON.parse(data.material_usage) : data.material_usage;
+            if (mu) setMatUsage({ noRemnant: !!mu.noRemnant, pieces: mu.pieces ?? [], note: mu.note ?? "", savedAt: mu.savedAt });
+          } catch {}
         }
         if (data?.qc_data) {
           try {
@@ -183,6 +204,14 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     supabase.from("tech_teams").select("id, name").eq("is_active", true).order("name")
       .then(({ data }) => setTechs((data as { id: string; name: string }[]) ?? []));
   }, []);
+
+  // เฟส 2: โหลด token ใบส่งงานที่มีอยู่แล้ว
+  useEffect(() => {
+    if (!job.jobNo) return;
+    supabase.from("dispatch_notes").select("share_token").eq("job_no", job.jobNo)
+      .order("created_at", { ascending: false }).limit(1)
+      .then(({ data }) => { if (data && data[0]) setDispatchToken(data[0].share_token as string); });
+  }, [job.jobNo]);
 
   // เฟส A: บันทึก waiting_on / ธง (ตั้ง waiting_since เมื่อ waiting_on เปลี่ยน)
   async function saveWaiting(nextWaiting?: string, nextFlags?: FlagState) {
@@ -343,9 +372,93 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     setSaving(false);
   }
 
+  // สำรวจหน้างานแล้วหรือยัง (ใช้เป็น gate ก่อนขึ้น S2)
+  const surveyDone = !!(survey.savedAt || survey.areaSqm || survey.floorCondition || (survey.photos?.length ?? 0) > 0);
+
+  // เฟส 3: บันทึกเศษคงเหลือ + เข้าคลังเศษ (remnant_stock)
+  const matDone = !!matUsage.savedAt;
+  function addPiece() {
+    setMatUsage((m) => ({ ...m, pieces: [...m.pieces, { mat_type: job.product ?? "", width_bin: "", length_cm: "", note: "" }] }));
+  }
+  function setPiece(i: number, k: keyof RemnantPiece, v: string) {
+    setMatUsage((m) => ({ ...m, pieces: m.pieces.map((p, idx) => idx === i ? { ...p, [k]: v } : p) }));
+  }
+  function removePiece(i: number) {
+    setMatUsage((m) => ({ ...m, pieces: m.pieces.filter((_, idx) => idx !== i) }));
+  }
+  async function saveMaterialUsage() {
+    if (!matUsage.noRemnant && matUsage.pieces.length === 0) {
+      toast.error("กรอกเศษที่เหลือ หรือติ๊ก 'ไม่มีเศษเหลือ'");
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = { ...matUsage, savedAt: new Date().toISOString() };
+      const { error } = await supabase.from("install_jobs")
+        .update({ material_usage: JSON.stringify(payload) }).eq("job_no", job.jobNo);
+      if (error) throw error;
+      // เข้าคลังเศษ: insert remnant_stock ต่อชิ้น (เฉพาะที่ยังไม่เคยบันทึก)
+      if (!matUsage.noRemnant && !matUsage.savedAt && matUsage.pieces.length > 0) {
+        const rows = matUsage.pieces
+          .filter((p) => p.width_bin || p.length_cm)
+          .map((p) => ({
+            mat_type: p.mat_type || (job.product ?? ""),
+            width_bin: p.width_bin ? Math.round(Number(p.width_bin)) : null,
+            length_cm: p.length_cm ? Number(p.length_cm) : null,
+            status: "available",
+            source_job: job.jobNo,
+            note: p.note || null,
+          }));
+        if (rows.length > 0) {
+          const { error: rerr } = await supabase.from("remnant_stock").insert(rows);
+          if (rerr) throw rerr;
+        }
+      }
+      setMatUsage(payload);
+      toast.success("บันทึกเศษคงเหลือแล้ว — เข้าคลังเศษเรียบร้อย");
+      onRefresh();
+    } catch (e: unknown) {
+      toast.error("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
+    }
+    setSaving(false);
+  }
+
+  // เฟส 2: สร้าง/เปิดใบส่งงาน (dispatch note) + ลิงก์แชร์
+  async function createDispatch() {
+    setSaving(true);
+    try {
+      let token = dispatchToken;
+      if (!token) {
+        token = ipGenToken();
+        const { error } = await supabase.from("dispatch_notes")
+          .insert({ job_no: job.jobNo, share_token: token, created_by: "admin" });
+        if (error) throw error;
+        setDispatchToken(token);
+      }
+      const link = `${window.location.origin}/dispatch/${token}`;
+      await navigator.clipboard.writeText(link).catch(() => {});
+      window.open(link, "_blank");
+      toast.success("เปิดใบส่งงาน + คัดลอกลิงก์แชร์แล้ว");
+    } catch (e: unknown) {
+      toast.error("สร้างใบส่งงานไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
+    }
+    setSaving(false);
+  }
+
   // Advance stage
   async function advanceStage() {
-    if (job.stage >= 7) return;
+    if (job.stage >= 6) return;
+    // Gate: ต้องสำรวจหน้างานก่อนขึ้น S2 (ยืนยันนัด + ใบส่งงาน)
+    if (job.stage === 1 && !surveyDone) {
+      toast.error("ต้องสำรวจหน้างาน (แท็บ สำรวจ) ก่อนส่งให้หัวหน้าช่าง");
+      setTab("survey");
+      return;
+    }
+    // Gate: ต้องกรอกเศษคงเหลือก่อนขึ้น S5 (รอประเมิน)
+    if (job.stage === 4 && !matDone) {
+      toast.error("ต้องกรอกเศษคงเหลือก่อน แล้วจึงเข้าสู่รอประเมิน");
+      return;
+    }
     const { error } = await supabase
       .from("install_jobs")
       .update({ stage: job.stage + 1 })
@@ -360,7 +473,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     const token = ipGenToken();
     const { error } = await supabase
       .from("install_jobs")
-      .update({ stage: 7, closed_at: new Date().toISOString(), eval_token: token })
+      .update({ stage: 6, closed_at: new Date().toISOString(), eval_token: token })
       .eq("job_no", job.jobNo);
     if (error) { toast.error("ปิดงานไม่สำเร็จ"); return; }
     await supabase.from("job_evals").insert({ install_job_id: job.id, token });
@@ -457,6 +570,20 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
           {/* INFO */}
           {tab === "info" && (
+            <>
+            {job.stage < 6 && (
+              <button
+                onClick={() => setTab("stages")}
+                className="w-full flex items-center justify-between border-2 border-indigo-300 bg-indigo-50 rounded-xl px-4 py-3 mb-3 hover:bg-indigo-100 transition-colors"
+              >
+                <span className="text-sm font-semibold text-indigo-800">📅 นัดหมาย & คิวช่าง</span>
+                <span className="text-xs text-indigo-700">
+                  {job.apptDate
+                    ? new Date(job.apptDate).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) + " ›"
+                    : "ยังไม่นัด — กดเพื่อจองช่าง ›"}
+                </span>
+              </button>
+            )}
             <table className="w-full text-sm">
               <tbody>
                 {FIELD_ROWS.map(({ label, key, format }) => {
@@ -472,6 +599,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 })}
               </tbody>
             </table>
+            </>
           )}
 
           {/* STAGES */}
@@ -497,8 +625,8 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 ))}
               </ol>
 
-              {/* S2: Call log section */}
-              {job.stage === 2 && (
+              {/* S1: Call log section (โทรติดต่อลูกค้าตอนรับ order) */}
+              {job.stage === 1 && (
                 <div className="border rounded-xl p-4 bg-blue-50 space-y-3">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-blue-800">📞 บันทึกการโทรหาลูกค้า</p>
@@ -529,10 +657,10 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 </div>
               )}
 
-              {/* S3: Reschedule appointment date */}
-              {job.stage === 3 && (
-                <div className="border rounded-xl p-4 bg-indigo-50 space-y-3">
-                  <p className="text-sm font-semibold text-indigo-800">📅 วันนัดหมายติดตั้ง</p>
+              {/* วันนัดหมาย + นัดช่างเข้าคิว — แสดงได้ทุกสเตจที่งานยังไม่เสร็จ */}
+              {job.stage < 6 && (
+                <div className="border-2 border-indigo-300 rounded-xl p-4 bg-indigo-50 space-y-3">
+                  <p className="text-sm font-semibold text-indigo-800">📅 นัดหมาย & คิวช่าง</p>
                   {job.apptDate && (
                     <p className="text-xs text-indigo-600">นัดปัจจุบัน: {new Date(job.apptDate).toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" })}</p>
                   )}
@@ -545,7 +673,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                       className="mt-1 w-full border border-indigo-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
                     />
                   </div>
-                  <p className="text-xs text-indigo-500">ℹ️ บันทึกวันใหม่โดยไม่เปลี่ยน Stage — ไม่ต้องย้อนไป S2</p>
+                  <p className="text-xs text-indigo-500">ℹ️ บันทึก/เลื่อนวันนัดได้ทุกสเตจ โดยไม่เปลี่ยน Stage ของงาน</p>
                   <button
                     onClick={saveApptDate}
                     disabled={saving || !newApptDate}
@@ -582,13 +710,87 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 </div>
               )}
 
-              {job.stage < 7 && (
-                <button
-                  onClick={advanceStage}
-                  className="w-full mt-2 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 transition-colors"
-                >
-                  ➡ ย้ายไปขั้นถัดไป
-                </button>
+              {/* S2: ใบส่งงาน (dispatch note) */}
+              {job.stage === 2 && (
+                <div className="border rounded-xl p-4 bg-violet-50 space-y-2">
+                  <p className="text-sm font-semibold text-violet-800">📋 ใบส่งงาน (กระจายให้ทีมช่าง)</p>
+                  <p className="text-xs text-violet-600">รวมข้อมูลลูกค้า/ที่อยู่/สินค้า/นัดหมาย/ผลสำรวจ + รูป — เปิดหน้าเพื่อพิมพ์/บันทึก PDF และได้ลิงก์แชร์ให้ช่าง</p>
+                  <button
+                    onClick={createDispatch}
+                    disabled={saving}
+                    className="w-full bg-violet-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                  >
+                    {saving ? "กำลังทำ..." : dispatchToken ? "📋 เปิดใบส่งงาน + คัดลอกลิงก์" : "📋 สร้างใบส่งงาน + ลิงก์แชร์"}
+                  </button>
+                  {dispatchToken && (
+                    <p className="text-[11px] text-violet-500 break-all">ลิงก์: /dispatch/{dispatchToken}</p>
+                  )}
+                </div>
+              )}
+
+              {/* S4: เศษคงเหลือ + เข้าคลังเศษ */}
+              {job.stage === 4 && (
+                <div className="border-2 border-emerald-300 rounded-xl p-4 bg-emerald-50 space-y-3">
+                  <p className="text-sm font-semibold text-emerald-800">♻️ เศษคงเหลือ (บันทึกก่อนเข้ารอประเมิน)</p>
+                  <label className="flex items-center gap-2 text-sm text-emerald-800">
+                    <input
+                      type="checkbox"
+                      checked={matUsage.noRemnant}
+                      onChange={(e) => setMatUsage((m) => ({ ...m, noRemnant: e.target.checked, savedAt: undefined }))}
+                    />
+                    ไม่มีเศษเหลือ (ใช้วัสดุหมด)
+                  </label>
+                  {!matUsage.noRemnant && (
+                    <div className="space-y-2">
+                      {matUsage.pieces.map((p, i) => (
+                        <div key={i} className="border border-emerald-200 rounded-lg p-2 bg-white space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-emerald-700">ชิ้นที่ {i + 1}</span>
+                            <button onClick={() => removePiece(i)} className="text-red-400 hover:text-red-600 text-xs">ลบ</button>
+                          </div>
+                          <input value={p.mat_type} onChange={(e) => setPiece(i, "mat_type", e.target.value)} placeholder="ชนิดวัสดุ" className="w-full border border-emerald-200 rounded px-2 py-1 text-sm" />
+                          <div className="flex items-center gap-2">
+                            <input value={p.width_bin} onChange={(e) => setPiece(i, "width_bin", e.target.value)} placeholder="กว้าง (cm)" inputMode="numeric" className="flex-1 border border-emerald-200 rounded px-2 py-1 text-sm" />
+                            <input value={p.length_cm} onChange={(e) => setPiece(i, "length_cm", e.target.value)} placeholder="ยาว (cm)" inputMode="decimal" className="flex-1 border border-emerald-200 rounded px-2 py-1 text-sm" />
+                          </div>
+                          <input value={p.note} onChange={(e) => setPiece(i, "note", e.target.value)} placeholder="หมายเหตุ (ถ้ามี)" className="w-full border border-emerald-200 rounded px-2 py-1 text-sm" />
+                        </div>
+                      ))}
+                      <button onClick={addPiece} className="w-full border border-dashed border-emerald-400 text-emerald-700 rounded-lg py-1.5 text-sm hover:bg-emerald-100 transition-colors">+ เพิ่มชิ้นเศษ</button>
+                    </div>
+                  )}
+                  <textarea value={matUsage.note} onChange={(e) => setMatUsage((m) => ({ ...m, note: e.target.value }))} rows={2} placeholder="หมายเหตุรวม เช่น วัสดุที่หยิบไป vs ใช้จริง" className="w-full border border-emerald-200 rounded-lg px-2 py-1.5 text-sm bg-white" />
+                  <button
+                    onClick={saveMaterialUsage}
+                    disabled={saving}
+                    className="w-full bg-emerald-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                  >
+                    {saving ? "กำลังบันทึก..." : matDone ? "♻️ บันทึกอีกครั้ง" : "♻️ บันทึกเศษ + เข้าคลัง"}
+                  </button>
+                  {matDone && <p className="text-[11px] text-emerald-600">✓ บันทึกแล้ว — กด 'ย้ายไปขั้นถัดไป' เพื่อเข้าสู่รอประเมิน</p>}
+                </div>
+              )}
+
+              {job.stage < 6 && (
+                <>
+                  {job.stage === 1 && !surveyDone && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      ⚠️ ต้องสำรวจหน้างาน (แท็บ สำรวจ) ก่อนถึงจะส่งให้หัวหน้าช่างยืนยันนัดได้
+                    </p>
+                  )}
+                  {job.stage === 4 && !matDone && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      ⚠️ ต้องบันทึกเศษคงเหลือก่อนถึงจะเข้าสู่รอประเมินได้
+                    </p>
+                  )}
+                  <button
+                    onClick={advanceStage}
+                    disabled={(job.stage === 1 && !surveyDone) || (job.stage === 4 && !matDone)}
+                    className="w-full mt-2 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    ➡ ย้ายไปขั้นถัดไป
+                  </button>
+                </>
               )}
             </div>
           )}
@@ -597,7 +799,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
           {tab === "survey" && (
             <div className="space-y-5">
               <p className="text-xs text-gray-500 bg-amber-50 border border-amber-200 rounded p-2">
-                บันทึกข้อมูลสำรวจหน้างาน ใช้ที่ขั้นตอน ติดต่อลูกค้า / ยืนยันนัดหมาย
+                บันทึกข้อมูลสำรวจหน้างาน — บังคับทำที่ S1 (รับ order) ก่อนส่งให้หัวหน้าช่างยืนยันนัด
               </p>
 
               <fieldset>
@@ -768,7 +970,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
           {tab === "qc" && (
             <div className="space-y-4">
               <div className="text-xs text-gray-500 bg-blue-50 border border-blue-200 rounded p-2">
-                เกณฑ์ตรวจรับงาน 15 ข้อ ตาม SOP — ใช้ที่ขั้นตอน ตรวจสอบงาน (Stage 6)
+                เกณฑ์ตรวจรับงาน 15 ข้อ ตาม SOP — ใช้ตอนติดตั้งสำเร็จ (S4)
               </div>
 
               <div className="flex gap-3 text-xs">

@@ -23,7 +23,7 @@ interface JobDoc {
 
 function PrintModal({ job, onClose }: { job: JobDoc; onClose: () => void }) {
   const stg = IP_STAGES.find((s) => s.id === job.stage);
-  const isComplete = job.stage === 7;
+  const isComplete = job.stage === 6;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div
@@ -107,8 +107,8 @@ export default function DocumentsPage() {
 
   const filtered = useMemo(() => {
     let list = jobs;
-    if (filter === "active") list = list.filter((j) => j.stage >= 1 && j.stage <= 6);
-    if (filter === "done") list = list.filter((j) => j.stage === 7);
+    if (filter === "active") list = list.filter((j) => j.stage >= 1 && j.stage <= 5);
+    if (filter === "done") list = list.filter((j) => j.stage === 6);
     if (search) {
       const q = search.toLowerCase();
       list = list.filter(
@@ -121,12 +121,12 @@ export default function DocumentsPage() {
     return list;
   }, [jobs, filter, search]);
 
-  const active = filtered.filter((j) => j.stage <= 6);
-  const done = filtered.filter((j) => j.stage === 7);
+  const active = filtered.filter((j) => j.stage <= 5);
+  const done = filtered.filter((j) => j.stage === 6);
 
   function DocRow({ job }: { job: JobDoc }) {
     const stg = IP_STAGES.find((s) => s.id === job.stage);
-    const isComplete = job.stage === 7;
+    const isComplete = job.stage === 6;
     return (
       <tr
         className="hover:bg-blue-50 cursor-pointer transition-colors"
