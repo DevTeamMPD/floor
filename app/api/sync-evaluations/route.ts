@@ -50,7 +50,7 @@ async function runSync() {
     Array.from(map.entries()).map(async ([order, overall]) => {
       const { data, error } = await supabase
         .from("install_jobs")
-        .update({ stage: 7, eval_score: overall, eval_sent_at: nowIso })
+        .update({ stage: 6, eval_score: overall, eval_sent_at: nowIso })
         .or(`order_no.eq.${order},bill_no.eq.${order}`)
         .select("job_no");
       if (error) return 0;

@@ -36,8 +36,8 @@ export default function OverviewPage() {
   }, []);
 
   const total = jobs.length;
-  const active = jobs.filter((j) => j.stage >= 2 && j.stage <= 6).length;
-  const done = jobs.filter((j) => j.stage === 7).length;
+  const active = jobs.filter((j) => j.stage >= 1 && j.stage <= 5).length;
+  const done = jobs.filter((j) => j.stage === 6).length;
   const withEval = jobs.filter((j) => j.eval_score != null).length;
   const avgEval = withEval > 0
     ? (jobs.reduce((s, j) => s + (j.eval_score ?? 0), 0) / withEval).toFixed(1)
@@ -46,7 +46,7 @@ export default function OverviewPage() {
   // This month completions
   const nowMonth = new Date().toISOString().slice(0, 7);
   const doneThisMonth = jobs.filter(
-    (j) => j.stage === 7 && j.closed_at?.startsWith(nowMonth)
+    (j) => j.stage === 6 && j.closed_at?.startsWith(nowMonth)
   ).length;
 
   // Stage breakdown
@@ -57,7 +57,7 @@ export default function OverviewPage() {
 
   // Recent completed jobs (last 8)
   const recentDone = jobs
-    .filter((j) => j.stage === 7 && j.closed_at)
+    .filter((j) => j.stage === 6 && j.closed_at)
     .slice(0, 8);
 
   // Recently added jobs (last 8)

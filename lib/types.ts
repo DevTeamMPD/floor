@@ -10,13 +10,12 @@ export interface Stage {
 }
 
 export const IP_STAGES: Stage[] = [
-  { id: 1, name: "รับออเดอร์", icon: "📥", color: "bg-slate-100 text-slate-700" },
-  { id: 2, name: "ติดต่อลูกค้า", icon: "📞", color: "bg-blue-100 text-blue-700" },
-  { id: 3, name: "ยืนยันนัดหมาย", icon: "📅", color: "bg-indigo-100 text-indigo-700" },
-  { id: 4, name: "เตรียมงาน", icon: "🔧", color: "bg-amber-100 text-amber-700" },
-  { id: 5, name: "ระหว่างติดตั้ง", icon: "🚧", color: "bg-orange-100 text-orange-700" },
-  { id: 6, name: "ตรวจสอบงาน", icon: "🔍", color: "bg-purple-100 text-purple-700" },
-  { id: 7, name: "เสร็จสิ้น", icon: "✅", color: "bg-green-100 text-green-700" },
+  { id: 1, name: "รับ order", icon: "📥", color: "bg-slate-100 text-slate-700" },
+  { id: 2, name: "ยืนยันนัด + ใบส่งงาน", icon: "📋", color: "bg-indigo-100 text-indigo-700" },
+  { id: 3, name: "ระหว่างติดตั้ง", icon: "🚧", color: "bg-orange-100 text-orange-700" },
+  { id: 4, name: "ติดตั้งสำเร็จ", icon: "✅", color: "bg-green-100 text-green-700" },
+  { id: 5, name: "รอประเมินหลังการขาย", icon: "⭐", color: "bg-amber-100 text-amber-700" },
+  { id: 6, name: "เสร็จสิ้น", icon: "🏁", color: "bg-emerald-100 text-emerald-700" },
 ];
 
 export interface CallLog {

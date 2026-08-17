@@ -51,8 +51,8 @@ export default function JobsPage() {
   }, [jobs, search]);
 
   const total = jobs.length;
-  const inProgress = jobs.filter((j) => j.stage >= 2 && j.stage <= 6).length;
-  const done = jobs.filter((j) => j.stage === 7).length;
+  const inProgress = jobs.filter((j) => j.stage >= 1 && j.stage <= 5).length;
+  const done = jobs.filter((j) => j.stage === 6).length;
   const evald = jobs.filter((j) => j.evalScore != null).length;
 
   return (
