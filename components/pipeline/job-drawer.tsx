@@ -5,6 +5,7 @@ import { IP_STAGES } from "@/lib/types";
 import type { InstallJob } from "@/lib/types";
 import { formatDate, ipGenToken } from "@/lib/utils";
 import { toast } from "sonner";
+import TechQueueView from "@/components/tech-queue/tech-queue-view";
 
 interface Props {
   job: InstallJob;
@@ -183,6 +184,8 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
   // ดูรูปขยายที่โซนซ้าย (A) โดย drawer (B) ยังกดได้ — เลื่อนดูหลายรูปได้
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
+  // แสดงตารางคิวช่างที่โซนซ้าย (A) ตอนจองช่าง
+  const [showQueue, setShowQueue] = useState(false);
 
   // QC state
   const [qcResults, setQcResults] = useState<Record<number, QCResult>>({});
@@ -565,6 +568,22 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+      {/* โซน A: ตารางคิวช่าง — ดูขณะจองช่างใน drawer (โซน B) */}
+      {showQueue && (
+        <div
+          className="hidden md:flex fixed inset-y-0 left-0 z-40 flex-col bg-slate-100 border-r border-slate-300 shadow-xl"
+          style={{ right: "32rem" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between px-4 py-2.5 bg-white border-b shrink-0">
+            <span className="font-semibold text-slate-800">👷 ตารางคิวช่าง (14 วัน)</span>
+            <button onClick={() => setShowQueue(false)} className="text-slate-400 hover:text-slate-700 text-sm">ปิด ✕</button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3">
+            <TechQueueView highlightDate={newApptDate || undefined} reloadKey={showQueue ? 1 : 0} />
+          </div>
+        </div>
+      )}
       {/* โซน A: รูปขยายฝั่งซ้าย — drawer (โซน B) ยังกดได้ เลื่อนดูได้หลายรูป */}
       {previewIdx !== null && survey.photos && survey.photos[previewIdx] && (() => {
         const photos = survey.photos!;
@@ -784,7 +803,12 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
                   {/* นัดช่าง -> เข้าคิวงาน (appointments) */}
                   <div className="pt-3 mt-1 border-t border-indigo-200 space-y-2">
-                    <p className="text-xs font-semibold text-indigo-800">👷 นัดช่าง + เข้าคิวงาน</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-indigo-800">👷 นัดช่าง + เข้าคิวงาน</p>
+                      <button type="button" onClick={() => { setPreviewIdx(null); setShowQueue((v) => !v); }} className="hidden md:inline-block text-[11px] px-2 py-0.5 rounded-full border border-indigo-300 text-indigo-700 bg-white hover:bg-indigo-50">
+                        {showQueue ? "ซ่อนคิวช่าง" : "👁 ดูคิวช่าง (ซ้าย)"}
+                      </button>
+                    </div>
                     <select
                       value={apptTechId}
                       onChange={(e) => setApptTechId(e.target.value)}
@@ -1091,7 +1115,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                   <div className="grid grid-cols-3 gap-2">
                     {survey.photos!.map((p, idx) => (
                       <div key={p} className="relative">
-                        <button type="button" onClick={() => setPreviewIdx(idx)} className="block w-full" title="กดเพื่อดูรูปขยายด้านซ้าย">
+                        <button type="button" onClick={() => { setShowQueue(false); setPreviewIdx(idx); }} className="block w-full" title="กดเพื่อดูรูปขยายด้านซ้าย">
                           <img src={surveyPhotoUrl(p)} alt="รูปหน้างาน" className="w-full h-20 object-cover rounded-lg border border-gray-200 hover:ring-2 hover:ring-blue-400" />
                         </button>
                         <button onClick={() => removeSurveyPhoto(p)} className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-5 h-5 text-xs leading-none flex items-center justify-center">×</button>
