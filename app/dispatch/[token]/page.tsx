@@ -18,7 +18,18 @@ interface JobRow {
   appt_shift: string | null;
   survey_data: string | null;
   pick_plan: string | null;
+  progress_log: unknown;
 }
+
+interface Checkpoint { at?: string; photos: string[] }
+type ProgressLog = Record<string, Checkpoint>;
+const CHECKPOINTS: { key: string; label: string }[] = [
+  { key: "depart", label: "🚗 เริ่มออกเดินทาง" },
+  { key: "arrive", label: "🏠 ถึงบ้านลูกค้า" },
+  { key: "install", label: "🔧 เริ่มติดตั้งงาน" },
+  { key: "finish", label: "✅ ถ่ายหลังจบงาน" },
+  { key: "return", label: "🏭 กลับถึงคลัง" },
+];
 
 interface Survey {
   areaSqm?: string;
@@ -57,6 +68,8 @@ export default function DispatchPage() {
   const [note, setNote] = useState<string>("");
   const [pick, setPick] = useState<PickPlan | null>(null);
   const [req, setReq] = useState<{ total140: number; total110: number } | null>(null);
+  const [progress, setProgress] = useState<ProgressLog>({});
+  const [uploadingKey, setUploadingKey] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -66,12 +79,13 @@ export default function DispatchPage() {
       if (!dn) { setState("invalid"); return; }
       setNote(dn.note ?? "");
       const { data: j } = await supabase.from("install_jobs")
-        .select("job_no, customer_name, customer_phone, address, location_url, product_name, product_skus, appt_date, appt_shift, survey_data, pick_plan")
+        .select("job_no, customer_name, customer_phone, address, location_url, product_name, product_skus, appt_date, appt_shift, survey_data, pick_plan, progress_log")
         .eq("job_no", dn.job_no).maybeSingle();
       if (!j) { setState("invalid"); return; }
       setJob(j as JobRow);
       if (j.survey_data) { try { setSurvey(JSON.parse(j.survey_data)); } catch {} }
       if (j.pick_plan) { try { setPick(typeof j.pick_plan === "string" ? JSON.parse(j.pick_plan) : j.pick_plan); } catch {} }
+      if (j.progress_log) { try { setProgress(typeof j.progress_log === "string" ? JSON.parse(j.progress_log) : (j.progress_log as ProgressLog)); } catch {} }
       const { data: zs } = await supabase.from("install_job_zones")
         .select("zone_name, width_cm, length_cm").eq("job_no", dn.job_no);
       if (zs && zs.length) {
@@ -95,6 +109,30 @@ export default function DispatchPage() {
 
   function photoUrl(path: string): string {
     return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+  }
+
+  async function handleProgressUpload(key: string, files: File[]) {
+    if (!job || !files.length) return;
+    setUploadingKey(key);
+    const added: string[] = [];
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const safe = f.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = `dispatch/${job.job_no}/${key}/${Date.now()}-${i}-${safe}`;
+        const { error } = await supabase.storage.from(BUCKET).upload(path, f, { upsert: false, contentType: f.type || "image/jpeg" });
+        if (error) throw error;
+        added.push(path);
+      }
+      const prev = progress[key] ?? { photos: [] };
+      const next: ProgressLog = { ...progress, [key]: { at: prev.at ?? new Date().toISOString(), photos: [...(prev.photos ?? []), ...added] } };
+      const { error: uerr } = await supabase.from("install_jobs").update({ progress_log: next }).eq("job_no", job.job_no);
+      if (uerr) throw uerr;
+      setProgress(next);
+    } catch (e: unknown) {
+      alert("อัพโหลดไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
+    }
+    setUploadingKey(null);
   }
 
   if (state === "loading") return <div className="min-h-screen flex items-center justify-center text-slate-400">กำลังโหลด…</div>;
@@ -202,6 +240,44 @@ export default function DispatchPage() {
             <p className="text-sm whitespace-pre-wrap">{note}</p>
           </section>
         )}
+
+        {/* ช่างบันทึกรูปตามสเต็ปงาน */}
+        <section className="print:hidden">
+          <h2 className="text-sm font-semibold text-slate-700 mb-2">📸 บันทึกงาน (สำหรับช่าง)</h2>
+          <div className="space-y-3">
+            {CHECKPOINTS.map((cp) => {
+              const c = progress[cp.key] ?? { photos: [] };
+              const busy = uploadingKey === cp.key;
+              return (
+                <div key={cp.key} className="border border-slate-200 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-slate-800">{cp.label}</span>
+                    {c.at && <span className="text-xs text-emerald-600">✓ {new Date(c.at).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
+                  </div>
+                  {(c.photos?.length ?? 0) > 0 && (
+                    <div className="grid grid-cols-4 gap-2 mb-2">
+                      {c.photos.map((p, i) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <a key={i} href={photoUrl(p)} target="_blank" rel="noreferrer"><img src={photoUrl(p)} alt={`${cp.key}-${i}`} className="w-full h-20 object-cover rounded-lg border" /></a>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <label className={`flex-1 text-center text-sm rounded-lg py-2 border cursor-pointer ${busy ? "opacity-50 pointer-events-none" : "border-slate-300 hover:bg-slate-50"}`}>
+                      📷 ถ่ายรูป
+                      <input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; handleProgressUpload(cp.key, fs); }} />
+                    </label>
+                    <label className={`flex-1 text-center text-sm rounded-lg py-2 border cursor-pointer ${busy ? "opacity-50 pointer-events-none" : "border-slate-300 hover:bg-slate-50"}`}>
+                      🖼 อัพโหลด
+                      <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; handleProgressUpload(cp.key, fs); }} />
+                    </label>
+                  </div>
+                  {busy && <p className="text-xs text-slate-400 mt-1">กำลังอัพโหลด…</p>}
+                </div>
+              );
+            })}
+          </div>
+        </section>
 
         <p className="text-[11px] text-slate-400 border-t pt-3">ออกใบส่งงานจากระบบ MPD — สำหรับทีมช่างเท่านั้น</p>
       </div>
