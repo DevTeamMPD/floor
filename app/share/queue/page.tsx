@@ -19,6 +19,20 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   confirmed: { label: "ยืนยันแล้ว", cls: "bg-blue-100 text-blue-700" },
   completed: { label: "เสร็จสิ้น", cls: "bg-emerald-100 text-emerald-700" },
 };
+// สีประจำทีม (วนตามลำดับทีม) — พื้น/ตัวอักษร/ขอบ
+const TEAM_COLORS = [
+  "bg-blue-100 text-blue-800 border-blue-300",
+  "bg-emerald-100 text-emerald-800 border-emerald-300",
+  "bg-purple-100 text-purple-800 border-purple-300",
+  "bg-orange-100 text-orange-800 border-orange-300",
+  "bg-pink-100 text-pink-800 border-pink-300",
+  "bg-cyan-100 text-cyan-800 border-cyan-300",
+  "bg-lime-100 text-lime-800 border-lime-300",
+];
+const HOLIDAY_COLOR = "bg-slate-200 text-slate-500 border-slate-300";
+function isHoliday(a: { job_id: string | null; notes: string | null }) {
+  return !a.job_id && /วันหยุด|หยุด|ลาพัก|ไม่รับงาน/.test(a.notes || "");
+}
 const DAY_TH = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
 const DOW_HEAD = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"];
 const MONTH_TH = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
@@ -66,8 +80,24 @@ function linkify(text: string): { t: string; href?: string }[] {
   return parts;
 }
 
-interface FormState { id: string | null; tech_id: string; date: string; start: string; end: string; notes: string }
-const EMPTY_FORM: FormState = { id: null, tech_id: "", date: "", start: "09:00", end: "12:00", notes: "" };
+interface FormState { id: string | null; tech_id: string; date: string; endDate: string; start: string; end: string; notes: string }
+const WORK_START = "09:00";
+const WORK_END = "17:00";
+const EMPTY_FORM: FormState = { id: null, tech_id: "", date: "", endDate: "", start: WORK_START, end: WORK_END, notes: "" };
+
+// list of YYYY-MM-DD strings from a..b inclusive (capped for safety)
+function eachDay(a: string, b: string): string[] {
+  if (!a) return [];
+  if (!b || b < a) return [a];
+  const out: string[] = [];
+  const cur = new Date(`${a}T00:00:00`);
+  const end = new Date(`${b}T00:00:00`);
+  for (let i = 0; i < 60 && cur <= end; i++) {
+    out.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}-${String(cur.getDate()).padStart(2, "0")}`);
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
 
 export default function ShareQueuePage() {
   const supabase = createClient();
@@ -122,12 +152,22 @@ export default function ShareQueuePage() {
     return n.split(/[·\n/]/)[0].trim() || n;
   }, [jobs]);
 
-  function openAdd(date: Date) { setDetail(null); setForm({ ...EMPTY_FORM, date: ymd(date), tech_id: teams[0]?.id ?? "" }); }
+  const teamColor = useCallback((id: string | null) => {
+    const idx = teams.findIndex((t) => t.id === id);
+    return idx >= 0 ? TEAM_COLORS[idx % TEAM_COLORS.length] : "bg-slate-100 text-slate-700 border-slate-300";
+  }, [teams]);
+  // สีของ chip: วันหยุด=เทา, ไม่งั้นตามทีม; รอยืนยัน=เส้นประ
+  const chipCls = useCallback((a: Appt) => {
+    const base = isHoliday(a) ? HOLIDAY_COLOR : teamColor(a.tech_id);
+    const dashed = a.status === "proposed" ? "border border-dashed" : "border border-transparent";
+    return `${base} ${dashed}`;
+  }, [teamColor]);
+
+  function openAdd(date: Date) { setDetail(null); setForm({ ...EMPTY_FORM, date: ymd(date), endDate: ymd(date), tech_id: teams[0]?.id ?? "" }); }
   function openEdit(a: Appt) {
-    const s = new Date(a.slot_start), e = new Date(a.slot_end);
-    const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    const s = new Date(a.slot_start);
     setDetail(null);
-    setForm({ id: a.id, tech_id: a.tech_id ?? "", date: ymd(s), start: hhmm(s), end: hhmm(e), notes: a.notes ?? "" });
+    setForm({ id: a.id, tech_id: a.tech_id ?? "", date: ymd(s), endDate: ymd(s), start: WORK_START, end: WORK_END, notes: a.notes ?? "" });
   }
 
   async function save() {
@@ -135,35 +175,55 @@ export default function ShareQueuePage() {
     if (!form.tech_id) { alert("กรุณาเลือกทีมช่าง"); return; }
     if (!form.date) { alert("กรุณาเลือกวันที่"); return; }
     if ((form.end || "12:00") <= (form.start || "09:00")) { alert("เวลาสิ้นสุดต้องหลังเวลาเริ่ม"); return; }
+    const endDate = form.endDate && form.endDate >= form.date ? form.endDate : form.date;
+    const dates = eachDay(form.date, endDate);
     setSaving(true);
     try {
-      const slotStart = new Date(`${form.date}T${form.start || "09:00"}:00`).toISOString();
-      const slotEnd = new Date(`${form.date}T${form.end || "12:00"}:00`).toISOString();
-
-      // กันคิวชนกัน: ทีมเดียวกัน + ช่วงเวลาคาบเกี่ยวในวันเดียวกัน
-      const dayStart = new Date(`${form.date}T00:00:00`).toISOString();
-      const dayEnd = new Date(`${form.date}T23:59:59`).toISOString();
-      const { data: sameDayRows } = await supabase.from("appointments")
+      // กันคิวชนกัน: เช็คทุกวันในช่วง — ทีมเดียวกัน + เวลาคาบเกี่ยว
+      const rangeStart = new Date(`${dates[0]}T00:00:00`).toISOString();
+      const rangeEnd = new Date(`${dates[dates.length - 1]}T23:59:59`).toISOString();
+      const { data: existRows } = await supabase.from("appointments")
         .select("id, slot_start, slot_end, notes, job_id")
         .eq("tech_id", form.tech_id).neq("status", "cancelled")
-        .gte("slot_start", dayStart).lte("slot_start", dayEnd);
-      const clash = (sameDayRows as { id: string; slot_start: string; slot_end: string; notes: string | null; job_id: string | null }[] | null ?? [])
-        .find((r) => r.id !== form.id && new Date(slotStart) < new Date(r.slot_end) && new Date(slotEnd) > new Date(r.slot_start));
-      if (clash) {
-        const who = clash.job_id ? (jobs[clash.job_id] || clash.job_id) : ((clash.notes || "").split(/[·\n/]/)[0].trim() || "งานอื่น");
+        .gte("slot_start", rangeStart).lte("slot_start", rangeEnd);
+      const existing = (existRows as { id: string; slot_start: string; slot_end: string; notes: string | null; job_id: string | null }[] | null) ?? [];
+
+      const clashes: string[] = [];
+      for (const d of dates) {
+        const s = new Date(`${d}T${form.start || "09:00"}:00`);
+        const e = new Date(`${d}T${form.end || "12:00"}:00`);
+        const c = existing.find((r) => r.id !== form.id && s < new Date(r.slot_end) && e > new Date(r.slot_start));
+        if (c) {
+          const who = c.job_id ? (jobs[c.job_id] || c.job_id) : ((c.notes || "").split(/[·\n/]/)[0].trim() || "งานอื่น");
+          clashes.push(`${new Date(d).toLocaleDateString("th-TH", { day: "numeric", month: "short" })} — ชนกับ ${fmtTime(c.slot_start)}–${fmtTime(c.slot_end)} น. · ${who}`);
+        }
+      }
+      if (clashes.length) {
         setSaving(false);
-        alert(`⚠️ ทีมนี้มีคิวชนกันในวันเดียวกันแล้ว:\n${fmtTime(clash.slot_start)}–${fmtTime(clash.slot_end)} น. · ${who}\n\nกรุณาเลือกทีม/เวลาอื่น`);
+        alert(`⚠️ ทีมนี้มีคิวชนกัน:\n${clashes.join("\n")}\n\nกรุณาเลือกทีม/เวลาอื่น`);
         return;
       }
 
+      const mkRow = (d: string, status: string) => ({
+        tech_id: form.tech_id,
+        slot_start: new Date(`${d}T${form.start || "09:00"}:00`).toISOString(),
+        slot_end: new Date(`${d}T${form.end || "12:00"}:00`).toISOString(),
+        notes: form.notes || null,
+        status,
+      });
+
       if (form.id) {
+        // update the edited row to the first day, then add any extra days as new rows
+        const first = mkRow(dates[0], "proposed");
         const { error } = await supabase.from("appointments")
-          .update({ tech_id: form.tech_id, slot_start: slotStart, slot_end: slotEnd, notes: form.notes || null })
+          .update({ tech_id: first.tech_id, slot_start: first.slot_start, slot_end: first.slot_end, notes: first.notes })
           .eq("id", form.id);
         if (error) throw error;
+        const extra = dates.slice(1).map((d) => mkRow(d, "proposed"));
+        if (extra.length) { const { error: e2 } = await supabase.from("appointments").insert(extra); if (e2) throw e2; }
       } else {
-        const { error } = await supabase.from("appointments")
-          .insert({ tech_id: form.tech_id, slot_start: slotStart, slot_end: slotEnd, notes: form.notes || null, status: "proposed" });
+        const rows = dates.map((d) => mkRow(d, "proposed"));
+        const { error } = await supabase.from("appointments").insert(rows);
         if (error) throw error;
       }
       setForm(null);
@@ -211,7 +271,7 @@ export default function ShareQueuePage() {
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold text-slate-900">🗓️ ตารางคิวช่าง — MPD</h1>
-            <p className="text-xs text-slate-500">แชร์สำหรับทีมช่าง · ลงคิว/แก้ไขได้ · กดที่งานเพื่อดูรายละเอียด</p>
+            <p className="text-xs text-slate-500">แชร์สำหรับทีมช่าง · จิ้มวันว่างเพื่อลงคิว · กดที่งานเพื่อดูรายละเอียด</p>
           </div>
           <button onClick={() => openAdd(new Date())} className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700">+ ลงคิว</button>
         </div>
@@ -229,6 +289,17 @@ export default function ShareQueuePage() {
           </div>
         </div>
 
+        {/* คำอธิบายสี */}
+        <div className="flex items-center gap-3 mb-3 flex-wrap text-[11px] text-slate-600">
+          {teams.map((t) => (
+            <span key={t.id} className="inline-flex items-center gap-1">
+              <span className={`inline-block w-3 h-3 rounded ${teamColor(t.id).split(" ")[0]}`} />{t.name}
+            </span>
+          ))}
+          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-slate-200" />🏖️ วันหยุด</span>
+          <span className="inline-flex items-center gap-1 text-slate-400"><span className="inline-block w-3 h-3 rounded border border-dashed border-slate-400" />รอยืนยัน (เส้นประ)</span>
+        </div>
+
         {loading ? (
           <p className="text-slate-400 text-sm">กำลังโหลด…</p>
         ) : view === "month" ? (
@@ -241,21 +312,18 @@ export default function ShareQueuePage() {
                 const inMonth = d.getMonth() === mMonth;
                 const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
                 return (
-                  <div key={d.toISOString()} className={`min-h-[96px] border-b border-r border-slate-100 p-1 flex flex-col ${inMonth ? "" : "bg-slate-50/60"}`}>
+                  <div key={d.toISOString()} onClick={() => openAdd(d)} title="จิ้มเพื่อลงคิว" className={`group min-h-[96px] border-b border-r border-slate-100 p-1 flex flex-col cursor-pointer hover:bg-blue-50/40 ${inMonth ? "" : "bg-slate-50/60"}`}>
                     <div className="flex items-center justify-between px-0.5">
                       <span className={`text-[11px] ${isToday(d) ? "bg-blue-600 text-white rounded-full w-5 h-5 inline-flex items-center justify-center font-semibold" : inMonth ? "text-slate-700" : "text-slate-300"}`}>{d.getDate()}</span>
-                      <button onClick={() => openAdd(d)} className="text-[11px] text-slate-300 hover:text-blue-600 leading-none px-1">＋</button>
+                      <span className="text-[11px] text-slate-300 group-hover:text-blue-600 leading-none px-1">＋</span>
                     </div>
                     <div className="mt-0.5 space-y-0.5 flex-1">
-                      {dayAppts.map((a) => {
-                        const st = STATUS[a.status] ?? STATUS.proposed;
-                        return (
-                          <button key={a.id} onClick={() => setDetail(a)} className={`w-full text-left rounded px-1 py-0.5 text-[10px] leading-tight ${st.cls} hover:brightness-95`}>
-                            <span className="font-semibold">{fmtTime(a.slot_start)}</span> {teamName(a.tech_id)}
-                            <span className="block truncate opacity-80">{chipLabel(a)}</span>
-                          </button>
-                        );
-                      })}
+                      {dayAppts.map((a) => (
+                        <button key={a.id} onClick={(ev) => { ev.stopPropagation(); setDetail(a); }} className={`w-full text-left rounded px-1 py-0.5 text-[10px] leading-tight ${chipCls(a)} hover:brightness-95`}>
+                          <span className="font-semibold">{isHoliday(a) ? "🏖️" : fmtTime(a.slot_start)}</span> {teamName(a.tech_id)}
+                          <span className="block truncate opacity-80">{chipLabel(a)}</span>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 );
@@ -276,11 +344,11 @@ export default function ShareQueuePage() {
                     {dayAppts.map((a) => {
                       const st = STATUS[a.status] ?? STATUS.proposed;
                       return (
-                        <button key={a.id} onClick={() => setDetail(a)} className="w-full text-left rounded-lg bg-slate-50 border border-slate-200 p-1.5 hover:border-blue-300 hover:bg-blue-50/40">
-                          <div className="text-xs font-semibold text-slate-800">{teamName(a.tech_id)}</div>
-                          <div className="text-[11px] text-slate-500">{fmtTime(a.slot_start)}–{fmtTime(a.slot_end)}</div>
-                          <div className="text-[11px] text-slate-600 truncate">{chipLabel(a)}</div>
-                          <span className={`inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                        <button key={a.id} onClick={() => setDetail(a)} className={`w-full text-left rounded-lg p-1.5 hover:brightness-95 ${chipCls(a)}`}>
+                          <div className="text-xs font-semibold">{teamName(a.tech_id)}{isHoliday(a) ? " · 🏖️ วันหยุด" : ""}</div>
+                          {!isHoliday(a) && <div className="text-[11px] opacity-70">{fmtTime(a.slot_start)}–{fmtTime(a.slot_end)}</div>}
+                          <div className="text-[11px] opacity-80 truncate">{chipLabel(a)}</div>
+                          <span className="inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-white/60">{st.label}</span>
                         </button>
                       );
                     })}
@@ -348,22 +416,28 @@ export default function ShareQueuePage() {
                   {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
               </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">วันที่</label>
-                <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-              </div>
               <div className="flex items-center gap-2">
                 <div className="flex-1">
-                  <label className="text-xs text-slate-500 block mb-1">เริ่ม</label>
-                  <input type="time" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm" />
+                  <label className="text-xs text-slate-500 block mb-1">วันที่เริ่ม</label>
+                  <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value, endDate: (!form.endDate || form.endDate < e.target.value) ? e.target.value : form.endDate })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                 </div>
                 <div className="flex-1">
-                  <label className="text-xs text-slate-500 block mb-1">ถึง</label>
-                  <input type="time" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm" />
+                  <label className="text-xs text-slate-500 block mb-1">ถึงวันที่</label>
+                  <input type="date" value={form.endDate} min={form.date} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                 </div>
               </div>
+              {form.endDate && form.endDate > form.date && (
+                <p className="text-[11px] text-blue-600 -mt-1">📅 งานหลายวัน: จะสร้างคิว {eachDay(form.date, form.endDate).length} วัน (เวลาเดียวกันทุกวัน)</p>
+              )}
               <div>
-                <label className="text-xs text-slate-500 block mb-1">งาน / ลูกค้า / หมายเหตุ</label>
+                <label className="text-xs text-slate-500 block mb-1">เวลาทำงาน</label>
+                <div className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-700">🕘 เต็มวัน 09:00–17:00 น.</div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-slate-500">งาน / ลูกค้า / หมายเหตุ</label>
+                  <button type="button" onClick={() => setForm({ ...form, notes: /วันหยุด/.test(form.notes) ? "" : "วันหยุด" })} className={`text-[11px] px-2 py-0.5 rounded-full border ${/วันหยุด/.test(form.notes) ? "bg-slate-200 text-slate-600 border-slate-300" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>🏖️ ตั้งเป็นวันหยุด</button>
+                </div>
                 <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={4} placeholder="เช่น ชื่อลูกค้า ที่อยู่ เลขงาน หรือรายละเอียดเพิ่มเติม (กด Enter ขึ้นบรรทัดใหม่ได้)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y min-h-[96px]" />
               </div>
             </div>
