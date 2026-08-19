@@ -12,6 +12,7 @@ interface Appt {
   slot_end: string;
   status: string;
   notes: string | null;
+  requirement: string | null;
 }
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -80,10 +81,10 @@ function linkify(text: string): { t: string; href?: string }[] {
   return parts;
 }
 
-interface FormState { id: string | null; tech_id: string; date: string; endDate: string; start: string; end: string; notes: string }
+interface FormState { id: string | null; tech_id: string; date: string; endDate: string; start: string; end: string; notes: string; requirement: string }
 const WORK_START = "09:00";
 const WORK_END = "17:00";
-const EMPTY_FORM: FormState = { id: null, tech_id: "", date: "", endDate: "", start: WORK_START, end: WORK_END, notes: "" };
+const EMPTY_FORM: FormState = { id: null, tech_id: "", date: "", endDate: "", start: WORK_START, end: WORK_END, notes: "", requirement: "" };
 
 // list of YYYY-MM-DD strings from a..b inclusive (capped for safety)
 function eachDay(a: string, b: string): string[] {
@@ -125,7 +126,7 @@ export default function ShareQueuePage() {
     const end = new Date(days[days.length - 1]); end.setHours(23, 59, 59, 999);
     const [{ data: tt }, { data: ap }] = await Promise.all([
       supabase.from("tech_teams").select("id, name").eq("is_active", true).order("name"),
-      supabase.from("appointments").select("id, job_id, tech_id, slot_start, slot_end, status, notes")
+      supabase.from("appointments").select("id, job_id, tech_id, slot_start, slot_end, status, notes, requirement")
         .gte("slot_start", start.toISOString()).lte("slot_start", end.toISOString())
         .neq("status", "cancelled").order("slot_start"),
     ]);
@@ -165,9 +166,10 @@ export default function ShareQueuePage() {
 
   function openAdd(date: Date) { setDetail(null); setForm({ ...EMPTY_FORM, date: ymd(date), endDate: ymd(date), tech_id: teams[0]?.id ?? "" }); }
   function openEdit(a: Appt) {
-    const s = new Date(a.slot_start);
+    const s = new Date(a.slot_start), e = new Date(a.slot_end);
+    const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
     setDetail(null);
-    setForm({ id: a.id, tech_id: a.tech_id ?? "", date: ymd(s), endDate: ymd(s), start: WORK_START, end: WORK_END, notes: a.notes ?? "" });
+    setForm({ id: a.id, tech_id: a.tech_id ?? "", date: ymd(s), endDate: ymd(s), start: hhmm(s), end: hhmm(e), notes: a.notes ?? "", requirement: a.requirement ?? "" });
   }
 
   async function save() {
@@ -207,8 +209,9 @@ export default function ShareQueuePage() {
       const mkRow = (d: string, status: string) => ({
         tech_id: form.tech_id,
         slot_start: new Date(`${d}T${form.start || "09:00"}:00`).toISOString(),
-        slot_end: new Date(`${d}T${form.end || "12:00"}:00`).toISOString(),
+        slot_end: new Date(`${d}T${form.end || "17:00"}:00`).toISOString(),
         notes: form.notes || null,
+        requirement: form.requirement || null,
         status,
       });
 
@@ -216,7 +219,7 @@ export default function ShareQueuePage() {
         // update the edited row to the first day, then add any extra days as new rows
         const first = mkRow(dates[0], "proposed");
         const { error } = await supabase.from("appointments")
-          .update({ tech_id: first.tech_id, slot_start: first.slot_start, slot_end: first.slot_end, notes: first.notes })
+          .update({ tech_id: first.tech_id, slot_start: first.slot_start, slot_end: first.slot_end, notes: first.notes, requirement: first.requirement })
           .eq("id", form.id);
         if (error) throw error;
         const extra = dates.slice(1).map((d) => mkRow(d, "proposed"));
@@ -391,6 +394,12 @@ export default function ShareQueuePage() {
                       : <span key={i}>{p.t}</span>)}
                   </p>
                 ) : <p className="text-sm text-slate-400">— ไม่มีหมายเหตุ —</p>}
+                {detail.requirement && (
+                  <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-3">
+                    <div className="text-xs text-amber-700 font-medium mb-1">📋 Requirement งาน</div>
+                    <p className="text-sm text-slate-800 whitespace-pre-wrap break-words leading-relaxed">{detail.requirement}</p>
+                  </div>
+                )}
               </div>
               <div className="p-4 border-t flex gap-2">
                 {detail.status === "proposed" && <button onClick={() => setStatus(detail, "confirmed")} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700">ยืนยันนัด</button>}
@@ -430,8 +439,15 @@ export default function ShareQueuePage() {
                 <p className="text-[11px] text-blue-600 -mt-1">📅 งานหลายวัน: จะสร้างคิว {eachDay(form.date, form.endDate).length} วัน (เวลาเดียวกันทุกวัน)</p>
               )}
               <div>
-                <label className="text-xs text-slate-500 block mb-1">เวลาทำงาน</label>
-                <div className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-700">🕘 เต็มวัน 09:00–17:00 น.</div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-slate-500">เวลาทำงาน</label>
+                  <button type="button" onClick={() => setForm({ ...form, start: WORK_START, end: WORK_END })} className="text-[11px] text-blue-600 hover:underline">🕘 เต็มวัน 09:00–17:00</button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input type="time" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} className="flex-1 border border-slate-200 rounded-lg px-2 py-2 text-sm" />
+                  <span className="text-slate-400 text-sm">ถึง</span>
+                  <input type="time" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} className="flex-1 border border-slate-200 rounded-lg px-2 py-2 text-sm" />
+                </div>
               </div>
               <div>
                 <div className="flex items-center justify-between mb-1">
@@ -439,6 +455,10 @@ export default function ShareQueuePage() {
                   <button type="button" onClick={() => setForm({ ...form, notes: /วันหยุด/.test(form.notes) ? "" : "วันหยุด" })} className={`text-[11px] px-2 py-0.5 rounded-full border ${/วันหยุด/.test(form.notes) ? "bg-slate-200 text-slate-600 border-slate-300" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>🏖️ ตั้งเป็นวันหยุด</button>
                 </div>
                 <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={4} placeholder="เช่น ชื่อลูกค้า ที่อยู่ เลขงาน หรือรายละเอียดเพิ่มเติม (กด Enter ขึ้นบรรทัดใหม่ได้)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y min-h-[96px]" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">📋 Requirement งาน (สเปก)</label>
+                <textarea value={form.requirement} onChange={(e) => setForm({ ...form, requirement: e.target.value })} rows={3} placeholder="เช่น สี Whitebuzz · รุ่น Rollsafe 1.6cm · พื้นที่ 15 ตรม · จำนวนโซน" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y min-h-[72px]" />
               </div>
             </div>
             <div className="flex gap-2 mt-4">
