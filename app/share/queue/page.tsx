@@ -211,7 +211,7 @@ export default function ShareQueuePage() {
               </div>
               <div>
                 <label className="text-xs text-slate-500 block mb-1">งาน / ลูกค้า / หมายเหตุ</label>
-                <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="เช่น ชื่อลูกค้า หรือเลขงาน" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={4} placeholder="เช่น ชื่อลูกค้า ที่อยู่ เลขงาน หรือรายละเอียดเพิ่มเติม (กด Enter ขึ้นบรรทัดใหม่ได้)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y min-h-[96px]" />
               </div>
             </div>
             <div className="flex gap-2 mt-4">
