@@ -20,6 +20,8 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   completed: { label: "เสร็จสิ้น", cls: "bg-emerald-100 text-emerald-700" },
 };
 const DAY_TH = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
+const DOW_HEAD = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"];
+const MONTH_TH = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
 
 function getWeekDays(offset: number): Date[] {
   const today = new Date();
@@ -30,32 +32,67 @@ function getWeekDays(offset: number): Date[] {
   monday.setHours(0, 0, 0, 0);
   return Array.from({ length: 7 }, (_, i) => { const d = new Date(monday); d.setDate(monday.getDate() + i); return d; });
 }
+// Monday-first month matrix; trims trailing weeks that are entirely in the next month.
+function getMonthDays(year: number, month: number): Date[] {
+  const first = new Date(year, month, 1);
+  const startDow = first.getDay();
+  const lead = startDow === 0 ? 6 : startDow - 1;
+  const start = new Date(year, month, 1 - lead);
+  start.setHours(0, 0, 0, 0);
+  const days: Date[] = [];
+  for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); days.push(d); }
+  // drop a trailing week if all 7 of its days are outside this month
+  while (days.length > 35 && days.slice(days.length - 7).every((d) => d.getMonth() !== month)) days.length -= 7;
+  return days;
+}
 function fmtDate(d: Date) { return d.toLocaleDateString("th-TH", { day: "numeric", month: "short" }); }
 function fmtTime(iso: string) { return new Date(iso).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" }); }
+function fmtFullDate(iso: string) { return new Date(iso).toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Bangkok" }); }
 function ymd(d: Date) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 function sameDay(d: Date, iso: string) { const x = new Date(iso); return d.getFullYear() === x.getFullYear() && d.getMonth() === x.getMonth() && d.getDate() === x.getDate(); }
 function isToday(d: Date) { const n = new Date(); return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate(); }
+
+// Split note text into plain + clickable link segments
+function linkify(text: string): { t: string; href?: string }[] {
+  const parts: { t: string; href?: string }[] = [];
+  const re = /(https?:\/\/[^\s]+)/g;
+  let last = 0; let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push({ t: text.slice(last, m.index) });
+    parts.push({ t: m[0], href: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push({ t: text.slice(last) });
+  return parts;
+}
 
 interface FormState { id: string | null; tech_id: string; date: string; start: string; end: string; notes: string }
 const EMPTY_FORM: FormState = { id: null, tech_id: "", date: "", start: "09:00", end: "12:00", notes: "" };
 
 export default function ShareQueuePage() {
   const supabase = createClient();
+  const [view, setView] = useState<"month" | "week">("month");
   const [offset, setOffset] = useState(0);
+  const now = new Date();
+  const [mYear, setMYear] = useState(now.getFullYear());
+  const [mMonth, setMMonth] = useState(now.getMonth());
   const [teams, setTeams] = useState<Team[]>([]);
   const [jobs, setJobs] = useState<Record<string, string>>({});
   const [appts, setAppts] = useState<Appt[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<FormState | null>(null);
+  const [detail, setDetail] = useState<Appt | null>(null);
   const [saving, setSaving] = useState(false);
 
   const week = useMemo(() => getWeekDays(offset), [offset]);
+  const monthDays = useMemo(() => getMonthDays(mYear, mMonth), [mYear, mMonth]);
+  const days = view === "month" ? monthDays : week;
   const teamName = useCallback((id: string | null) => teams.find((t) => t.id === id)?.name ?? "ทีม", [teams]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const start = new Date(week[0]); start.setHours(0, 0, 0, 0);
-    const end = new Date(week[6]); end.setHours(23, 59, 59, 999);
+    const start = new Date(days[0]); start.setHours(0, 0, 0, 0);
+    const end = new Date(days[days.length - 1]); end.setHours(23, 59, 59, 999);
     const [{ data: tt }, { data: ap }] = await Promise.all([
       supabase.from("tech_teams").select("id, name").eq("is_active", true).order("name"),
       supabase.from("appointments").select("id, job_id, tech_id, slot_start, slot_end, status, notes")
@@ -73,14 +110,23 @@ export default function ShareQueuePage() {
       setJobs(jm);
     } else setJobs({});
     setLoading(false);
-  }, [week, supabase]);
+  }, [days, supabase]);
 
   useEffect(() => { load(); }, [load]);
 
-  function openAdd(date: Date) { setForm({ ...EMPTY_FORM, date: ymd(date), tech_id: teams[0]?.id ?? "" }); }
+  // Short customer/label for a chip
+  const chipLabel = useCallback((a: Appt) => {
+    if (a.job_id) return jobs[a.job_id] || a.job_id;
+    const n = (a.notes || "").trim();
+    if (!n) return "—";
+    return n.split(/[·\n/]/)[0].trim() || n;
+  }, [jobs]);
+
+  function openAdd(date: Date) { setDetail(null); setForm({ ...EMPTY_FORM, date: ymd(date), tech_id: teams[0]?.id ?? "" }); }
   function openEdit(a: Appt) {
     const s = new Date(a.slot_start), e = new Date(a.slot_end);
     const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    setDetail(null);
     setForm({ id: a.id, tech_id: a.tech_id ?? "", date: ymd(s), start: hhmm(s), end: hhmm(e), notes: a.notes ?? "" });
   }
 
@@ -113,13 +159,32 @@ export default function ShareQueuePage() {
   async function setStatus(a: Appt, status: string) {
     const { error } = await supabase.from("appointments").update({ status }).eq("id", a.id);
     if (error) { alert("อัปเดตไม่สำเร็จ"); return; }
+    setDetail((d) => (d && d.id === a.id ? { ...d, status } : d));
     load();
   }
   async function remove(a: Appt) {
     if (!window.confirm("ลบคิวนี้?")) return;
     const { error } = await supabase.from("appointments").update({ status: "cancelled" }).eq("id", a.id);
     if (error) { alert("ลบไม่สำเร็จ"); return; }
+    setDetail(null);
     load();
+  }
+
+  const rangeLabel = view === "month"
+    ? `${MONTH_TH[mMonth]} ${mYear + 543}`
+    : `${fmtDate(week[0])} – ${fmtDate(week[6])}`;
+
+  function goPrev() {
+    if (view === "month") { const d = new Date(mYear, mMonth - 1, 1); setMYear(d.getFullYear()); setMMonth(d.getMonth()); }
+    else setOffset((o) => o - 1);
+  }
+  function goNext() {
+    if (view === "month") { const d = new Date(mYear, mMonth + 1, 1); setMYear(d.getFullYear()); setMMonth(d.getMonth()); }
+    else setOffset((o) => o + 1);
+  }
+  function goToday() {
+    const t = new Date();
+    setMYear(t.getFullYear()); setMMonth(t.getMonth()); setOffset(0);
   }
 
   return (
@@ -128,22 +193,57 @@ export default function ShareQueuePage() {
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold text-slate-900">🗓️ ตารางคิวช่าง — MPD</h1>
-            <p className="text-xs text-slate-500">แชร์สำหรับทีมช่าง · ลงคิว/แก้ไขได้</p>
+            <p className="text-xs text-slate-500">แชร์สำหรับทีมช่าง · ลงคิว/แก้ไขได้ · กดที่งานเพื่อดูรายละเอียด</p>
           </div>
           <button onClick={() => openAdd(new Date())} className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700">+ ลงคิว</button>
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-4">
-        <div className="flex items-center gap-2 mb-3">
-          <button onClick={() => setOffset((o) => o - 1)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm hover:bg-slate-50">←</button>
-          <span className="text-sm font-medium text-slate-700">{fmtDate(week[0])} – {fmtDate(week[6])}</span>
-          <button onClick={() => setOffset((o) => o + 1)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm hover:bg-slate-50">→</button>
-          <button onClick={() => setOffset(0)} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm hover:bg-slate-50">สัปดาห์นี้</button>
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <button onClick={goPrev} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm hover:bg-slate-50">←</button>
+          <span className="text-sm font-semibold text-slate-700 min-w-[120px] text-center">{rangeLabel}</span>
+          <button onClick={goNext} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm hover:bg-slate-50">→</button>
+          <button onClick={goToday} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm hover:bg-slate-50">วันนี้</button>
+          <div className="ml-auto inline-flex rounded-lg border border-slate-200 bg-white overflow-hidden">
+            <button onClick={() => setView("month")} className={`px-3 py-1.5 text-sm ${view === "month" ? "bg-blue-600 text-white" : "hover:bg-slate-50 text-slate-600"}`}>เดือน</button>
+            <button onClick={() => setView("week")} className={`px-3 py-1.5 text-sm ${view === "week" ? "bg-blue-600 text-white" : "hover:bg-slate-50 text-slate-600"}`}>สัปดาห์</button>
+          </div>
         </div>
 
         {loading ? (
           <p className="text-slate-400 text-sm">กำลังโหลด…</p>
+        ) : view === "month" ? (
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="grid grid-cols-7 border-b bg-slate-50">
+              {DOW_HEAD.map((d) => <div key={d} className="px-2 py-1.5 text-center text-[11px] font-medium text-slate-500">{d}</div>)}
+            </div>
+            <div className="grid grid-cols-7">
+              {monthDays.map((d) => {
+                const inMonth = d.getMonth() === mMonth;
+                const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
+                return (
+                  <div key={d.toISOString()} className={`min-h-[96px] border-b border-r border-slate-100 p-1 flex flex-col ${inMonth ? "" : "bg-slate-50/60"}`}>
+                    <div className="flex items-center justify-between px-0.5">
+                      <span className={`text-[11px] ${isToday(d) ? "bg-blue-600 text-white rounded-full w-5 h-5 inline-flex items-center justify-center font-semibold" : inMonth ? "text-slate-700" : "text-slate-300"}`}>{d.getDate()}</span>
+                      <button onClick={() => openAdd(d)} className="text-[11px] text-slate-300 hover:text-blue-600 leading-none px-1">＋</button>
+                    </div>
+                    <div className="mt-0.5 space-y-0.5 flex-1">
+                      {dayAppts.map((a) => {
+                        const st = STATUS[a.status] ?? STATUS.proposed;
+                        return (
+                          <button key={a.id} onClick={() => setDetail(a)} className={`w-full text-left rounded px-1 py-0.5 text-[10px] leading-tight ${st.cls} hover:brightness-95`}>
+                            <span className="font-semibold">{fmtTime(a.slot_start)}</span> {teamName(a.tech_id)}
+                            <span className="block truncate opacity-80">{chipLabel(a)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
             {week.map((d) => {
@@ -157,19 +257,13 @@ export default function ShareQueuePage() {
                   <div className="p-1.5 space-y-1.5 flex-1">
                     {dayAppts.map((a) => {
                       const st = STATUS[a.status] ?? STATUS.proposed;
-                      const who = a.job_id ? (jobs[a.job_id] || a.job_id) : (a.notes || "—");
                       return (
-                        <div key={a.id} className="rounded-lg bg-slate-50 border border-slate-200 p-1.5">
+                        <button key={a.id} onClick={() => setDetail(a)} className="w-full text-left rounded-lg bg-slate-50 border border-slate-200 p-1.5 hover:border-blue-300 hover:bg-blue-50/40">
                           <div className="text-xs font-semibold text-slate-800">{teamName(a.tech_id)}</div>
                           <div className="text-[11px] text-slate-500">{fmtTime(a.slot_start)}–{fmtTime(a.slot_end)}</div>
-                          <div className="text-[11px] text-slate-600 truncate">{who}</div>
+                          <div className="text-[11px] text-slate-600 truncate">{chipLabel(a)}</div>
                           <span className={`inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
-                          <div className="flex gap-1 mt-1">
-                            {a.status === "proposed" && <button onClick={() => setStatus(a, "confirmed")} className="text-[10px] text-blue-600 hover:underline">ยืนยัน</button>}
-                            <button onClick={() => openEdit(a)} className="text-[10px] text-slate-500 hover:underline">แก้ไข</button>
-                            <button onClick={() => remove(a)} className="text-[10px] text-red-500 hover:underline">ลบ</button>
-                          </div>
-                        </div>
+                        </button>
                       );
                     })}
                     <button onClick={() => openAdd(d)} className="w-full text-[11px] text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded py-1">+ ลงคิว</button>
@@ -182,6 +276,47 @@ export default function ShareQueuePage() {
         <p className="text-[11px] text-slate-400 mt-4">ตารางนี้เชื่อมกับระบบ MPD แบบเรียลไทม์</p>
       </main>
 
+      {/* Detail modal */}
+      {detail && (() => {
+        const st = STATUS[detail.status] ?? STATUS.proposed;
+        const cust = detail.job_id ? (jobs[detail.job_id] || detail.job_id) : null;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setDetail(null)}>
+            <div className="absolute inset-0 bg-black/40" />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md z-10 max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="p-5 border-b flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-semibold text-slate-900">{teamName(detail.tech_id)}</h2>
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">{fmtFullDate(detail.slot_start)}</p>
+                  <p className="text-sm text-slate-700 font-medium">{fmtTime(detail.slot_start)} – {fmtTime(detail.slot_end)} น.</p>
+                  {cust && <p className="text-xs text-slate-500 mt-1">ลูกค้า/งาน: {cust}</p>}
+                </div>
+                <button onClick={() => setDetail(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+              </div>
+              <div className="p-5 overflow-y-auto">
+                <div className="text-xs text-slate-400 mb-1">รายละเอียด / หมายเหตุ</div>
+                {detail.notes ? (
+                  <p className="text-sm text-slate-800 whitespace-pre-wrap break-words leading-relaxed">
+                    {linkify(detail.notes).map((p, i) => p.href
+                      ? <a key={i} href={p.href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">{p.t}</a>
+                      : <span key={i}>{p.t}</span>)}
+                  </p>
+                ) : <p className="text-sm text-slate-400">— ไม่มีหมายเหตุ —</p>}
+              </div>
+              <div className="p-4 border-t flex gap-2">
+                {detail.status === "proposed" && <button onClick={() => setStatus(detail, "confirmed")} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700">ยืนยันนัด</button>}
+                <button onClick={() => openEdit(detail)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">แก้ไข</button>
+                <button onClick={() => remove(detail)} className="px-4 border border-red-200 text-red-600 rounded-lg py-2 text-sm hover:bg-red-50">ลบ</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Add / edit form */}
       {form && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setForm(null)}>
           <div className="absolute inset-0 bg-black/40" />
