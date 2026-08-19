@@ -134,10 +134,28 @@ export default function ShareQueuePage() {
     if (!form) return;
     if (!form.tech_id) { alert("กรุณาเลือกทีมช่าง"); return; }
     if (!form.date) { alert("กรุณาเลือกวันที่"); return; }
+    if ((form.end || "12:00") <= (form.start || "09:00")) { alert("เวลาสิ้นสุดต้องหลังเวลาเริ่ม"); return; }
     setSaving(true);
     try {
       const slotStart = new Date(`${form.date}T${form.start || "09:00"}:00`).toISOString();
       const slotEnd = new Date(`${form.date}T${form.end || "12:00"}:00`).toISOString();
+
+      // กันคิวชนกัน: ทีมเดียวกัน + ช่วงเวลาคาบเกี่ยวในวันเดียวกัน
+      const dayStart = new Date(`${form.date}T00:00:00`).toISOString();
+      const dayEnd = new Date(`${form.date}T23:59:59`).toISOString();
+      const { data: sameDayRows } = await supabase.from("appointments")
+        .select("id, slot_start, slot_end, notes, job_id")
+        .eq("tech_id", form.tech_id).neq("status", "cancelled")
+        .gte("slot_start", dayStart).lte("slot_start", dayEnd);
+      const clash = (sameDayRows as { id: string; slot_start: string; slot_end: string; notes: string | null; job_id: string | null }[] | null ?? [])
+        .find((r) => r.id !== form.id && new Date(slotStart) < new Date(r.slot_end) && new Date(slotEnd) > new Date(r.slot_start));
+      if (clash) {
+        const who = clash.job_id ? (jobs[clash.job_id] || clash.job_id) : ((clash.notes || "").split(/[·\n/]/)[0].trim() || "งานอื่น");
+        setSaving(false);
+        alert(`⚠️ ทีมนี้มีคิวชนกันในวันเดียวกันแล้ว:\n${fmtTime(clash.slot_start)}–${fmtTime(clash.slot_end)} น. · ${who}\n\nกรุณาเลือกทีม/เวลาอื่น`);
+        return;
+      }
+
       if (form.id) {
         const { error } = await supabase.from("appointments")
           .update({ tech_id: form.tech_id, slot_start: slotStart, slot_end: slotEnd, notes: form.notes || null })
