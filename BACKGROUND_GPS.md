@@ -1,6 +1,6 @@
 # FloorNow Background GPS
 
-สถานะ: โค้ดเว็บ, schema/RPC และแอปพนักงาน Android/iPhone พร้อมสำหรับรอบทดสอบเครื่องจริง แต่ยังไม่ใช่ Store build จนกว่าจะตั้ง SMS, Google Routes และ EAS credentials
+สถานะ: โค้ดเว็บ, schema/RPC และแอปพนักงาน Android/iPhone พร้อมสำหรับรอบทดสอบเครื่องจริง แต่ยังไม่ใช่ Store build จนกว่าจะตั้ง SMS และ EAS credentials
 
 ## Flow ที่ระบบบังคับ
 
@@ -20,16 +20,10 @@
 - anon ใช้ได้เฉพาะ `get_floor_customer_tracking(customerToken)`
 - ตาราง GPS เปิด RLS และไม่มี direct grants สำหรับ anon/authenticated; อ่านและเขียนผ่าน RPC ที่จำกัดขอบเขตเท่านั้น
 - Raw latitude/longitude ไม่ถูกส่งให้หน้าลูกค้า
-- Google Routes ถูกตรวจ ownership และ throttle ก่อนเรียก API แบบเสียค่าใช้จ่าย
+- ETA คำนวณใน FloorNow เองจากพิกัดต้นทาง/ปลายทาง โดยไม่ส่งพิกัดไปหา Google Routes หรือบริการเสียเงินภายนอก
 - พิกัดที่เก่ากว่า 24 ชั่วโมงหรืออยู่ในอนาคตเกิน 10 นาทีถูกปฏิเสธ
 
 ## Environment ที่ต้องตั้ง
-
-Vercel (`floor`, Production และ Preview):
-
-```text
-GOOGLE_MAPS_ROUTES_API_KEY=...
-```
 
 Mobile/EAS:
 
@@ -46,17 +40,13 @@ Supabase Auth:
 - ตั้ง SMS provider และ sender ที่ใช้จริง
 - OTP เป็น Auth หลัก; session ถูกเก็บใน SecureStore ของเครื่อง
 
-Google Cloud:
-
-- เปิด Routes API
-- จำกัด key ให้เรียก Routes API เท่านั้น และตั้ง budget/alert
-
 ## ข้อจำกัดของระบบปฏิบัติการ
 
 - ต้องติดตั้ง development/preview/production build; Expo Go ทดสอบ Background Location จริงไม่ได้
 - Android แสดง foreground-service notification ตลอดการเดินทาง และบางยี่ห้อต้องยกเว้น battery optimization
 - iPhone ทำงานขณะล็อกจอ/สลับแอปได้ แต่ระบบปฏิบัติการจะหยุดติดตามเมื่อผู้ใช้ force-quit แอป
 - ETA ต้องมี Google Maps URL ที่มี latitude/longitude; short link ที่ไม่มีพิกัดใน URL ต้องปักหมุดใหม่ก่อน
+- ETA เป็นค่าประมาณจากระยะทางเส้นตรงคูณ factor เส้นทางถนนและความเร็วเฉลี่ย ไม่รวมสภาพจราจรสด
 
 ## Verification
 
@@ -73,4 +63,3 @@ npx expo config --type public
 ```
 
 Production build ในโฟลเดอร์ OneDrive อาจเกิด manifest race แบบเดิมของโปรเจกต์; ให้ตรวจ clean copy นอก OneDriveหรืออาศัย Vercel clean build
-
