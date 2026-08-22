@@ -1,4 +1,4 @@
-export type OrderSource = "manual" | "shopee" | "lazada" | "tiktok" | "jst" | "web";
+export type OrderSource = "manual" | "shopee" | "lazada" | "tiktok" | "jst" | "web" | "floor_direct" | "bbps";
 
 export type StageStatus = "pending" | "active" | "done";
 

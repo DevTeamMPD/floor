@@ -15,10 +15,12 @@ interface Appt {
   status: string;
   notes: string | null;
   requirement: string | null;
+  ext_ref: string | null;
 }
 interface JobDetail {
   bill_no: string | null; customer_name: string | null; customer_phone: string | null;
   address: string | null; location_url: string | null; product_name: string | null; survey_data: string | null;
+  status: string | null; source: string | null; flag_note: string | null;
 }
 const STATUS: Record<string, { label: string; cls: string }> = {
   proposed: { label: "รอยืนยัน", cls: "bg-amber-100 text-amber-700" },
@@ -137,7 +139,7 @@ export default function ShareQueuePage() {
     const end = new Date(days[days.length - 1]); end.setHours(23, 59, 59, 999);
     const [{ data: tt }, { data: ap }] = await Promise.all([
       supabase.from("tech_teams").select("id, name").eq("is_active", true).order("name"),
-      supabase.from("appointments").select("id, job_id, tech_id, slot_start, slot_end, status, notes, requirement")
+      supabase.from("appointments").select("id, job_id, tech_id, slot_start, slot_end, status, notes, requirement, ext_ref")
         .gte("slot_start", start.toISOString()).lte("slot_start", end.toISOString())
         .neq("status", "cancelled").order("slot_start"),
     ]);
@@ -177,7 +179,7 @@ export default function ShareQueuePage() {
     setDetail(a); setDetailJob(null);
     if (a.job_id) {
       const { data: j } = await supabase.from("install_jobs")
-        .select("bill_no, customer_name, customer_phone, address, location_url, product_name, survey_data")
+        .select("bill_no, customer_name, customer_phone, address, location_url, product_name, survey_data, status, source, flag_note")
         .eq("job_no", a.job_id).maybeSingle();
       if (j) setDetailJob(j as JobDetail);
     }
@@ -283,7 +285,18 @@ export default function ShareQueuePage() {
           location_url: form.location_url || null,
           appt_date: dates[0],
           appt_shift: (form.start < "12:00") ? "ช่วงเช้า" : "ช่วงบ่าย",
-          stage: 2, status: "Active", created_via: "share", linked: false,
+          due_date: dates[0],
+          stage: 2,
+          status: "รอหัวหน้าช่างยืนยัน",
+          created_via: "share",
+          source: "floor_direct",
+          order_source: "floor_direct",
+          external_id: `floor:${form.jobNo}`,
+          linked: false,
+          waiting_on: "หัวหน้าช่าง",
+          waiting_since: new Date().toISOString(),
+          flag_note: null,
+          updated_at: new Date().toISOString(),
         };
         if (form.requirement.trim()) payload.product_name = form.requirement;
         if (surveyHasData(form.survey)) {
@@ -306,7 +319,7 @@ export default function ShareQueuePage() {
       if (form.id) {
         const first = mkRow(dates[0], "proposed");
         const { error } = await supabase.from("appointments")
-          .update({ tech_id: first.tech_id, slot_start: first.slot_start, slot_end: first.slot_end, notes: first.notes, requirement: first.requirement, job_id: first.job_id })
+          .update({ tech_id: first.tech_id, slot_start: first.slot_start, slot_end: first.slot_end, notes: first.notes, requirement: first.requirement, job_id: first.job_id, status: "proposed", confirmed_at: null })
           .eq("id", form.id);
         if (error) throw error;
         const extra = dates.slice(1).map((d) => mkRow(d, "proposed"));
@@ -325,15 +338,69 @@ export default function ShareQueuePage() {
   }
 
   async function setStatus(a: Appt, status: string) {
-    const { error } = await supabase.from("appointments").update({ status }).eq("id", a.id);
+    const confirmedAt = status === "confirmed" ? new Date().toISOString() : null;
+    const query = supabase.from("appointments").update({ status, confirmed_at: confirmedAt });
+    const { error } = a.job_id
+      ? await query.eq("job_id", a.job_id).neq("status", "cancelled")
+      : await query.eq("id", a.id);
     if (error) { alert("อัปเดตไม่สำเร็จ"); return; }
+    if (a.job_id) {
+      const nextJobStatus = status === "confirmed" ? "ยืนยันคิวแล้ว" : "รอหัวหน้าช่างยืนยัน";
+      const { error: jobError } = await supabase.from("install_jobs").update({
+        status: nextJobStatus,
+        waiting_on: status === "confirmed" ? "ไม่ได้ค้าง" : "หัวหน้าช่าง",
+        waiting_since: status === "confirmed" ? null : new Date().toISOString(),
+        flag_note: null,
+        updated_at: new Date().toISOString(),
+      }).eq("job_no", a.job_id);
+      if (jobError) { alert("อัปเดต Ticket ไม่สำเร็จ"); return; }
+      await supabase.from("job_activity").insert({
+        job_no: a.job_id, actor: "หัวหน้าช่าง", action: "confirm",
+        field: "status", old_value: detailJob?.status ?? null, new_value: nextJobStatus,
+      });
+    }
     setDetail((d) => (d && d.id === a.id ? { ...d, status } : d));
     load();
   }
+
+  async function sendBack(a: Appt) {
+    if (!a.job_id) return;
+    const reason = window.prompt("ระบุข้อมูลที่ต้องให้ฝ่ายขายแก้ไข");
+    if (!reason?.trim()) return;
+    const [{ error: apptError }, { error: jobError }] = await Promise.all([
+      supabase.from("appointments").update({ status: "proposed", confirmed_at: null })
+        .eq("job_id", a.job_id).neq("status", "cancelled"),
+      supabase.from("install_jobs").update({
+        status: "ส่งกลับฝ่ายขายแก้ไข", waiting_on: "ฝ่ายขาย",
+        waiting_since: new Date().toISOString(), flag_note: reason.trim(), updated_at: new Date().toISOString(),
+      }).eq("job_no", a.job_id),
+    ]);
+    if (apptError || jobError) { alert("ส่งกลับไม่สำเร็จ"); return; }
+    await supabase.from("job_activity").insert({
+      job_no: a.job_id, actor: "หัวหน้าช่าง", action: "return",
+      field: "status", old_value: detailJob?.status ?? null, new_value: `ส่งกลับฝ่ายขายแก้ไข: ${reason.trim()}`,
+    });
+    setDetail(null);
+    load();
+  }
+
   async function remove(a: Appt) {
-    if (!window.confirm("ลบคิวนี้?")) return;
+    if (!window.confirm("ยกเลิกคิวนี้? ประวัติรายการจะยังถูกเก็บไว้")) return;
     const { error } = await supabase.from("appointments").update({ status: "cancelled" }).eq("id", a.id);
     if (error) { alert("ลบไม่สำเร็จ"); return; }
+    if (a.job_id) {
+      const { count } = await supabase.from("appointments")
+        .select("id", { count: "exact", head: true }).eq("job_id", a.job_id).neq("status", "cancelled");
+      if (!count) {
+        await supabase.from("install_jobs").update({
+          status: "ยกเลิกคิว", waiting_on: "ไม่ได้ค้าง", waiting_since: null, updated_at: new Date().toISOString(),
+        }).eq("job_no", a.job_id);
+        await supabase.from("job_activity").insert({
+          job_no: a.job_id, actor: "ผู้ดูแลคิว", action: "cancel", field: "status",
+          old_value: detailJob?.status ?? null, new_value: "ยกเลิกคิว",
+        });
+      }
+    }
     setDetail(null);
     load();
   }
@@ -465,11 +532,16 @@ export default function ShareQueuePage() {
               <div className="p-5 overflow-y-auto space-y-4">
                 {detailJob && (
                   <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm space-y-1">
+                    <div className="flex items-center gap-2 pb-1">
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-white border border-slate-200">{detailJob.source === "bbps" ? "BBPS" : "ขายตรง"}</span>
+                      {detailJob.status && <span className="text-xs font-medium text-slate-600">{detailJob.status}</span>}
+                    </div>
                     {detailJob.bill_no && <div><span className="text-slate-400 text-xs">เลขบิล: </span>{detailJob.bill_no}</div>}
                     {detailJob.customer_name && <div><span className="text-slate-400 text-xs">ลูกค้า: </span>{detailJob.customer_name}</div>}
                     {detailJob.customer_phone && <div><span className="text-slate-400 text-xs">โทร: </span><a href={`tel:${detailJob.customer_phone}`} className="text-blue-600">{detailJob.customer_phone}</a></div>}
                     {detailJob.address && <div><span className="text-slate-400 text-xs">ที่อยู่: </span>{detailJob.address}</div>}
                     {detailJob.location_url && <div><a href={detailJob.location_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">📍 เปิดแผนที่</a></div>}
+                    {detailJob.flag_note && <div className="mt-2 rounded bg-amber-50 border border-amber-200 p-2 text-amber-800"><span className="text-xs font-medium">ต้องแก้ไข: </span>{detailJob.flag_note}</div>}
                   </div>
                 )}
                 <div>
@@ -508,8 +580,9 @@ export default function ShareQueuePage() {
               </div>
               <div className="p-4 border-t flex gap-2">
                 {detail.status === "proposed" && <button onClick={() => setStatus(detail, "confirmed")} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700">ยืนยันนัด</button>}
-                <button onClick={() => openEdit(detail)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">แก้ไข</button>
-                <button onClick={() => remove(detail)} className="px-4 border border-red-200 text-red-600 rounded-lg py-2 text-sm hover:bg-red-50">ลบ</button>
+                {detail.status === "proposed" && detail.job_id && <button onClick={() => sendBack(detail)} className="flex-1 border border-amber-300 text-amber-700 rounded-lg py-2 text-sm hover:bg-amber-50">ส่งกลับแก้ไข</button>}
+                {!detail.ext_ref?.startsWith("bbps:") && <button onClick={() => openEdit(detail)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">แก้ไข</button>}
+                <button onClick={() => remove(detail)} className="px-4 border border-red-200 text-red-600 rounded-lg py-2 text-sm hover:bg-red-50">ยกเลิก</button>
               </div>
             </div>
           </div>
