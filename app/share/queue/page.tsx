@@ -32,6 +32,16 @@ interface DetailTechnician {
   openCount: number;
   acknowledgedAt: string | null;
 }
+interface LegacyNoteDetail {
+  billNo: string;
+  customerName: string;
+  customerPhone: string;
+  address: string;
+  locationUrl: string;
+  scope: string;
+  areaSqm: string;
+  isBbps: boolean;
+}
 const STATUS: Record<string, { label: string; cls: string }> = {
   proposed: { label: "รอยืนยัน", cls: "bg-amber-100 text-amber-700" },
   confirmed: { label: "ยืนยันแล้ว", cls: "bg-blue-100 text-blue-700" },
@@ -98,6 +108,23 @@ function evidenceOf(t: DetailTechnician) {
   if (t.acknowledgedAt) return { label: "รับทราบงานแล้ว", cls: "bg-emerald-100 text-emerald-700" };
   if (t.firstOpenedAt) return { label: `เปิดแล้ว ${t.openCount} ครั้ง`, cls: "bg-blue-100 text-blue-700" };
   return { label: "ยังไม่เปิดใบงาน", cls: "bg-slate-100 text-slate-500" };
+}
+function parseLegacyNote(note: string | null): LegacyNoteDetail {
+  const text = note ?? "";
+  const capture = (pattern: RegExp) => text.match(pattern)?.[1]?.trim() ?? "";
+  const firstPart = text.split("·")[0]?.trim() ?? "";
+  const namedCustomer = capture(/(?:ชื่อ|ลูกค้า)\s*:\s*([^/·]+)/i);
+  const scope = capture(/\[[^\]]+\]\s*([^\n]+)$/) || capture(/นัดติดตั้ง\s*:[^/]*\/\s*([^\n]+)$/i);
+  return {
+    billNo: capture(/(?:เลขบิล|บิล)\s*[:#]?\s*([A-Za-z0-9-]+)/i),
+    customerName: namedCustomer || firstPart,
+    customerPhone: capture(/(?:Tel|โทร|เบอร์โทร(?:ศัพท์)?|เบอรโทร)\s*:?\s*([0-9+() -]{8,})/i),
+    address: capture(/ที่อยู่(?:ลูกค้า)?\s*:\s*([^/]+?)(?=\s*\/\s*(?:Google|Map|แผนที่|นัดติดตั้ง)|$)/i),
+    locationUrl: capture(/(?:Google\s*Map|Map|แผนที่)\s*:\s*(https?:\/\/[^\s/]+[^\s]*)/i),
+    scope,
+    areaSqm: capture(/([0-9]+(?:\.[0-9]+)?)\s*(?:ตร\.?ม\.?|ตรม)/i),
+    isBbps: /(?:เลขบิล|บิล)\s*[:#]?\s*[A-Za-z0-9-]+/i.test(text) && /เซล|BBPS/i.test(text),
+  };
 }
 
 interface FormState {
@@ -563,6 +590,15 @@ export default function ShareQueuePage() {
         const st = STATUS[detail.status] ?? STATUS.proposed;
         let sv: SurveyData | null = null;
         if (detailJob?.survey_data) { try { sv = { ...EMPTY_SURVEY, ...JSON.parse(detailJob.survey_data) }; } catch {} }
+        const legacy = parseLegacyNote(detail.notes);
+        const customerName = detailJob?.customer_name || legacy.customerName;
+        const customerPhone = detailJob?.customer_phone || legacy.customerPhone;
+        const customerAddress = detailJob?.address || legacy.address;
+        const locationUrl = detailJob?.location_url || legacy.locationUrl;
+        const billNo = detailJob?.bill_no || legacy.billNo;
+        const workScope = detailJob?.product_name || detail.requirement || legacy.scope;
+        const areaSqm = sv?.areaSqm || legacy.areaSqm;
+        const hasCustomerDetail = !!(customerName || customerPhone || customerAddress || locationUrl);
         return (
           <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="รายละเอียดงาน">
             <button className="absolute inset-0 bg-slate-950/45 cursor-default" onClick={() => setDetail(null)} aria-label="ปิดรายละเอียดงาน" />
@@ -572,13 +608,13 @@ export default function ShareQueuePage() {
                   <div className="min-w-0">
                     <div className="mb-2 flex flex-wrap items-center gap-2">
                       <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${st.cls}`}>{st.label}</span>
-                      {detailJob && <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600">{detailJob.source === "bbps" ? "งาน BBPS" : "งานขายตรง"}</span>}
+                      {(detailJob || legacy.isBbps) && <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600">{detailJob?.source === "bbps" || legacy.isBbps ? "งาน BBPS" : "งานขายตรง"}</span>}
                       {detailJob?.status && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600">{detailJob.status}</span>}
                     </div>
-                    <h2 className="truncate text-xl font-bold text-slate-900">{detailJob?.customer_name || chipLabel(detail)}</h2>
+                    <h2 className="truncate text-xl font-bold text-slate-900">{customerName || chipLabel(detail)}</h2>
                     <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
                       {detail.job_id && <span>เลขงาน <strong className="font-medium text-slate-700">{detail.job_id}</strong></span>}
-                      {detailJob?.bill_no && <span>เลขบิล <strong className="font-medium text-slate-700">{detailJob.bill_no}</strong></span>}
+                      {billNo && <span>เลขบิล <strong className="font-medium text-slate-700">{billNo}</strong></span>}
                     </div>
                   </div>
                   <button onClick={() => setDetail(null)} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-2xl text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="ปิด">×</button>
@@ -614,14 +650,14 @@ export default function ShareQueuePage() {
                     ) : <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">ยังไม่ได้จ่ายงานให้ช่างรายบุคคล</p>}
                   </section>
 
-                  {detailJob && (
+                  {hasCustomerDetail && (
                     <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 md:col-span-2">
                       <h3 className="mb-4 text-sm font-semibold text-slate-900">👤 ลูกค้าและสถานที่ติดตั้ง</h3>
                       <div className="grid gap-4 sm:grid-cols-2">
-                        <div><div className="text-xs text-slate-400">ชื่อลูกค้า</div><div className="mt-1 text-sm font-medium text-slate-800">{detailJob.customer_name || "—"}</div></div>
-                        <div><div className="text-xs text-slate-400">เบอร์โทรศัพท์</div>{detailJob.customer_phone ? <a href={`tel:${detailJob.customer_phone}`} className="mt-1 inline-block text-sm font-medium text-blue-600 hover:underline">☎ {detailJob.customer_phone}</a> : <div className="mt-1 text-sm text-slate-400">—</div>}</div>
-                        <div className="sm:col-span-2"><div className="text-xs text-slate-400">ที่อยู่หน้างาน</div><div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{detailJob.address || "—"}</div></div>
-                        {detailJob.location_url && <div className="sm:col-span-2"><a href={detailJob.location_url} target="_blank" rel="noopener noreferrer" className="inline-flex rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100">📍 เปิดตำแหน่งใน Google Maps</a></div>}
+                        <div><div className="text-xs text-slate-400">ชื่อลูกค้า</div><div className="mt-1 text-sm font-medium text-slate-800">{customerName || "—"}</div></div>
+                        <div><div className="text-xs text-slate-400">เบอร์โทรศัพท์</div>{customerPhone ? <a href={`tel:${customerPhone}`} className="mt-1 inline-block text-sm font-medium text-blue-600 hover:underline">☎ {customerPhone}</a> : <div className="mt-1 text-sm text-slate-400">—</div>}</div>
+                        <div className="sm:col-span-2"><div className="text-xs text-slate-400">ที่อยู่หน้างาน</div><div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{customerAddress || "—"}</div></div>
+                        {locationUrl && <div className="sm:col-span-2"><a href={locationUrl} target="_blank" rel="noopener noreferrer" className="inline-flex rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100">📍 เปิดตำแหน่งใน Google Maps</a></div>}
                       </div>
                     </section>
                   )}
@@ -629,8 +665,8 @@ export default function ShareQueuePage() {
                   <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 md:col-span-2">
                     <h3 className="mb-4 text-sm font-semibold text-slate-900">📋 ขอบเขตและรายละเอียดงาน</h3>
                     <div className="grid gap-4 sm:grid-cols-2">
-                      <div><div className="text-xs text-slate-400">สินค้า / สเปก</div><div className="mt-1 whitespace-pre-wrap text-sm font-medium text-slate-800">{detailJob?.product_name || detail.requirement || "—"}</div></div>
-                      <div><div className="text-xs text-slate-400">พื้นที่ติดตั้ง</div><div className="mt-1 text-sm font-medium text-slate-800">{sv?.areaSqm ? `${sv.areaSqm} ตร.ม.` : "—"}</div></div>
+                      <div><div className="text-xs text-slate-400">สินค้า / สเปก</div><div className="mt-1 whitespace-pre-wrap text-sm font-medium text-slate-800">{workScope || "—"}</div></div>
+                      <div><div className="text-xs text-slate-400">พื้นที่ติดตั้ง</div><div className="mt-1 text-sm font-medium text-slate-800">{areaSqm ? `${areaSqm} ตร.ม.` : "—"}</div></div>
                       {detail.requirement && detail.requirement !== detailJob?.product_name && <div className="sm:col-span-2"><div className="text-xs text-slate-400">Requirement งาน</div><div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{detail.requirement}</div></div>}
                     </div>
                   </section>
