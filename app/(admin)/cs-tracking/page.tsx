@@ -189,7 +189,7 @@ function CsTrackingInner() {
       supabase
         .from("install_jobs")
         .select("job_no, customer_name, product_name, external_id, product_skus, closed_at, appt_date, customer_phone, stage")
-        .eq("stage", 7)
+        .eq("stage", 6)
         .order("closed_at", { ascending: false, nullsFirst: false }),
       supabase.from("job_evaluations").select("*, score:satisfaction_score"),
       supabase.from("evaluation_questions").select("id, question_text, order_index").eq("is_active", true).order("order_index"),

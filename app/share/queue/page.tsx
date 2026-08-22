@@ -2,6 +2,8 @@
 export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { ipGenOrderNo } from "@/lib/utils";
+import { CUT_TYPES, WELD_TYPES, FINISH_TYPES, FLOOR_CONDITIONS, EMPTY_SURVEY, surveyHasData, type SurveyData } from "@/lib/survey";
 
 interface Team { id: string; name: string }
 interface Appt {
@@ -14,13 +16,15 @@ interface Appt {
   notes: string | null;
   requirement: string | null;
 }
-
+interface JobDetail {
+  bill_no: string | null; customer_name: string | null; customer_phone: string | null;
+  address: string | null; location_url: string | null; product_name: string | null; survey_data: string | null;
+}
 const STATUS: Record<string, { label: string; cls: string }> = {
   proposed: { label: "รอยืนยัน", cls: "bg-amber-100 text-amber-700" },
   confirmed: { label: "ยืนยันแล้ว", cls: "bg-blue-100 text-blue-700" },
   completed: { label: "เสร็จสิ้น", cls: "bg-emerald-100 text-emerald-700" },
 };
-// สีประจำทีม (วนตามลำดับทีม) — พื้น/ตัวอักษร/ขอบ
 const TEAM_COLORS = [
   "bg-blue-100 text-blue-800 border-blue-300",
   "bg-emerald-100 text-emerald-800 border-emerald-300",
@@ -47,7 +51,6 @@ function getWeekDays(offset: number): Date[] {
   monday.setHours(0, 0, 0, 0);
   return Array.from({ length: 7 }, (_, i) => { const d = new Date(monday); d.setDate(monday.getDate() + i); return d; });
 }
-// Monday-first month matrix; trims trailing weeks that are entirely in the next month.
 function getMonthDays(year: number, month: number): Date[] {
   const first = new Date(year, month, 1);
   const startDow = first.getDay();
@@ -56,7 +59,6 @@ function getMonthDays(year: number, month: number): Date[] {
   start.setHours(0, 0, 0, 0);
   const days: Date[] = [];
   for (let i = 0; i < 42; i++) { const d = new Date(start); d.setDate(start.getDate() + i); days.push(d); }
-  // drop a trailing week if all 7 of its days are outside this month
   while (days.length > 35 && days.slice(days.length - 7).every((d) => d.getMonth() !== month)) days.length -= 7;
   return days;
 }
@@ -67,7 +69,6 @@ function ymd(d: Date) { return `${d.getFullYear()}-${String(d.getMonth() + 1).pa
 function sameDay(d: Date, iso: string) { const x = new Date(iso); return d.getFullYear() === x.getFullYear() && d.getMonth() === x.getMonth() && d.getDate() === x.getDate(); }
 function isToday(d: Date) { const n = new Date(); return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate(); }
 
-// Split note text into plain + clickable link segments
 function linkify(text: string): { t: string; href?: string }[] {
   const parts: { t: string; href?: string }[] = [];
   const re = /(https?:\/\/[^\s]+)/g;
@@ -80,13 +81,21 @@ function linkify(text: string): { t: string; href?: string }[] {
   if (last < text.length) parts.push({ t: text.slice(last) });
   return parts;
 }
+function labelOf(list: { id: string; label: string }[], id: string) { return list.find((x) => x.id === id)?.label ?? id; }
 
-interface FormState { id: string | null; tech_id: string; date: string; endDate: string; start: string; end: string; notes: string; requirement: string }
+interface FormState {
+  id: string | null; tech_id: string; date: string; endDate: string; start: string; end: string;
+  notes: string; requirement: string;
+  jobNo: string; bill_no: string; customer_name: string; customer_phone: string; address: string; location_url: string;
+  survey: SurveyData;
+}
 const WORK_START = "09:00";
 const WORK_END = "17:00";
-const EMPTY_FORM: FormState = { id: null, tech_id: "", date: "", endDate: "", start: WORK_START, end: WORK_END, notes: "", requirement: "" };
+function emptyForm(): FormState {
+  return { id: null, tech_id: "", date: "", endDate: "", start: WORK_START, end: WORK_END, notes: "", requirement: "",
+    jobNo: "", bill_no: "", customer_name: "", customer_phone: "", address: "", location_url: "", survey: { ...EMPTY_SURVEY, photos: [] } };
+}
 
-// list of YYYY-MM-DD strings from a..b inclusive (capped for safety)
 function eachDay(a: string, b: string): string[] {
   if (!a) return [];
   if (!b || b < a) return [a];
@@ -113,7 +122,9 @@ export default function ShareQueuePage() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<FormState | null>(null);
   const [detail, setDetail] = useState<Appt | null>(null);
+  const [detailJob, setDetailJob] = useState<JobDetail | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const week = useMemo(() => getWeekDays(offset), [offset]);
   const monthDays = useMemo(() => getMonthDays(mYear, mMonth), [mYear, mMonth]);
@@ -145,7 +156,6 @@ export default function ShareQueuePage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Short customer/label for a chip
   const chipLabel = useCallback((a: Appt) => {
     if (a.job_id) return jobs[a.job_id] || a.job_id;
     const n = (a.notes || "").trim();
@@ -157,20 +167,78 @@ export default function ShareQueuePage() {
     const idx = teams.findIndex((t) => t.id === id);
     return idx >= 0 ? TEAM_COLORS[idx % TEAM_COLORS.length] : "bg-slate-100 text-slate-700 border-slate-300";
   }, [teams]);
-  // สีของ chip: วันหยุด=เทา, ไม่งั้นตามทีม; รอยืนยัน=เส้นประ
   const chipCls = useCallback((a: Appt) => {
     const base = isHoliday(a) ? HOLIDAY_COLOR : teamColor(a.tech_id);
     const dashed = a.status === "proposed" ? "border border-dashed" : "border border-transparent";
     return `${base} ${dashed}`;
   }, [teamColor]);
 
-  function openAdd(date: Date) { setDetail(null); setForm({ ...EMPTY_FORM, date: ymd(date), endDate: ymd(date), tech_id: teams[0]?.id ?? "" }); }
-  function openEdit(a: Appt) {
+  async function openDetail(a: Appt) {
+    setDetail(a); setDetailJob(null);
+    if (a.job_id) {
+      const { data: j } = await supabase.from("install_jobs")
+        .select("bill_no, customer_name, customer_phone, address, location_url, product_name, survey_data")
+        .eq("job_no", a.job_id).maybeSingle();
+      if (j) setDetailJob(j as JobDetail);
+    }
+  }
+
+  function openAdd(date: Date) {
+    setDetail(null);
+    setForm({ ...emptyForm(), date: ymd(date), endDate: ymd(date), tech_id: teams[0]?.id ?? "", jobNo: ipGenOrderNo() });
+  }
+  async function openEdit(a: Appt) {
     const s = new Date(a.slot_start), e = new Date(a.slot_end);
     const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
     setDetail(null);
-    setForm({ id: a.id, tech_id: a.tech_id ?? "", date: ymd(s), endDate: ymd(s), start: hhmm(s), end: hhmm(e), notes: a.notes ?? "", requirement: a.requirement ?? "" });
+    const base: FormState = { ...emptyForm(), id: a.id, tech_id: a.tech_id ?? "", date: ymd(s), endDate: ymd(s),
+      start: hhmm(s), end: hhmm(e), notes: a.notes ?? "", requirement: a.requirement ?? "", jobNo: a.job_id || ipGenOrderNo() };
+    if (a.job_id) {
+      const { data: j } = await supabase.from("install_jobs")
+        .select("bill_no, customer_name, customer_phone, address, location_url, survey_data")
+        .eq("job_no", a.job_id).maybeSingle();
+      if (j) {
+        base.bill_no = j.bill_no ?? ""; base.customer_name = j.customer_name ?? ""; base.customer_phone = j.customer_phone ?? "";
+        base.address = j.address ?? ""; base.location_url = j.location_url ?? "";
+        if (j.survey_data) { try { base.survey = { ...EMPTY_SURVEY, ...JSON.parse(j.survey_data) }; } catch {} }
+      }
+    }
+    setForm(base);
   }
+
+  // อัปโหลดรูปสำรวจ -> bucket job-photos (public)
+  function photoUrl(path: string) { return supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl; }
+  async function uploadPhotos(files: File[]) {
+    if (!form || !files.length) return;
+    setUploading(true);
+    const added: string[] = [];
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const safe = f.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = `survey/${form.jobNo}/${Date.now()}-${i}-${safe}`;
+        const { error } = await supabase.storage.from("job-photos").upload(path, f, { upsert: false, contentType: f.type || "image/jpeg" });
+        if (error) throw error;
+        added.push(path);
+      }
+      setForm((f) => f ? { ...f, survey: { ...f.survey, photos: [...(f.survey.photos ?? []), ...added] } } : f);
+    } catch (e: unknown) {
+      alert("อัปโหลดรูปไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
+    }
+    setUploading(false);
+  }
+  function removePhoto(path: string) {
+    setForm((f) => f ? { ...f, survey: { ...f.survey, photos: (f.survey.photos ?? []).filter((p) => p !== path) } } : f);
+  }
+
+  // helpers to toggle survey multi-select
+  function toggleCut(id: string) {
+    setForm((f) => { if (!f) return f; const has = f.survey.cutTypes.includes(id); return { ...f, survey: { ...f.survey, cutTypes: has ? f.survey.cutTypes.filter((x) => x !== id) : [...f.survey.cutTypes, id] } }; });
+  }
+  function toggleFinish(id: string) {
+    setForm((f) => { if (!f) return f; const has = f.survey.finishTypes.includes(id); return { ...f, survey: { ...f.survey, finishTypes: has ? f.survey.finishTypes.filter((x) => x !== id) : [...f.survey.finishTypes, id] } }; });
+  }
+  function setSurvey(patch: Partial<SurveyData>) { setForm((f) => f ? { ...f, survey: { ...f.survey, ...patch } } : f); }
 
   async function save() {
     if (!form) return;
@@ -181,7 +249,7 @@ export default function ShareQueuePage() {
     const dates = eachDay(form.date, endDate);
     setSaving(true);
     try {
-      // กันคิวชนกัน: เช็คทุกวันในช่วง — ทีมเดียวกัน + เวลาคาบเกี่ยว
+      // กันคิวชนกัน
       const rangeStart = new Date(`${dates[0]}T00:00:00`).toISOString();
       const rangeEnd = new Date(`${dates[dates.length - 1]}T23:59:59`).toISOString();
       const { data: existRows } = await supabase.from("appointments")
@@ -189,7 +257,6 @@ export default function ShareQueuePage() {
         .eq("tech_id", form.tech_id).neq("status", "cancelled")
         .gte("slot_start", rangeStart).lte("slot_start", rangeEnd);
       const existing = (existRows as { id: string; slot_start: string; slot_end: string; notes: string | null; job_id: string | null }[] | null) ?? [];
-
       const clashes: string[] = [];
       for (const d of dates) {
         const s = new Date(`${d}T${form.start || "09:00"}:00`);
@@ -200,10 +267,30 @@ export default function ShareQueuePage() {
           clashes.push(`${new Date(d).toLocaleDateString("th-TH", { day: "numeric", month: "short" })} — ชนกับ ${fmtTime(c.slot_start)}–${fmtTime(c.slot_end)} น. · ${who}`);
         }
       }
-      if (clashes.length) {
-        setSaving(false);
-        alert(`⚠️ ทีมนี้มีคิวชนกัน:\n${clashes.join("\n")}\n\nกรุณาเลือกทีม/เวลาอื่น`);
-        return;
+      if (clashes.length) { setSaving(false); alert(`⚠️ ทีมนี้มีคิวชนกัน:\n${clashes.join("\n")}\n\nกรุณาเลือกทีม/เวลาอื่น`); return; }
+
+      // เปิดบิล = สร้าง ticket (install_jobs) เมื่อมีเลขบิลหรือชื่อลูกค้า และไม่ใช่วันหยุด
+      const isCustomerJob = !!(form.bill_no.trim() || form.customer_name.trim());
+      const jobId = isCustomerJob ? form.jobNo : null;
+
+      if (isCustomerJob) {
+        const payload: Record<string, unknown> = {
+          job_no: form.jobNo, order_no: form.jobNo,
+          bill_no: form.bill_no || null,
+          customer_name: form.customer_name || null,
+          customer_phone: form.customer_phone || null,
+          address: form.address || null,
+          location_url: form.location_url || null,
+          appt_date: dates[0],
+          appt_shift: (form.start < "12:00") ? "ช่วงเช้า" : "ช่วงบ่าย",
+          stage: 2, status: "Active", created_via: "share", linked: false,
+        };
+        if (form.requirement.trim()) payload.product_name = form.requirement;
+        if (surveyHasData(form.survey)) {
+          payload.survey_data = JSON.stringify({ ...form.survey, savedAt: form.survey.savedAt || new Date().toISOString() });
+        }
+        const { error: je } = await supabase.from("install_jobs").upsert(payload, { onConflict: "job_no" });
+        if (je) throw je;
       }
 
       const mkRow = (d: string, status: string) => ({
@@ -212,14 +299,14 @@ export default function ShareQueuePage() {
         slot_end: new Date(`${d}T${form.end || "17:00"}:00`).toISOString(),
         notes: form.notes || null,
         requirement: form.requirement || null,
+        job_id: jobId,
         status,
       });
 
       if (form.id) {
-        // update the edited row to the first day, then add any extra days as new rows
         const first = mkRow(dates[0], "proposed");
         const { error } = await supabase.from("appointments")
-          .update({ tech_id: first.tech_id, slot_start: first.slot_start, slot_end: first.slot_end, notes: first.notes, requirement: first.requirement })
+          .update({ tech_id: first.tech_id, slot_start: first.slot_start, slot_end: first.slot_end, notes: first.notes, requirement: first.requirement, job_id: first.job_id })
           .eq("id", form.id);
         if (error) throw error;
         const extra = dates.slice(1).map((d) => mkRow(d, "proposed"));
@@ -251,22 +338,12 @@ export default function ShareQueuePage() {
     load();
   }
 
-  const rangeLabel = view === "month"
-    ? `${MONTH_TH[mMonth]} ${mYear + 543}`
-    : `${fmtDate(week[0])} – ${fmtDate(week[6])}`;
+  const rangeLabel = view === "month" ? `${MONTH_TH[mMonth]} ${mYear + 543}` : `${fmtDate(week[0])} – ${fmtDate(week[6])}`;
+  function goPrev() { if (view === "month") { const d = new Date(mYear, mMonth - 1, 1); setMYear(d.getFullYear()); setMMonth(d.getMonth()); } else setOffset((o) => o - 1); }
+  function goNext() { if (view === "month") { const d = new Date(mYear, mMonth + 1, 1); setMYear(d.getFullYear()); setMMonth(d.getMonth()); } else setOffset((o) => o + 1); }
+  function goToday() { const t = new Date(); setMYear(t.getFullYear()); setMMonth(t.getMonth()); setOffset(0); }
 
-  function goPrev() {
-    if (view === "month") { const d = new Date(mYear, mMonth - 1, 1); setMYear(d.getFullYear()); setMMonth(d.getMonth()); }
-    else setOffset((o) => o - 1);
-  }
-  function goNext() {
-    if (view === "month") { const d = new Date(mYear, mMonth + 1, 1); setMYear(d.getFullYear()); setMMonth(d.getMonth()); }
-    else setOffset((o) => o + 1);
-  }
-  function goToday() {
-    const t = new Date();
-    setMYear(t.getFullYear()); setMMonth(t.getMonth()); setOffset(0);
-  }
+  const isHol = form ? (/วันหยุด|หยุด|ลาพัก|ไม่รับงาน/.test(form.notes) && !form.bill_no.trim() && !form.customer_name.trim()) : false;
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -274,7 +351,7 @@ export default function ShareQueuePage() {
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold text-slate-900">🗓️ ตารางคิวช่าง — MPD</h1>
-            <p className="text-xs text-slate-500">แชร์สำหรับทีมช่าง · จิ้มวันว่างเพื่อลงคิว · กดที่งานเพื่อดูรายละเอียด</p>
+            <p className="text-xs text-slate-500">แชร์สำหรับทีมช่าง · จิ้มวันว่างเพื่อเปิดบิล/ลงคิว · กดที่งานเพื่อดูรายละเอียด</p>
           </div>
           <button onClick={() => openAdd(new Date())} className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700">+ ลงคิว</button>
         </div>
@@ -292,7 +369,6 @@ export default function ShareQueuePage() {
           </div>
         </div>
 
-        {/* คำอธิบายสี */}
         <div className="flex items-center gap-3 mb-3 flex-wrap text-[11px] text-slate-600">
           {teams.map((t) => (
             <span key={t.id} className="inline-flex items-center gap-1">
@@ -322,7 +398,7 @@ export default function ShareQueuePage() {
                     </div>
                     <div className="mt-0.5 space-y-0.5 flex-1">
                       {dayAppts.map((a) => (
-                        <button key={a.id} onClick={(ev) => { ev.stopPropagation(); setDetail(a); }} className={`w-full text-left rounded px-1 py-0.5 text-[10px] leading-tight ${chipCls(a)} hover:brightness-95`}>
+                        <button key={a.id} onClick={(ev) => { ev.stopPropagation(); openDetail(a); }} className={`w-full text-left rounded px-1 py-0.5 text-[10px] leading-tight ${chipCls(a)} hover:brightness-95`}>
                           <span className="font-semibold">{isHoliday(a) ? "🏖️" : fmtTime(a.slot_start)}</span> {teamName(a.tech_id)}
                           <span className="block truncate opacity-80">{chipLabel(a)}</span>
                         </button>
@@ -347,7 +423,7 @@ export default function ShareQueuePage() {
                     {dayAppts.map((a) => {
                       const st = STATUS[a.status] ?? STATUS.proposed;
                       return (
-                        <button key={a.id} onClick={() => setDetail(a)} className={`w-full text-left rounded-lg p-1.5 hover:brightness-95 ${chipCls(a)}`}>
+                        <button key={a.id} onClick={() => openDetail(a)} className={`w-full text-left rounded-lg p-1.5 hover:brightness-95 ${chipCls(a)}`}>
                           <div className="text-xs font-semibold">{teamName(a.tech_id)}{isHoliday(a) ? " · 🏖️ วันหยุด" : ""}</div>
                           {!isHoliday(a) && <div className="text-[11px] opacity-70">{fmtTime(a.slot_start)}–{fmtTime(a.slot_end)}</div>}
                           <div className="text-[11px] opacity-80 truncate">{chipLabel(a)}</div>
@@ -362,13 +438,14 @@ export default function ShareQueuePage() {
             })}
           </div>
         )}
-        <p className="text-[11px] text-slate-400 mt-4">ตารางนี้เชื่อมกับระบบ MPD แบบเรียลไทม์</p>
+        <p className="text-[11px] text-slate-400 mt-4">ตารางนี้เชื่อมกับระบบ MPD แบบเรียลไทม์ · เปิดบิลที่นี่ = สร้างงานเข้า Pipeline</p>
       </main>
 
       {/* Detail modal */}
       {detail && (() => {
         const st = STATUS[detail.status] ?? STATUS.proposed;
-        const cust = detail.job_id ? (jobs[detail.job_id] || detail.job_id) : null;
+        let sv: SurveyData | null = null;
+        if (detailJob?.survey_data) { try { sv = JSON.parse(detailJob.survey_data); } catch {} }
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setDetail(null)}>
             <div className="absolute inset-0 bg-black/40" />
@@ -378,26 +455,54 @@ export default function ShareQueuePage() {
                   <div className="flex items-center gap-2">
                     <h2 className="text-base font-semibold text-slate-900">{teamName(detail.tech_id)}</h2>
                     <span className={`text-[11px] px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                    {detail.job_id && <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🎫 มีบิล</span>}
                   </div>
                   <p className="text-xs text-slate-500 mt-1">{fmtFullDate(detail.slot_start)}</p>
                   <p className="text-sm text-slate-700 font-medium">{fmtTime(detail.slot_start)} – {fmtTime(detail.slot_end)} น.</p>
-                  {cust && <p className="text-xs text-slate-500 mt-1">ลูกค้า/งาน: {cust}</p>}
                 </div>
                 <button onClick={() => setDetail(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
               </div>
-              <div className="p-5 overflow-y-auto">
-                <div className="text-xs text-slate-400 mb-1">รายละเอียด / หมายเหตุ</div>
-                {detail.notes ? (
-                  <p className="text-sm text-slate-800 whitespace-pre-wrap break-words leading-relaxed">
-                    {linkify(detail.notes).map((p, i) => p.href
-                      ? <a key={i} href={p.href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">{p.t}</a>
-                      : <span key={i}>{p.t}</span>)}
-                  </p>
-                ) : <p className="text-sm text-slate-400">— ไม่มีหมายเหตุ —</p>}
+              <div className="p-5 overflow-y-auto space-y-4">
+                {detailJob && (
+                  <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm space-y-1">
+                    {detailJob.bill_no && <div><span className="text-slate-400 text-xs">เลขบิล: </span>{detailJob.bill_no}</div>}
+                    {detailJob.customer_name && <div><span className="text-slate-400 text-xs">ลูกค้า: </span>{detailJob.customer_name}</div>}
+                    {detailJob.customer_phone && <div><span className="text-slate-400 text-xs">โทร: </span><a href={`tel:${detailJob.customer_phone}`} className="text-blue-600">{detailJob.customer_phone}</a></div>}
+                    {detailJob.address && <div><span className="text-slate-400 text-xs">ที่อยู่: </span>{detailJob.address}</div>}
+                    {detailJob.location_url && <div><a href={detailJob.location_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">📍 เปิดแผนที่</a></div>}
+                  </div>
+                )}
+                <div>
+                  <div className="text-xs text-slate-400 mb-1">รายละเอียด / หมายเหตุ</div>
+                  {detail.notes ? (
+                    <p className="text-sm text-slate-800 whitespace-pre-wrap break-words leading-relaxed">
+                      {linkify(detail.notes).map((p, i) => p.href
+                        ? <a key={i} href={p.href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">{p.t}</a>
+                        : <span key={i}>{p.t}</span>)}
+                    </p>
+                  ) : <p className="text-sm text-slate-400">— ไม่มีหมายเหตุ —</p>}
+                </div>
                 {detail.requirement && (
-                  <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-3">
+                  <div className="rounded-lg bg-amber-50 border border-amber-200 p-3">
                     <div className="text-xs text-amber-700 font-medium mb-1">📋 Requirement งาน</div>
                     <p className="text-sm text-slate-800 whitespace-pre-wrap break-words leading-relaxed">{detail.requirement}</p>
+                  </div>
+                )}
+                {sv && surveyHasData(sv) && (
+                  <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm space-y-1">
+                    <div className="text-xs text-blue-700 font-medium mb-1">🔎 ข้อมูลสำรวจ</div>
+                    {sv.areaSqm && <div><span className="text-slate-400 text-xs">พื้นที่: </span>{sv.areaSqm} ตร.ม.</div>}
+                    {sv.weldType && <div><span className="text-slate-400 text-xs">วิธีเชื่อม: </span>{labelOf(WELD_TYPES, sv.weldType)}</div>}
+                    {sv.floorCondition && <div><span className="text-slate-400 text-xs">สภาพพื้น: </span>{labelOf(FLOOR_CONDITIONS, sv.floorCondition)}</div>}
+                    {sv.finishTypes?.length > 0 && <div><span className="text-slate-400 text-xs">การจบงาน: </span>{sv.finishTypes.map((x) => labelOf(FINISH_TYPES, x)).join(", ")}</div>}
+                    {sv.cutTypes?.length > 0 && <div><span className="text-slate-400 text-xs">งานตัด: </span>{sv.cutTypes.map((x) => labelOf(CUT_TYPES, x)).join(", ")}</div>}
+                    <div><span className="text-slate-400 text-xs">โซนเปียก: </span>{sv.wetZone ? "มี" : "ไม่มี"}</div>
+                    {sv.notes && <div className="whitespace-pre-wrap"><span className="text-slate-400 text-xs">หมายเหตุสำรวจ: </span>{sv.notes}</div>}
+                    {sv.photos && sv.photos.length > 0 && (
+                      <div className="flex gap-1 flex-wrap pt-1">
+                        {sv.photos.map((p) => <a key={p} href={photoUrl(p)} target="_blank" rel="noopener noreferrer"><img src={photoUrl(p)} alt="" className="w-14 h-14 object-cover rounded border" /></a>)}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -415,55 +520,174 @@ export default function ShareQueuePage() {
       {form && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setForm(null)}>
           <div className="absolute inset-0 bg-black/40" />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 z-10" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-base font-semibold mb-3">{form.id ? "แก้ไขคิวช่าง" : "ลงคิวช่างใหม่"}</h2>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">ทีมช่าง</label>
-                <select value={form.tech_id} onChange={(e) => setForm({ ...form, tech_id: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white">
-                  <option value="">— เลือกทีมช่าง —</option>
-                  {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="flex-1">
-                  <label className="text-xs text-slate-500 block mb-1">วันที่เริ่ม</label>
-                  <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value, endDate: (!form.endDate || form.endDate < e.target.value) ? e.target.value : form.endDate })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-                </div>
-                <div className="flex-1">
-                  <label className="text-xs text-slate-500 block mb-1">ถึงวันที่</label>
-                  <input type="date" value={form.endDate} min={form.date} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-                </div>
-              </div>
-              {form.endDate && form.endDate > form.date && (
-                <p className="text-[11px] text-blue-600 -mt-1">📅 งานหลายวัน: จะสร้างคิว {eachDay(form.date, form.endDate).length} วัน (เวลาเดียวกันทุกวัน)</p>
-              )}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs text-slate-500">เวลาทำงาน</label>
-                  <button type="button" onClick={() => setForm({ ...form, start: WORK_START, end: WORK_END })} className="text-[11px] text-blue-600 hover:underline">🕘 เต็มวัน 09:00–17:00</button>
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg z-10 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b flex items-center justify-between">
+              <h2 className="text-base font-semibold">{form.id ? "แก้ไขคิว/บิล" : "ลงคิว / เปิดบิลใหม่"}</h2>
+              <button onClick={() => setForm(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+            </div>
+            <div className="p-5 overflow-y-auto space-y-4">
+              {/* นัด/ทีม */}
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">ทีมช่าง</label>
+                  <select value={form.tech_id} onChange={(e) => setForm({ ...form, tech_id: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white">
+                    <option value="">— เลือกทีมช่าง —</option>
+                    {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
                 </div>
                 <div className="flex items-center gap-2">
-                  <input type="time" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} className="flex-1 border border-slate-200 rounded-lg px-2 py-2 text-sm" />
-                  <span className="text-slate-400 text-sm">ถึง</span>
-                  <input type="time" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} className="flex-1 border border-slate-200 rounded-lg px-2 py-2 text-sm" />
+                  <div className="flex-1">
+                    <label className="text-xs text-slate-500 block mb-1">วันที่เริ่ม</label>
+                    <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value, endDate: (!form.endDate || form.endDate < e.target.value) ? e.target.value : form.endDate })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-xs text-slate-500 block mb-1">ถึงวันที่</label>
+                    <input type="date" value={form.endDate} min={form.date} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                </div>
+                {form.endDate && form.endDate > form.date && (
+                  <p className="text-[11px] text-blue-600 -mt-1">📅 งานหลายวัน: จะสร้างคิว {eachDay(form.date, form.endDate).length} วัน (เวลาเดียวกันทุกวัน)</p>
+                )}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs text-slate-500">เวลาทำงาน</label>
+                    <button type="button" onClick={() => setForm({ ...form, start: WORK_START, end: WORK_END })} className="text-[11px] text-blue-600 hover:underline">🕘 เต็มวัน 09:00–17:00</button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input type="time" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} className="flex-1 border border-slate-200 rounded-lg px-2 py-2 text-sm" />
+                    <span className="text-slate-400 text-sm">ถึง</span>
+                    <input type="time" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} className="flex-1 border border-slate-200 rounded-lg px-2 py-2 text-sm" />
+                  </div>
                 </div>
               </div>
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs text-slate-500">งาน / ลูกค้า / หมายเหตุ</label>
+
+              {/* ข้อมูลลูกค้า / บิล */}
+              <div className="border-t pt-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-slate-700">🧾 ข้อมูลลูกค้า / บิล</p>
                   <button type="button" onClick={() => setForm({ ...form, notes: /วันหยุด/.test(form.notes) ? "" : "วันหยุด" })} className={`text-[11px] px-2 py-0.5 rounded-full border ${/วันหยุด/.test(form.notes) ? "bg-slate-200 text-slate-600 border-slate-300" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>🏖️ ตั้งเป็นวันหยุด</button>
                 </div>
-                <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={4} placeholder="เช่น ชื่อลูกค้า ที่อยู่ เลขงาน หรือรายละเอียดเพิ่มเติม (กด Enter ขึ้นบรรทัดใหม่ได้)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y min-h-[96px]" />
+                {isHol ? (
+                  <p className="text-[11px] text-slate-400">โหมดวันหยุด — จะลงเป็นวันหยุดของทีม ไม่เปิดบิล</p>
+                ) : (
+                  <>
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <label className="text-xs text-slate-500 block mb-1">เลขบิล</label>
+                        <input value={form.bill_no} onChange={(e) => setForm({ ...form, bill_no: e.target.value })} placeholder="เช่น 285739" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                      </div>
+                      <div className="flex-1">
+                        <label className="text-xs text-slate-500 block mb-1">ชื่อลูกค้า</label>
+                        <input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} placeholder="ชื่อ-นามสกุล" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-500 block mb-1">เบอร์โทร</label>
+                      <input value={form.customer_phone} onChange={(e) => setForm({ ...form, customer_phone: e.target.value })} placeholder="0xx-xxxxxxx" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-500 block mb-1">โลเคชั่น / ที่อยู่</label>
+                      <textarea value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} rows={2} placeholder="ที่อยู่หน้างาน" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-500 block mb-1">ลิงก์แผนที่ (Google Map)</label>
+                      <input value={form.location_url} onChange={(e) => setForm({ ...form, location_url: e.target.value })} placeholder="https://maps.app.goo.gl/..." className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                    </div>
+                    <p className="text-[11px] text-slate-400">💡 กรอกเลขบิลหรือชื่อลูกค้า = เปิดเป็นบิล/ticket เข้า Pipeline อัตโนมัติ (สเตจ 2)</p>
+                  </>
+                )}
               </div>
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">📋 Requirement งาน (สเปก)</label>
-                <textarea value={form.requirement} onChange={(e) => setForm({ ...form, requirement: e.target.value })} rows={3} placeholder="เช่น สี Whitebuzz · รุ่น Rollsafe 1.6cm · พื้นที่ 15 ตรม · จำนวนโซน" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y min-h-[72px]" />
+
+              {/* หมายเหตุ + requirement */}
+              <div className="border-t pt-3 space-y-3">
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">หมายเหตุ</label>
+                  <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} placeholder="รายละเอียดเพิ่มเติม (กด Enter ขึ้นบรรทัดใหม่ได้)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y min-h-[72px]" />
+                </div>
+                {!isHol && (
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">📋 Requirement งาน (สเปก)</label>
+                    <textarea value={form.requirement} onChange={(e) => setForm({ ...form, requirement: e.target.value })} rows={2} placeholder="เช่น สี Whitebuzz · รุ่น Rollsafe 1.6cm · พื้นที่ 15 ตรม · จำนวนโซน" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y min-h-[56px]" />
+                  </div>
+                )}
               </div>
+
+              {/* สำรวจหน้างาน */}
+              {!isHol && (
+                <div className="border-t pt-3 space-y-3">
+                  <p className="text-xs font-semibold text-slate-700">🔎 ข้อมูลสำรวจหน้างาน <span className="text-slate-400 font-normal">(ไม่บังคับ — กรอกเท่าที่มี)</span></p>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">พื้นที่ติดตั้ง (ตร.ม.)</label>
+                    <input value={form.survey.areaSqm} onChange={(e) => setSurvey({ areaSqm: e.target.value })} placeholder="เช่น 24.5" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">วิธีการเชื่อม</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {WELD_TYPES.map((o) => (
+                        <button key={o.id} type="button" onClick={() => setSurvey({ weldType: form.survey.weldType === o.id ? "" : o.id })} className={`text-xs px-2.5 py-1 rounded-full border ${form.survey.weldType === o.id ? "bg-blue-600 text-white border-blue-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{o.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">การจบงาน</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {FINISH_TYPES.map((o) => (
+                        <button key={o.id} type="button" onClick={() => toggleFinish(o.id)} className={`text-xs px-2.5 py-1 rounded-full border ${form.survey.finishTypes.includes(o.id) ? "bg-blue-600 text-white border-blue-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{o.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">งานตัด/เก็บขอบ</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {CUT_TYPES.map((o) => (
+                        <button key={o.id} type="button" onClick={() => toggleCut(o.id)} className={`text-xs px-2.5 py-1 rounded-full border ${form.survey.cutTypes.includes(o.id) ? "bg-blue-600 text-white border-blue-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{o.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">สภาพพื้น</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {FLOOR_CONDITIONS.map((o) => (
+                        <button key={o.id} type="button" onClick={() => setSurvey({ floorCondition: form.survey.floorCondition === o.id ? "" : o.id })} className={`text-xs px-2.5 py-1 rounded-full border ${form.survey.floorCondition === o.id ? "bg-blue-600 text-white border-blue-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{o.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500">มีโซนเปียก?</span>
+                    <button type="button" onClick={() => setSurvey({ wetZone: !form.survey.wetZone })} className={`relative w-11 h-6 rounded-full transition ${form.survey.wetZone ? "bg-blue-600" : "bg-slate-200"}`}>
+                      <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition ${form.survey.wetZone ? "translate-x-6" : "translate-x-1"}`} />
+                    </button>
+                    <span className="text-xs text-slate-500">{form.survey.wetZone ? "มี" : "ไม่มี"}</span>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">หมายเหตุสำรวจ</label>
+                    <textarea value={form.survey.notes} onChange={(e) => setSurvey({ notes: e.target.value })} rows={2} placeholder="รายละเอียดหน้างานเพิ่มเติม" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y" />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs text-slate-500">รูปหน้างาน</label>
+                      <label className="text-[11px] text-blue-600 hover:underline cursor-pointer">
+                        {uploading ? "กำลังอัปโหลด…" : "📷 เพิ่มรูป"}
+                        <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; uploadPhotos(fs); }} />
+                      </label>
+                    </div>
+                    {form.survey.photos && form.survey.photos.length > 0 && (
+                      <div className="flex gap-1.5 flex-wrap">
+                        {form.survey.photos.map((p) => (
+                          <div key={p} className="relative">
+                            <img src={photoUrl(p)} alt="" className="w-16 h-16 object-cover rounded border" />
+                            <button type="button" onClick={() => removePhoto(p)} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 text-xs leading-none">×</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="flex gap-2 mt-4">
+            <div className="px-5 py-4 border-t flex gap-2">
               <button onClick={() => setForm(null)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">ยกเลิก</button>
-              <button onClick={save} disabled={saving} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก"}</button>
+              <button onClick={save} disabled={saving || uploading} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : (isHol ? "บันทึกวันหยุด" : "บันทึก / เปิดบิล")}</button>
             </div>
           </div>
         </div>

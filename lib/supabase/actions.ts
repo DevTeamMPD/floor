@@ -5,7 +5,7 @@ import type { InstallJob } from "../types";
 
 function mapRow(row: Record<string, unknown>): InstallJob {
   return {
-    id: String(row.id),
+    id: String(row.job_no),
     ticket: row.ticket_no as string,
     order: row.order_no as string,
     bill: row.bill_no as string,
