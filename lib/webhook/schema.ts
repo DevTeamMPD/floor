@@ -1,6 +1,30 @@
 import { z } from "zod";
 
 /**
+ * fix round 1, Medium (security-auditor): `location_map_link` flows
+ * straight into `<a href={job.location_url}>` at
+ * app/dispatch/[token]/page.tsx -- an un-validated `javascript:...` value
+ * would execute when a technician clicks the link. Only http(s) absolute
+ * URLs are accepted; anything else (a bad scheme, or a string that isn't
+ * an absolute URL at all) becomes `null` rather than rejecting the whole
+ * payload -- one bad map link on one work order shouldn't dead-letter an
+ * otherwise-valid event.
+ */
+const httpUrlOrNull = z
+  .string()
+  .nullable()
+  .transform((value) => {
+    if (value == null) return null;
+    try {
+      const parsed = new URL(value);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") return value;
+    } catch {
+      // not an absolute URL at all
+    }
+    return null;
+  });
+
+/**
  * Zod schema for `work_order.queued.v1` -- SYSTEM_INTEGRATION_SPEC.md v2.1 §4.
  *
  * `.nullable()` is applied exactly where the spec's payload sample annotates
@@ -52,7 +76,7 @@ const WorkOrderSchema = z.object({
   install_start: z.string().nullable(),
   install_end: z.string().nullable(),
   location_address: z.string().nullable(),
-  location_map_link: z.string().nullable(),
+  location_map_link: httpUrlOrNull,
   contact_name: z.string().nullable(),
   contact_phone: z.string().nullable(),
   task_details: z.string().nullable(),

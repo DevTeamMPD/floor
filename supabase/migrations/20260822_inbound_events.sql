@@ -30,6 +30,16 @@ CREATE INDEX IF NOT EXISTS idx_inbound_events_status_received_at
 -- D9: dedup/conflict key for install_jobs is production_id (external_id column),
 -- not order_no -- a single quotation_number can legitimately belong to many
 -- production_tracking_bbps rows (up to 9 seen in production data).
+--
+-- Must be a FULL unique index, not a partial one (fix round 1: a partial
+-- index -- e.g. `WHERE external_id IS NOT NULL` -- cannot be used as the
+-- target of `ON CONFLICT (external_id)`, which is exactly what PostgREST
+-- generates for supabase-js's `.upsert(row, { onConflict: "external_id" })`.
+-- Confirmed against real Postgres 16: that combination throws
+-- 42P10 "there is no unique or exclusion constraint matching the ON
+-- CONFLICT specification" on every single upsert. A plain unique index
+-- already allows unlimited rows with external_id IS NULL to coexist --
+-- Postgres treats NULLs as distinct for uniqueness purposes -- so nothing
+-- is lost by dropping the WHERE clause.
 CREATE UNIQUE INDEX IF NOT EXISTS install_jobs_external_id_key
-  ON install_jobs (external_id)
-  WHERE external_id IS NOT NULL;
+  ON install_jobs (external_id);

@@ -22,6 +22,25 @@ function serviceRoleClient() {
   });
 }
 
+/**
+ * `String(e)` on a PostgrestError/PostgrestError-shaped object collapses to
+ * the useless "[object Object]" (fix round 1, Minor finding) -- pull out
+ * the fields that actually matter for debugging instead.
+ */
+function serializeError(e: unknown): string {
+  if (e && typeof e === "object") {
+    const err = e as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown };
+    const parts: Record<string, unknown> = {};
+    if (err.message) parts.message = err.message;
+    if (err.code) parts.code = err.code;
+    if (err.details) parts.details = err.details;
+    if (err.hint) parts.hint = err.hint;
+    if (Object.keys(parts).length > 0) return JSON.stringify(parts);
+  }
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
 export async function POST(req: NextRequest) {
   // Raw body FIRST, before any JSON parsing: the HMAC in X-Signature was
   // computed by the CRM dispatcher over these exact bytes. Parsing first
@@ -73,9 +92,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "server_misconfigured" }, { status: 500 });
   }
 
-  // Dedup layer 1: INSERT inbound_events, UNIQUE(event_id). A conflict here
-  // means the dispatcher already delivered (and we already processed) this
-  // exact event before -- ack immediately without touching install_jobs again.
+  // Dedup layer 1: INSERT inbound_events, UNIQUE(event_id).
   const { error: insertError } = await supabase.from("inbound_events").insert({
     event_id: eventId,
     event_type: payload.event.event_type,
@@ -86,11 +103,37 @@ export async function POST(req: NextRequest) {
   });
 
   if (insertError) {
-    if (insertError.code === "23505") {
+    if (insertError.code !== "23505") {
+      console.error("[webhook/bbps] inbound_events insert failed:", insertError);
+      return NextResponse.json({ error: "insert_failed" }, { status: 500 });
+    }
+
+    // fix round 1, Critical #2: a 23505 on event_id only means *this exact
+    // event was recorded before* -- it does NOT mean it was ever actually
+    // processed. If the first attempt crashed between this insert and the
+    // install_jobs upsert (status stuck at 'received'), or the upsert
+    // itself failed (status='failed'), answering "202 duplicate" here
+    // would make the dispatcher mark the event delivered and never retry
+    // it again -- the job silently never reaches install_jobs. So: look at
+    // the recorded status and only short-circuit when it is genuinely
+    // 'processed'; otherwise fall through and retry the upsert for real.
+    const { data: existingEvent, error: lookupError } = await supabase
+      .from("inbound_events")
+      .select("status")
+      .eq("event_id", eventId)
+      .maybeSingle();
+
+    if (lookupError) {
+      console.error("[webhook/bbps] inbound_events status lookup failed:", lookupError);
+      return NextResponse.json({ error: "lookup_failed" }, { status: 500 });
+    }
+
+    if (existingEvent?.status === "processed") {
       return NextResponse.json({ duplicate: true }, { status: 202 });
     }
-    console.error("[webhook/bbps] inbound_events insert failed:", insertError);
-    return NextResponse.json({ error: "insert_failed" }, { status: 500 });
+    // status is 'received' or 'failed' (or the row vanished between the
+    // insert attempt and this lookup) -- retry processing below instead of
+    // acking a job that never actually landed.
   }
 
   // Dedup layer 2: upsert install_jobs on external_id (production_id, D9).
@@ -100,7 +143,7 @@ export async function POST(req: NextRequest) {
     const result = await upsertInstallJob(supabase, payload);
     await supabase
       .from("inbound_events")
-      .update({ status: "processed", processed_at: new Date().toISOString() })
+      .update({ status: "processed", processed_at: new Date().toISOString(), error: null })
       .eq("event_id", eventId);
     return NextResponse.json(
       { accepted: true, job_no: result.job_no, created: result.created },
@@ -110,7 +153,7 @@ export async function POST(req: NextRequest) {
     console.error("[webhook/bbps] install_jobs upsert failed:", e);
     await supabase
       .from("inbound_events")
-      .update({ status: "failed", error: String(e) })
+      .update({ status: "failed", error: serializeError(e) })
       .eq("event_id", eventId);
     return NextResponse.json({ error: "processing_failed" }, { status: 500 });
   }
