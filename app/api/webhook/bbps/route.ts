@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { applyJobBlocks, removeJobBlocks, jobHasYearWarning, type BbpsJob } from "@/lib/bbps-sync";
+import { applyBbpsJob, closeBbpsJob, jobHasYearWarning, type BbpsJob } from "@/lib/bbps-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -28,24 +28,28 @@ async function handle(req: Request) {
   if (!jobs.length) return NextResponse.json({ error: "no_jobs" }, { status: 400 });
 
   try {
-    let added = 0, removed = 0, warnings = 0;
+    let added = 0, removed = 0, warnings = 0, skipped = 0;
     const isRemoveEvent = event === "completed" || event === "deleted" || event === "cancelled";
     for (const j of jobs) {
       if (!j.id) continue;
       if (jobHasYearWarning(j)) { warnings++; console.warn(`[webhook-bbps] date year > 2100 (possible BE) job=${j.id} quote=${j.quoteNumber ?? "-"} — needs human review, skip block`); }
       // ปิดงาน/ลบ หรือ สถานะไม่ active -> ลบบล็อก ; ไม่งั้นอัปเดตบล็อกตามวันที่
       if (isRemoveEvent || (j.statusCode !== "queued" && j.statusCode !== "installing")) {
-        removed += await removeJobBlocks(supabase, j.id);
+        removed += await closeBbpsJob(supabase, j, event);
       } else {
-        const r = await applyJobBlocks(supabase, j);
+        const r = await applyBbpsJob(supabase, j);
         added += r.added; removed += r.removed;
+        if (r.skipped) skipped++;
       }
     }
-    console.log(`[webhook-bbps] event=${event} jobs=${jobs.length} added=${added} removed=${removed} warnings=${warnings}`);
-    return NextResponse.json({ ok: true, event, jobs: jobs.length, added, removed, warnings, at: new Date().toISOString() });
+    console.log(`[webhook-bbps] event=${event} jobs=${jobs.length} added=${added} removed=${removed} skipped=${skipped} warnings=${warnings}`);
+    return NextResponse.json({ ok: true, event, jobs: jobs.length, added, removed, skipped, warnings, at: new Date().toISOString() });
   } catch (e) {
     console.error("[webhook-bbps] error", e);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    const message = e instanceof Error
+      ? e.message
+      : (typeof e === "object" && e && "message" in e ? String(e.message) : String(e));
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 

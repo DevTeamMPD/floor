@@ -18,6 +18,10 @@ interface Job {
   customer_name: string | null;
   product_name: string | null;
   stage: number;
+  status: string | null;
+  source: string | null;
+  waiting_on: string | null;
+  flag_note: string | null;
 }
 
 interface Appointment {
@@ -108,10 +112,10 @@ export default function AppointmentsPage() {
     const [{ data: apptData }, { data: techData }, { data: jobData }] = await Promise.all([
       supabase
         .from('appointments')
-        .select('*, tech:tech_teams(*), job:install_jobs(job_no,customer_name,product_name,stage)')
+        .select('*, tech:tech_teams(*), job:install_jobs(job_no,customer_name,product_name,stage,status,source,waiting_on,flag_note)')
         .order('slot_start'),
       supabase.from('tech_teams').select('*').order('name'),
-      supabase.from('install_jobs').select('job_no,customer_name,product_name,stage').order('job_no', { ascending: false }).limit(200),
+      supabase.from('install_jobs').select('job_no,customer_name,product_name,stage,status,source,waiting_on,flag_note').order('job_no', { ascending: false }).limit(200),
     ]);
     setAppointments((apptData ?? []) as Appointment[]);
     setTechs((techData ?? []) as TechTeam[]);
@@ -157,14 +161,92 @@ export default function AppointmentsPage() {
 
   // --- Update Status ---
   async function updateStatus(appt: Appointment, newStatus: string) {
-    const { error } = await supabase.from('appointments').update({ status: newStatus }).eq('id', appt.id);
+    const confirmedAt = newStatus === 'confirmed' ? new Date().toISOString() : null;
+    const update = supabase.from('appointments').update({ status: newStatus, confirmed_at: confirmedAt });
+    const { error } = appt.job_id && newStatus === 'confirmed'
+      ? await update.eq('job_id', appt.job_id).neq('status', 'cancelled')
+      : await update.eq('id', appt.id);
     if (error) { toast.error(error.message); return; }
+    if (appt.job_id && newStatus === 'confirmed') {
+      const { error: jobError } = await supabase.from('install_jobs').update({
+        status: 'ยืนยันคิวแล้ว', waiting_on: 'ไม่ได้ค้าง', waiting_since: null,
+        flag_note: null, updated_at: new Date().toISOString(),
+      }).eq('job_no', appt.job_id);
+      if (jobError) { toast.error(jobError.message); return; }
+      await supabase.from('job_activity').insert({
+        job_no: appt.job_id, actor: 'หัวหน้าช่าง', action: 'confirm', field: 'status',
+        old_value: appt.job?.status ?? null, new_value: 'ยืนยันคิวแล้ว',
+      });
+    }
     toast.success(`อัปเดตสถานะเป็น ${STATUS_CONFIG[newStatus]?.label ?? newStatus}`);
     loadData();
   }
 
   async function cancelAppointment(appt: Appointment) {
-    await updateStatus(appt, 'cancelled');
+    const { error } = await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', appt.id);
+    if (error) { toast.error(error.message); return; }
+    if (appt.job_id) {
+      const { count } = await supabase.from('appointments')
+        .select('id', { count: 'exact', head: true }).eq('job_id', appt.job_id).neq('status', 'cancelled');
+      if (!count) {
+        await supabase.from('install_jobs').update({
+          status: 'ยกเลิกคิว', waiting_on: 'ไม่ได้ค้าง', waiting_since: null, updated_at: new Date().toISOString(),
+        }).eq('job_no', appt.job_id);
+        await supabase.from('job_activity').insert({
+          job_no: appt.job_id, actor: 'หัวหน้าช่าง', action: 'cancel', field: 'status',
+          old_value: appt.job?.status ?? null, new_value: 'ยกเลิกคิว',
+        });
+      }
+    }
+    toast.success('ยกเลิกคิวและเก็บประวัติไว้แล้ว');
+    loadData();
+  }
+
+  async function returnToSales(appt: Appointment) {
+    if (!appt.job_id) return;
+    const reason = window.prompt('ระบุข้อมูลที่ต้องให้ฝ่ายขายแก้ไข');
+    if (!reason?.trim()) return;
+    const [{ error: apptError }, { error: jobError }] = await Promise.all([
+      supabase.from('appointments').update({ status: 'proposed', confirmed_at: null })
+        .eq('job_id', appt.job_id).neq('status', 'cancelled'),
+      supabase.from('install_jobs').update({
+        status: 'ส่งกลับฝ่ายขายแก้ไข', waiting_on: 'ฝ่ายขาย', waiting_since: new Date().toISOString(),
+        flag_note: reason.trim(), updated_at: new Date().toISOString(),
+      }).eq('job_no', appt.job_id),
+    ]);
+    if (apptError || jobError) { toast.error(apptError?.message ?? jobError?.message ?? 'ส่งกลับไม่สำเร็จ'); return; }
+    await supabase.from('job_activity').insert({
+      job_no: appt.job_id, actor: 'หัวหน้าช่าง', action: 'return', field: 'status',
+      old_value: appt.job?.status ?? null, new_value: `ส่งกลับฝ่ายขายแก้ไข: ${reason.trim()}`,
+    });
+    toast.success('ส่งกลับให้ฝ่ายขายแก้ไขแล้ว');
+    loadData();
+  }
+
+  async function reassignTeam(appt: Appointment, techId: string) {
+    if (!techId || techId === appt.tech_id) return;
+    const { data: clashes, error: clashError } = await supabase.from('appointments')
+      .select('id').eq('tech_id', techId).neq('status', 'cancelled').neq('id', appt.id)
+      .lt('slot_start', appt.slot_end).gt('slot_end', appt.slot_start).limit(1);
+    if (clashError) { toast.error(clashError.message); return; }
+    if (clashes?.length) { toast.error('ทีมที่เลือกมีคิวชนในช่วงเวลานี้'); return; }
+
+    const { error } = await supabase.from('appointments').update({
+      tech_id: techId, status: 'proposed', confirmed_at: null,
+    }).eq('id', appt.id);
+    if (error) { toast.error(error.message); return; }
+    if (appt.job_id) {
+      await supabase.from('install_jobs').update({
+        status: 'รอหัวหน้าช่างยืนยัน', waiting_on: 'หัวหน้าช่าง',
+        waiting_since: new Date().toISOString(), updated_at: new Date().toISOString(),
+      }).eq('job_no', appt.job_id);
+      await supabase.from('job_activity').insert({
+        job_no: appt.job_id, actor: 'หัวหน้าช่าง', action: 'reassign', field: 'tech_id',
+        old_value: appt.tech_id, new_value: techId,
+      });
+    }
+    toast.success('ย้ายทีมแล้วและนำคิวกลับไปรอยืนยัน');
+    loadData();
   }
 
   // --- Tech CRUD ---
@@ -246,15 +328,26 @@ export default function AppointmentsPage() {
                   <div className="text-sm font-medium truncate">
                     {appt.job?.customer_name ?? 'ไม่ระบุลูกค้า'}
                     {appt.job && <span className="text-xs text-slate-400 ml-2">{appt.job.job_no}</span>}
+                    {appt.job && <span className={`text-[10px] px-1.5 py-0.5 rounded ml-2 ${appt.job.source === 'bbps' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{appt.job.source === 'bbps' ? 'BBPS' : 'ขายตรง'}</span>}
                   </div>
                   <div className="text-xs text-slate-500">
                     {fmtTime(appt.slot_start)} – {fmtTime(appt.slot_end)} · {appt.tech?.name ?? 'ไม่ระบุช่าง'}
                   </div>
                 </div>
+                <select value={appt.tech_id ?? ''} onChange={(e) => reassignTeam(appt, e.target.value)}
+                  aria-label={`ย้ายทีมสำหรับ ${appt.job?.customer_name ?? appt.job_id ?? 'นัดหมาย'}`}
+                  className="border border-slate-200 rounded-lg px-2 py-1 text-xs bg-white max-w-32">
+                  <option value="">เลือกทีม</option>
+                  {techs.filter((t) => t.is_active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
                 <button onClick={() => updateStatus(appt, 'confirmed')}
                   className="px-3 py-1 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shrink-0">
                   ✓ ยืนยัน
                 </button>
+                {appt.job_id && <button onClick={() => returnToSales(appt)}
+                  className="px-3 py-1 text-xs bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 shrink-0">
+                  ส่งกลับแก้ไข
+                </button>}
                 <button onClick={() => cancelAppointment(appt)}
                   className="px-3 py-1 text-xs bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 shrink-0">
                   ยกเลิก
@@ -363,7 +456,11 @@ export default function AppointmentsPage() {
                         {appt.job ? (
                           <div>
                             <div className="font-medium">{appt.job.customer_name ?? appt.job.job_no}</div>
-                            <div className="text-xs text-slate-400">{appt.job.job_no}</div>
+                            <div className="text-xs text-slate-400 flex items-center gap-1.5">
+                              <span>{appt.job.job_no}</span>
+                              <span className={appt.job.source === 'bbps' ? 'text-amber-600' : 'text-blue-600'}>{appt.job.source === 'bbps' ? 'BBPS' : 'ขายตรง'}</span>
+                            </div>
+                            {appt.job.flag_note && <div className="text-xs text-amber-700 mt-0.5">แก้ไข: {appt.job.flag_note}</div>}
                           </div>
                         ) : <span className="text-slate-300">—</span>}
                       </td>
@@ -373,10 +470,23 @@ export default function AppointmentsPage() {
                       <td className="px-4 py-2 text-xs text-slate-400">{appt.notes ?? '—'}</td>
                       <td className="px-4 py-2">
                         <div className="flex items-center gap-1">
+                          <select value={appt.tech_id ?? ''} onChange={(e) => reassignTeam(appt, e.target.value)}
+                            aria-label={`ย้ายทีมสำหรับ ${appt.job?.customer_name ?? appt.job_id ?? 'นัดหมาย'}`}
+                            className="border border-slate-200 rounded px-1.5 py-0.5 text-xs bg-white max-w-24">
+                            <option value="">ทีม</option>
+                            {techs.filter((t) => t.is_active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
                           {appt.status === 'proposed' && (
                             <button onClick={() => updateStatus(appt, 'confirmed')}
                               className="px-2 py-0.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100">
                               ✓
+                            </button>
+                          )}
+                          {appt.status === 'proposed' && appt.job_id && (
+                            <button onClick={() => returnToSales(appt)}
+                              aria-label="ส่งกลับให้ฝ่ายขายแก้ไข"
+                              className="px-2 py-0.5 text-xs bg-amber-50 text-amber-700 rounded hover:bg-amber-100">
+                              ↩
                             </button>
                           )}
                           {appt.status === 'confirmed' && (

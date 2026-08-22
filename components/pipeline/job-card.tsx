@@ -14,11 +14,19 @@ const SOURCE_COLORS: Record<string, string> = {
   manual: "s-gray",
   jst: "s-purple",
   web: "s-green",
+  floor_direct: "s-blue",
+  bbps: "s-amber",
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  floor_direct: "ขายตรง",
+  bbps: "BBPS",
 };
 
 export default function JobCard({ job, onClick }: Props) {
   const stg = IP_STAGES.find((s) => s.id === job.stage);
-  const srcColor = SOURCE_COLORS[job.orderSource ?? job.via ?? ""] ?? "s-gray";
+  const source = job.orderSource ?? job.via ?? "";
+  const srcColor = SOURCE_COLORS[source] ?? "s-gray";
 
   return (
     <div
@@ -29,7 +37,7 @@ export default function JobCard({ job, onClick }: Props) {
         <span className="text-xs font-mono text-slate-400">{job.ticket ?? job.order}</span>
         {(job.orderSource || job.via) && (
           <span className={`tag ${srcColor} text-[10px]`}>
-            {job.orderSource ?? job.via}
+            {SOURCE_LABELS[source] ?? source}
           </span>
         )}
       </div>
