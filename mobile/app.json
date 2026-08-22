@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "FloorNow Worker",
+    "slug": "floornow-worker",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "scheme": "floornow-worker",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.mpdgroup.floornow.worker",
+      "infoPlist": {
+        "UIBackgroundModes": ["location"]
+      }
+    },
+    "android": {
+      "package": "com.mpdgroup.floornow.worker",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": ["CAMERA"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true,
+          "locationAlwaysAndWhenInUsePermission": "อนุญาตให้ FloorNow ใช้ตำแหน่งระหว่างการเดินทางไปหน้างานจนกว่างานจะสิ้นสุด"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "อนุญาตให้ FloorNow ถ่ายภาพหลักฐานสถานะงาน",
+          "microphonePermission": false
+        }
+      ]
+    ]
+  }
+}
