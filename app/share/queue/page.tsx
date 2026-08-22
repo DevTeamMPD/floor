@@ -1,6 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState, useCallback } from "react";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { ipGenOrderNo } from "@/lib/utils";
 import { CUT_TYPES, WELD_TYPES, FINISH_TYPES, FLOOR_CONDITIONS, EMPTY_SURVEY, surveyHasData, type SurveyData } from "@/lib/survey";
@@ -21,6 +22,15 @@ interface JobDetail {
   bill_no: string | null; customer_name: string | null; customer_phone: string | null;
   address: string | null; location_url: string | null; product_name: string | null; survey_data: string | null;
   status: string | null; source: string | null; flag_note: string | null;
+}
+interface DetailTechnician {
+  id: string;
+  name: string;
+  phone: string | null;
+  isLead: boolean;
+  firstOpenedAt: string | null;
+  openCount: number;
+  acknowledgedAt: string | null;
 }
 const STATUS: Record<string, { label: string; cls: string }> = {
   proposed: { label: "รอยืนยัน", cls: "bg-amber-100 text-amber-700" },
@@ -84,6 +94,11 @@ function linkify(text: string): { t: string; href?: string }[] {
   return parts;
 }
 function labelOf(list: { id: string; label: string }[], id: string) { return list.find((x) => x.id === id)?.label ?? id; }
+function evidenceOf(t: DetailTechnician) {
+  if (t.acknowledgedAt) return { label: "รับทราบงานแล้ว", cls: "bg-emerald-100 text-emerald-700" };
+  if (t.firstOpenedAt) return { label: `เปิดแล้ว ${t.openCount} ครั้ง`, cls: "bg-blue-100 text-blue-700" };
+  return { label: "ยังไม่เปิดใบงาน", cls: "bg-slate-100 text-slate-500" };
+}
 
 interface FormState {
   id: string | null; tech_id: string; date: string; endDate: string; start: string; end: string;
@@ -125,6 +140,8 @@ export default function ShareQueuePage() {
   const [form, setForm] = useState<FormState | null>(null);
   const [detail, setDetail] = useState<Appt | null>(null);
   const [detailJob, setDetailJob] = useState<JobDetail | null>(null);
+  const [detailTechnicians, setDetailTechnicians] = useState<DetailTechnician[]>([]);
+  const [detailTechniciansLoading, setDetailTechniciansLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
 
@@ -176,13 +193,35 @@ export default function ShareQueuePage() {
   }, [teamColor]);
 
   async function openDetail(a: Appt) {
-    setDetail(a); setDetailJob(null);
-    if (a.job_id) {
-      const { data: j } = await supabase.from("install_jobs")
+    setDetail(a); setDetailJob(null); setDetailTechnicians([]); setDetailTechniciansLoading(true);
+    const jobRequest = a.job_id
+      ? supabase.from("install_jobs")
         .select("bill_no, customer_name, customer_phone, address, location_url, product_name, survey_data, status, source, flag_note")
-        .eq("job_no", a.job_id).maybeSingle();
-      if (j) setDetailJob(j as JobDetail);
+        .eq("job_no", a.job_id).maybeSingle()
+      : Promise.resolve({ data: null });
+    const [jobResult, assignmentResult] = await Promise.all([
+      jobRequest,
+      supabase.from("appointment_technicians")
+        .select("technician_id, is_lead, first_opened_at, open_count, acknowledged_at")
+        .eq("appointment_id", a.id).eq("is_active", true).order("is_lead", { ascending: false }),
+    ]);
+    if (jobResult.data) setDetailJob(jobResult.data as JobDetail);
+    const assigned = assignmentResult.data ?? [];
+    const technicianIds = assigned.map((row) => row.technician_id);
+    if (technicianIds.length) {
+      const { data: people } = await supabase.from("floor_technicians")
+        .select("id, name, phone").in("id", technicianIds);
+      const byId = new Map((people ?? []).map((person) => [person.id, person]));
+      setDetailTechnicians(assigned.flatMap((row) => {
+        const person = byId.get(row.technician_id);
+        return person ? [{
+          id: person.id, name: person.name, phone: person.phone,
+          isLead: row.is_lead, firstOpenedAt: row.first_opened_at,
+          openCount: row.open_count ?? 0, acknowledgedAt: row.acknowledged_at,
+        }] : [];
+      }));
     }
+    setDetailTechniciansLoading(false);
   }
 
   function openAdd(date: Date) {
@@ -523,79 +562,112 @@ export default function ShareQueuePage() {
       {detail && (() => {
         const st = STATUS[detail.status] ?? STATUS.proposed;
         let sv: SurveyData | null = null;
-        if (detailJob?.survey_data) { try { sv = JSON.parse(detailJob.survey_data); } catch {} }
+        if (detailJob?.survey_data) { try { sv = { ...EMPTY_SURVEY, ...JSON.parse(detailJob.survey_data) }; } catch {} }
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setDetail(null)}>
-            <div className="absolute inset-0 bg-black/40" />
-            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md z-10 max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-              <div className="p-5 border-b flex items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-base font-semibold text-slate-900">{teamName(detail.tech_id)}</h2>
-                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
-                    {detail.job_id && <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🎫 มีบิล</span>}
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1">{fmtFullDate(detail.slot_start)}</p>
-                  <p className="text-sm text-slate-700 font-medium">{fmtTime(detail.slot_start)} – {fmtTime(detail.slot_end)} น.</p>
-                </div>
-                <button onClick={() => setDetail(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
-              </div>
-              <div className="p-5 overflow-y-auto space-y-4">
-                {detailJob && (
-                  <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm space-y-1">
-                    <div className="flex items-center gap-2 pb-1">
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-white border border-slate-200">{detailJob.source === "bbps" ? "BBPS" : "ขายตรง"}</span>
-                      {detailJob.status && <span className="text-xs font-medium text-slate-600">{detailJob.status}</span>}
+          <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="รายละเอียดงาน">
+            <button className="absolute inset-0 bg-slate-950/45 cursor-default" onClick={() => setDetail(null)} aria-label="ปิดรายละเอียดงาน" />
+            <aside className="relative z-10 flex h-full w-full max-w-3xl flex-col bg-slate-50 shadow-2xl">
+              <header className="shrink-0 border-b border-slate-200 bg-white px-5 py-4 sm:px-7">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${st.cls}`}>{st.label}</span>
+                      {detailJob && <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600">{detailJob.source === "bbps" ? "งาน BBPS" : "งานขายตรง"}</span>}
+                      {detailJob?.status && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600">{detailJob.status}</span>}
                     </div>
-                    {detailJob.bill_no && <div><span className="text-slate-400 text-xs">เลขบิล: </span>{detailJob.bill_no}</div>}
-                    {detailJob.customer_name && <div><span className="text-slate-400 text-xs">ลูกค้า: </span>{detailJob.customer_name}</div>}
-                    {detailJob.customer_phone && <div><span className="text-slate-400 text-xs">โทร: </span><a href={`tel:${detailJob.customer_phone}`} className="text-blue-600">{detailJob.customer_phone}</a></div>}
-                    {detailJob.address && <div><span className="text-slate-400 text-xs">ที่อยู่: </span>{detailJob.address}</div>}
-                    {detailJob.location_url && <div><a href={detailJob.location_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">📍 เปิดแผนที่</a></div>}
-                    {detailJob.flag_note && <div className="mt-2 rounded bg-amber-50 border border-amber-200 p-2 text-amber-800"><span className="text-xs font-medium">ต้องแก้ไข: </span>{detailJob.flag_note}</div>}
+                    <h2 className="truncate text-xl font-bold text-slate-900">{detailJob?.customer_name || chipLabel(detail)}</h2>
+                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
+                      {detail.job_id && <span>เลขงาน <strong className="font-medium text-slate-700">{detail.job_id}</strong></span>}
+                      {detailJob?.bill_no && <span>เลขบิล <strong className="font-medium text-slate-700">{detailJob.bill_no}</strong></span>}
+                    </div>
                   </div>
-                )}
-                <div>
-                  <div className="text-xs text-slate-400 mb-1">รายละเอียด / หมายเหตุ</div>
-                  {detail.notes ? (
-                    <p className="text-sm text-slate-800 whitespace-pre-wrap break-words leading-relaxed">
-                      {linkify(detail.notes).map((p, i) => p.href
-                        ? <a key={i} href={p.href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">{p.t}</a>
-                        : <span key={i}>{p.t}</span>)}
-                    </p>
-                  ) : <p className="text-sm text-slate-400">— ไม่มีหมายเหตุ —</p>}
+                  <button onClick={() => setDetail(null)} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-2xl text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="ปิด">×</button>
                 </div>
-                {detail.requirement && (
-                  <div className="rounded-lg bg-amber-50 border border-amber-200 p-3">
-                    <div className="text-xs text-amber-700 font-medium mb-1">📋 Requirement งาน</div>
-                    <p className="text-sm text-slate-800 whitespace-pre-wrap break-words leading-relaxed">{detail.requirement}</p>
-                  </div>
-                )}
-                {sv && surveyHasData(sv) && (
-                  <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm space-y-1">
-                    <div className="text-xs text-blue-700 font-medium mb-1">🔎 ข้อมูลสำรวจ</div>
-                    {sv.areaSqm && <div><span className="text-slate-400 text-xs">พื้นที่: </span>{sv.areaSqm} ตร.ม.</div>}
-                    {sv.weldType && <div><span className="text-slate-400 text-xs">วิธีเชื่อม: </span>{labelOf(WELD_TYPES, sv.weldType)}</div>}
-                    {sv.floorCondition && <div><span className="text-slate-400 text-xs">สภาพพื้น: </span>{labelOf(FLOOR_CONDITIONS, sv.floorCondition)}</div>}
-                    {sv.finishTypes?.length > 0 && <div><span className="text-slate-400 text-xs">การจบงาน: </span>{sv.finishTypes.map((x) => labelOf(FINISH_TYPES, x)).join(", ")}</div>}
-                    {sv.cutTypes?.length > 0 && <div><span className="text-slate-400 text-xs">งานตัด: </span>{sv.cutTypes.map((x) => labelOf(CUT_TYPES, x)).join(", ")}</div>}
-                    <div><span className="text-slate-400 text-xs">โซนเปียก: </span>{sv.wetZone ? "มี" : "ไม่มี"}</div>
-                    {sv.notes && <div className="whitespace-pre-wrap"><span className="text-slate-400 text-xs">หมายเหตุสำรวจ: </span>{sv.notes}</div>}
-                    {sv.photos && sv.photos.length > 0 && (
-                      <div className="flex gap-1 flex-wrap pt-1">
-                        {sv.photos.map((p) => <a key={p} href={photoUrl(p)} target="_blank" rel="noopener noreferrer"><img src={photoUrl(p)} alt="" className="w-14 h-14 object-cover rounded border" /></a>)}
+              </header>
+
+              <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-6">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+                    <h3 className="mb-4 text-sm font-semibold text-slate-900">📅 วัน เวลา และทีมรับผิดชอบ</h3>
+                    <dl className="space-y-3 text-sm">
+                      <div><dt className="text-xs text-slate-400">วันที่ติดตั้ง</dt><dd className="mt-0.5 font-medium text-slate-800">{fmtFullDate(detail.slot_start)}</dd></div>
+                      <div><dt className="text-xs text-slate-400">เวลาทำงาน</dt><dd className="mt-0.5 font-medium text-slate-800">{fmtTime(detail.slot_start)} – {fmtTime(detail.slot_end)} น.</dd></div>
+                      <div><dt className="text-xs text-slate-400">ทีมช่าง</dt><dd className="mt-0.5 font-medium text-slate-800">{teamName(detail.tech_id)}</dd></div>
+                    </dl>
+                  </section>
+
+                  <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+                    <h3 className="mb-4 text-sm font-semibold text-slate-900">👷 ช่างที่ได้รับมอบหมาย</h3>
+                    {detailTechniciansLoading ? <p className="text-sm text-slate-400">กำลังโหลดรายชื่อช่าง…</p> : detailTechnicians.length ? (
+                      <div className="space-y-3">
+                        {detailTechnicians.map((person) => {
+                          const evidence = evidenceOf(person);
+                          return <div key={person.id} className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-1.5"><span className="font-medium text-slate-800">{person.name}</span>{person.isLead && <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">คนหลัก</span>}</div>
+                              {person.phone && <a href={`tel:${person.phone}`} className="text-xs text-blue-600 hover:underline">{person.phone}</a>}
+                            </div>
+                            <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-medium ${evidence.cls}`}>{evidence.label}</span>
+                          </div>;
+                        })}
                       </div>
-                    )}
-                  </div>
-                )}
+                    ) : <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">ยังไม่ได้จ่ายงานให้ช่างรายบุคคล</p>}
+                  </section>
+
+                  {detailJob && (
+                    <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 md:col-span-2">
+                      <h3 className="mb-4 text-sm font-semibold text-slate-900">👤 ลูกค้าและสถานที่ติดตั้ง</h3>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div><div className="text-xs text-slate-400">ชื่อลูกค้า</div><div className="mt-1 text-sm font-medium text-slate-800">{detailJob.customer_name || "—"}</div></div>
+                        <div><div className="text-xs text-slate-400">เบอร์โทรศัพท์</div>{detailJob.customer_phone ? <a href={`tel:${detailJob.customer_phone}`} className="mt-1 inline-block text-sm font-medium text-blue-600 hover:underline">☎ {detailJob.customer_phone}</a> : <div className="mt-1 text-sm text-slate-400">—</div>}</div>
+                        <div className="sm:col-span-2"><div className="text-xs text-slate-400">ที่อยู่หน้างาน</div><div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{detailJob.address || "—"}</div></div>
+                        {detailJob.location_url && <div className="sm:col-span-2"><a href={detailJob.location_url} target="_blank" rel="noopener noreferrer" className="inline-flex rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100">📍 เปิดตำแหน่งใน Google Maps</a></div>}
+                      </div>
+                    </section>
+                  )}
+
+                  <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 md:col-span-2">
+                    <h3 className="mb-4 text-sm font-semibold text-slate-900">📋 ขอบเขตและรายละเอียดงาน</h3>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div><div className="text-xs text-slate-400">สินค้า / สเปก</div><div className="mt-1 whitespace-pre-wrap text-sm font-medium text-slate-800">{detailJob?.product_name || detail.requirement || "—"}</div></div>
+                      <div><div className="text-xs text-slate-400">พื้นที่ติดตั้ง</div><div className="mt-1 text-sm font-medium text-slate-800">{sv?.areaSqm ? `${sv.areaSqm} ตร.ม.` : "—"}</div></div>
+                      {detail.requirement && detail.requirement !== detailJob?.product_name && <div className="sm:col-span-2"><div className="text-xs text-slate-400">Requirement งาน</div><div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{detail.requirement}</div></div>}
+                    </div>
+                  </section>
+
+                  {sv && surveyHasData(sv) && (
+                    <section className="rounded-2xl border border-blue-200 bg-blue-50/50 p-4 sm:p-5 md:col-span-2">
+                      <h3 className="mb-4 text-sm font-semibold text-blue-900">🔎 ข้อมูลสำรวจหน้างาน</h3>
+                      <div className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                        <div><div className="text-xs text-slate-400">สภาพพื้น</div><div className="mt-1 font-medium text-slate-800">{sv.floorCondition ? labelOf(FLOOR_CONDITIONS, sv.floorCondition) : "—"}</div></div>
+                        <div><div className="text-xs text-slate-400">วิธีเชื่อม</div><div className="mt-1 font-medium text-slate-800">{sv.weldType ? labelOf(WELD_TYPES, sv.weldType) : "—"}</div></div>
+                        <div><div className="text-xs text-slate-400">โซนเปียก</div><div className="mt-1 font-medium text-slate-800">{sv.wetZone ? "มีโซนเปียก" : "ไม่มีโซนเปียก"}</div></div>
+                        <div><div className="text-xs text-slate-400">งานตัด</div><div className="mt-1 text-slate-800">{sv.cutTypes?.length ? sv.cutTypes.map((x) => labelOf(CUT_TYPES, x)).join(", ") : "—"}</div></div>
+                        <div className="sm:col-span-2"><div className="text-xs text-slate-400">การจบงาน</div><div className="mt-1 text-slate-800">{sv.finishTypes?.length ? sv.finishTypes.map((x) => labelOf(FINISH_TYPES, x)).join(", ") : "—"}</div></div>
+                        {sv.notes && <div className="sm:col-span-2 lg:col-span-3"><div className="text-xs text-slate-400">หมายเหตุสำรวจ</div><div className="mt-1 whitespace-pre-wrap leading-relaxed text-slate-800">{sv.notes}</div></div>}
+                      </div>
+                      {sv.photos && sv.photos.length > 0 && <div className="mt-5"><div className="mb-2 text-xs text-slate-400">รูปหน้างาน ({sv.photos.length} รูป)</div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{sv.photos.map((p, i) => <a key={p} href={photoUrl(p)} target="_blank" rel="noopener noreferrer" className="group relative aspect-video overflow-hidden rounded-xl border border-blue-200 bg-white"><Image src={photoUrl(p)} alt={`รูปหน้างาน ${i + 1}`} fill unoptimized sizes="(max-width: 640px) 50vw, 240px" className="object-cover transition group-hover:scale-105" /><span className="absolute bottom-1 right-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">เปิดรูป</span></a>)}</div></div>}
+                    </section>
+                  )}
+
+                  <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 md:col-span-2">
+                    <h3 className="mb-3 text-sm font-semibold text-slate-900">📝 หมายเหตุจากต้นทาง</h3>
+                    {detail.notes ? <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{linkify(detail.notes).map((p, i) => p.href ? <a key={i} href={p.href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">{p.t}</a> : <span key={i}>{p.t}</span>)}</p> : <p className="text-sm text-slate-400">ไม่มีหมายเหตุเพิ่มเติม</p>}
+                  </section>
+
+                  {detailJob?.flag_note && <section className="rounded-2xl border border-amber-300 bg-amber-50 p-4 sm:p-5 md:col-span-2"><h3 className="text-sm font-semibold text-amber-800">⚠️ ข้อมูลที่ต้องแก้ไข</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-amber-900">{detailJob.flag_note}</p></section>}
+                </div>
               </div>
-              <div className="p-4 border-t flex gap-2">
-                {detail.status === "proposed" && <button onClick={() => setStatus(detail, "confirmed")} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700">ยืนยันนัด</button>}
-                {detail.status === "proposed" && detail.job_id && <button onClick={() => sendBack(detail)} className="flex-1 border border-amber-300 text-amber-700 rounded-lg py-2 text-sm hover:bg-amber-50">ส่งกลับแก้ไข</button>}
-                {!detail.ext_ref?.startsWith("bbps:") && <button onClick={() => openEdit(detail)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">แก้ไข</button>}
-                <button onClick={() => remove(detail)} className="px-4 border border-red-200 text-red-600 rounded-lg py-2 text-sm hover:bg-red-50">ยกเลิก</button>
-              </div>
-            </div>
+
+              <footer className="shrink-0 border-t border-slate-200 bg-white px-4 py-3 sm:px-7">
+                <div className="flex flex-wrap justify-end gap-2">
+                  {detail.status === "proposed" && <button onClick={() => setStatus(detail, "confirmed")} className="order-first grow rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 sm:order-none sm:grow-0">ยืนยันนัด</button>}
+                  {detail.status === "proposed" && detail.job_id && <button onClick={() => sendBack(detail)} className="rounded-lg border border-amber-300 px-4 py-2.5 text-sm text-amber-700 hover:bg-amber-50">ส่งกลับแก้ไข</button>}
+                  {!detail.ext_ref?.startsWith("bbps:") && <button onClick={() => openEdit(detail)} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50">แก้ไข</button>}
+                  <button onClick={() => remove(detail)} className="rounded-lg border border-red-200 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50">ยกเลิกคิว</button>
+                </div>
+              </footer>
+            </aside>
           </div>
         );
       })()}
