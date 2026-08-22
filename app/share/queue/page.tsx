@@ -5,6 +5,7 @@ import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { ipGenOrderNo } from "@/lib/utils";
 import { CUT_TYPES, WELD_TYPES, FINISH_TYPES, FLOOR_CONDITIONS, EMPTY_SURVEY, surveyHasData, type SurveyData } from "@/lib/survey";
+import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 
 interface Team { id: string; name: string }
 interface Appt {
@@ -21,7 +22,7 @@ interface Appt {
 interface JobDetail {
   bill_no: string | null; customer_name: string | null; customer_phone: string | null;
   address: string | null; location_url: string | null; product_name: string | null; survey_data: string | null;
-  status: string | null; source: string | null; flag_note: string | null;
+  status: string | null; source: string | null; flag_note: string | null; raw_payload: unknown;
 }
 interface DetailTechnician {
   id: string;
@@ -223,7 +224,7 @@ export default function ShareQueuePage() {
     setDetail(a); setDetailJob(null); setDetailTechnicians([]); setDetailTechniciansLoading(true);
     const jobRequest = a.job_id
       ? supabase.from("install_jobs")
-        .select("bill_no, customer_name, customer_phone, address, location_url, product_name, survey_data, status, source, flag_note")
+        .select("bill_no, customer_name, customer_phone, address, location_url, product_name, survey_data, status, source, flag_note, raw_payload")
         .eq("job_no", a.job_id).maybeSingle()
       : Promise.resolve({ data: null });
     const [jobResult, assignmentResult] = await Promise.all([
@@ -670,6 +671,8 @@ export default function ShareQueuePage() {
                       {detail.requirement && detail.requirement !== detailJob?.product_name && <div className="sm:col-span-2"><div className="text-xs text-slate-400">Requirement งาน</div><div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{detail.requirement}</div></div>}
                     </div>
                   </section>
+
+                  {detailJob?.source === "bbps" && <BbpsWorkOrderDetails rawPayload={detailJob.raw_payload} />}
 
                   {sv && surveyHasData(sv) && (
                     <section className="rounded-2xl border border-blue-200 bg-blue-50/50 p-4 sm:p-5 md:col-span-2">
