@@ -20,9 +20,10 @@ async function handle(req: Request) {
 
   let payload: unknown;
   try { payload = await req.json(); } catch { return NextResponse.json({ error: "invalid_json" }, { status: 400 }); }
-  const p = payload as { event?: string; jobs?: BbpsJob[] } & Partial<BbpsJob>;
+  const p = payload as { event?: unknown; action?: string; jobs?: BbpsJob[] } & Partial<BbpsJob>;
 
-  const event = (p.event || "upsert").toLowerCase();
+  // BBPS outbox ใส่ metadata object ไว้ที่ event; action คือคำสั่งธุรกิจที่ Floor ใช้จริง
+  const event = (typeof p.event === "string" ? p.event : p.action || "upsert").toLowerCase();
   const jobs: BbpsJob[] = Array.isArray(p.jobs) ? p.jobs : (p.id ? [p as BbpsJob] : []);
   if (!jobs.length) return NextResponse.json({ error: "no_jobs" }, { status: 400 });
 
