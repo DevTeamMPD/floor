@@ -8,7 +8,7 @@ interface Props {
   onCreated: () => void;
 }
 
-const SOURCES = ["manual", "shopee", "lazada", "tiktok", "jst", "web"];
+const SOURCES = ["manual", "shopee", "lazada", "tiktok", "jst", "web", "bbps-crm"];
 
 const SHIFT_OPTIONS = [
   { value: "morning", label: "🌅 เช้า" },
