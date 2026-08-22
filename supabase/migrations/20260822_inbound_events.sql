@@ -41,5 +41,16 @@ CREATE INDEX IF NOT EXISTS idx_inbound_events_status_received_at
 -- already allows unlimited rows with external_id IS NULL to coexist --
 -- Postgres treats NULLs as distinct for uniqueness purposes -- so nothing
 -- is lost by dropping the WHERE clause.
-CREATE UNIQUE INDEX IF NOT EXISTS install_jobs_external_id_key
+--
+-- fix round 2: `IF NOT EXISTS` is not enough here. Some environments (e.g.
+-- a stale dev/staging Supabase project) may already have the OLD buggy
+-- PARTIAL index under this exact name. Because `IF NOT EXISTS` matches on
+-- name only -- not on definition -- re-running this migration against such
+-- an environment is a silent no-op: no error, but the old partial index
+-- stays in place and the 42P10 upsert failure above is NOT actually fixed.
+-- Drop-and-recreate unconditionally instead, so this migration self-heals
+-- regardless of what shape the index was in before. (No `IF NOT EXISTS`
+-- needed on the CREATE -- the preceding DROP already guarantees it's gone.)
+DROP INDEX IF EXISTS install_jobs_external_id_key;
+CREATE UNIQUE INDEX install_jobs_external_id_key
   ON install_jobs (external_id);
