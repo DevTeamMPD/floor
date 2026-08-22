@@ -59,7 +59,7 @@ export async function upsertInstallJob(
 
   const { data: existing, error: lookupError } = await supabase
     .from("install_jobs")
-    .select("job_no, order_no, status")
+    .select("job_no, order_no, stage")
     .eq("external_id", productionId)
     .maybeSingle();
   if (lookupError) throw lookupError;
@@ -123,20 +123,42 @@ export async function upsertInstallJob(
     row.status = ACTIVE_STATUS;
     // `assignees` intentionally omitted: brand new row, floor hasn't
     // assigned anyone yet, DB default (if any) applies.
-  } else if (existing.status === ACTIVE_STATUS) {
+  } else if (existing.stage === DEFAULT_STAGE) {
     // Row is still sitting untouched at the CRM's own defaults -- safe to
     // re-apply them (no-op in practice, keeps behavior explicit).
+    //
+    // fix round 3, Critical: this used to key off `existing.status ===
+    // ACTIVE_STATUS` instead, on the theory that `status` only stays
+    // 'Active' while the job is untouched at stage 1. That's false --
+    // components/pipeline/job-drawer.tsx's advanceStage()/closeJob() only
+    // ever write `stage` (plus `closed_at`/`eval_token` on close), never
+    // `status`, so `status` stays 'Active' for a job's entire lifecycle
+    // (confirmed in production: status='Active' rows span stage 1-6). With
+    // that guard, ANY retried/replayed delivery for a production_id whose
+    // job had already been advanced -- or fully closed, eval link already
+    // sent -- silently snapped `stage` back to 1, leaving `closed_at`/
+    // `eval_token` stale and now inconsistent with the reset stage.
+    // `stage` is the only field that actually distinguishes "still exactly
+    // where the CRM put it" from "floor has touched this", so key off that.
     row.stage = DEFAULT_STAGE;
-    row.status = ACTIVE_STATUS;
+    // `status` is deliberately NOT re-applied here (nor omitted-then-implied
+    // to change): grep confirms no code path anywhere ever moves an
+    // install_jobs row's status away from 'Active' after creation (no
+    // cancel/hold state exists for this table), so re-writing it on every
+    // matching redelivery is a pure no-op that only pretends to matter.
+    // Leaving it out of `row` entirely keeps this branch's intent (and the
+    // no-touch branch below) honest: the only field this upsert may need to
+    // reset on an existing row is `stage`.
   }
-  // else: floor has already moved this job past stage 1 / away from
-  // 'Active'. A duplicate or retried webhook delivery for the same
-  // production_id (test case 6; real-world dispatcher retry) must not
-  // snap it back. `stage` and `status` are simply omitted from `row` in
-  // that branch -- Supabase/PostgREST upsert only writes columns present
-  // in the payload, so the existing values are left exactly as floor set
-  // them. Same reasoning is why `assignees` is never included here at all:
-  // it is a floor-only field this receiver must never touch, ever.
+  // else: floor has already moved this job past stage 1. A duplicate or
+  // retried webhook delivery for the same production_id (test case 6;
+  // real-world dispatcher retry/outbox replay) must not snap it back.
+  // `stage` is simply omitted from `row` in that branch -- Supabase/
+  // PostgREST upsert only writes columns present in the payload, so the
+  // existing `stage` (and `closed_at`/`eval_token`, which this function
+  // never touches in any branch) is left exactly as floor set it. Same
+  // reasoning is why `assignees` is never included here at all: it is a
+  // floor-only field this receiver must never touch, ever.
 
   const { error: upsertError } = await supabase
     .from("install_jobs")

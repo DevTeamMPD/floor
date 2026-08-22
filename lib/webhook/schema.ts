@@ -93,7 +93,19 @@ export const WorkOrderQueuedV1Schema = z
   .object({
     event: z.object({
       event_id: z.string(),
-      event_type: z.string(),
+      // fix round 3, Medium: was `z.string()` -- any string was accepted
+      // and processed identically (as a queue-event upsert) regardless of
+      // what it actually said. The spec's roadmap already names a future
+      // `work_order.updated.v1` that will hit this same endpoint shape but
+      // needs different handling once it exists; nothing in this codebase
+      // routes on `event_type` today (grep confirms route.ts only ever
+      // stores it for audit in `inbound_events`, never branches on it), so
+      // pinning to the one literal this receiver actually implements is
+      // the minimal correct fix -- reject anything else with a normal Zod
+      // 400 instead of silently mis-processing it. Revisit as a
+      // `z.enum([...])`/discriminated union once a second event type with
+      // its own handling actually lands, not before.
+      event_type: z.literal("work_order.queued.v1"),
       occurred_at: z.string(),
       source_system: z.string(),
     }),
