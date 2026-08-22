@@ -295,7 +295,7 @@ export default function ExecPage() {
                 {(ex?.jobs.byStage ?? []).map((s) => (
                   <div key={s.id} className="flex items-center gap-2.5 text-[10.5px]">
                     <span className="w-[78px] shrink-0 truncate" style={{ color: SUB }}>{s.id}. {s.name}</span>
-                    <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: TRACK }}><div className="h-full rounded-full" style={{ width: `${(s.n / maxStageN) * 100}%`, background: s.id === 7 ? GOOD : ACCENT_2 }} /></div>
+                    <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: TRACK }}><div className="h-full rounded-full" style={{ width: `${(s.n / maxStageN) * 100}%`, background: s.id === 6 ? GOOD : ACCENT_2 }} /></div>
                     <span className="w-6 shrink-0 text-right font-semibold" style={{ color: INK, ...NUM }}>{s.n}</span>
                   </div>
                 ))}

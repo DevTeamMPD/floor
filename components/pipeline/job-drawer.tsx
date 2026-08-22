@@ -555,7 +555,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       .eq("job_no", job.jobNo);
     if (error) { toast.error("ปิดงานไม่สำเร็จ"); return; }
     await supabase.from("job_evals").insert({ install_job_id: job.id, token });
-    const link = `${window.location.origin}/eval/${token}`;
+    const link = `${window.location.origin}/eval?t=${encodeURIComponent(token)}`;
     await navigator.clipboard.writeText(link).catch(() => {});
     toast.success("ปิดงานแล้ว — ลิงก์ประเมินคัดลอกแล้ว");
     onRefresh();
