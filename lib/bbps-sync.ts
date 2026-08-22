@@ -12,6 +12,9 @@ export interface BbpsJob {
   customerName?: string | null;
   customerPhone?: string | null;
   address?: string | null;
+  locationUrl?: string | null;
+  productName?: string | null;
+  areaSqm?: string | number | null;
   status?: string | null;
   statusCode?: string | null;
   installStart?: string | null;
@@ -85,12 +88,22 @@ async function upsertTicket(supabase: SupabaseClient, j: BbpsJob, dates: string[
 
   const jobNo = (existing?.job_no as string | undefined) ?? fallbackJobNo;
   const firstDate = dates[0] ?? null;
+  const missing = [
+    !j.quoteNumber ? "เลขอ้างอิง BBPS" : null,
+    !j.customerName ? "ชื่อลูกค้า" : null,
+    !j.customerPhone ? "เบอร์โทร" : null,
+    !j.address && !j.locationUrl ? "ที่อยู่หรือแผนที่" : null,
+  ].filter((x): x is string => Boolean(x));
+  const needsInfo = missing.length > 0;
   const shared = {
     order_no: j.quoteNumber || fallbackJobNo,
     bill_no: j.quoteNumber || null,
     customer_name: j.customerName || null,
     customer_phone: j.customerPhone || null,
     address: j.address || null,
+    ...(j.locationUrl ? { location_url: j.locationUrl } : {}),
+    ...(j.productName ? { product_name: j.productName } : {}),
+    ...(j.areaSqm ? { survey_data: JSON.stringify({ areaSqm: String(j.areaSqm), savedAt: new Date().toISOString() }) } : {}),
     appt_date: firstDate,
     due_date: firstDate,
     created_via: "bbps",
@@ -103,12 +116,14 @@ async function upsertTicket(supabase: SupabaseClient, j: BbpsJob, dates: string[
 
   if (existing) {
     const reactivated = existing.status === "BBPS ออกจากคิว" || existing.status === "ยกเลิกคิว";
+    const keepApproved = existing.status === "ยืนยันคิวแล้ว" || existing.status === "ติดตั้งสำเร็จ";
     const { error } = await supabase.from("install_jobs").update({
       ...shared,
-      ...(reactivated ? {
-        status: "รอหัวหน้าช่างยืนยัน",
-        waiting_on: "หัวหน้าช่าง",
+      ...(!keepApproved || reactivated ? {
+        status: needsInfo ? "รอฝ่ายขายเติมข้อมูล" : "รอหัวหน้าช่างยืนยัน",
+        waiting_on: needsInfo ? "ฝ่ายขาย" : "หัวหน้าช่าง",
         waiting_since: new Date().toISOString(),
+        flag_note: needsInfo ? `ข้อมูลไม่ครบ: ${missing.join(", ")}` : null,
       } : {}),
     }).eq("job_no", jobNo);
     if (error) throw error;
@@ -120,10 +135,11 @@ async function upsertTicket(supabase: SupabaseClient, j: BbpsJob, dates: string[
       job_no: jobNo,
       ...shared,
       stage: 2,
-      status: "รอหัวหน้าช่างยืนยัน",
+      status: needsInfo ? "รอฝ่ายขายเติมข้อมูล" : "รอหัวหน้าช่างยืนยัน",
       linked: true,
-      waiting_on: "หัวหน้าช่าง",
+      waiting_on: needsInfo ? "ฝ่ายขาย" : "หัวหน้าช่าง",
       waiting_since: new Date().toISOString(),
+      flag_note: needsInfo ? `ข้อมูลไม่ครบ: ${missing.join(", ")}` : null,
     });
     if (error) throw error;
     await writeActivity(supabase, jobNo, "create", "source", null, "bbps");
