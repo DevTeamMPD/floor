@@ -1,8 +1,11 @@
 "use client";
 export const dynamic = 'force-dynamic';
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import TechnicianManager from "@/components/appointments/technician-manager";
+import TechnicianAssignmentButton from "@/components/appointments/technician-assignment";
+import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
 
 interface TechTeam {
   id: string;
@@ -22,6 +25,11 @@ interface Job {
   source: string | null;
   waiting_on: string | null;
   flag_note: string | null;
+  bill_no: string | null;
+  customer_phone: string | null;
+  address: string | null;
+  location_url: string | null;
+  survey_data: string | null;
 }
 
 interface Appointment {
@@ -85,17 +93,35 @@ function isToday(d: Date) {
   return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
 }
 
+function missingJobFields(job: Job): string[] {
+  const missing: string[] = [];
+  if (!job.bill_no) missing.push(job.source === 'bbps' ? 'เลขอ้างอิง BBPS' : 'เลขบิล');
+  if (!job.customer_name) missing.push('ชื่อลูกค้า');
+  if (!job.customer_phone) missing.push('เบอร์โทร');
+  if (!job.address && !job.location_url) missing.push('ที่อยู่หรือแผนที่');
+  if (job.source !== 'bbps') {
+    if (!job.product_name) missing.push('Requirement/สเปก');
+    let area = '';
+    try { area = job.survey_data ? String(JSON.parse(job.survey_data).areaSqm ?? '') : ''; } catch {}
+    if (!area) missing.push('พื้นที่ติดตั้ง');
+  }
+  return missing;
+}
+
 export default function AppointmentsPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [techs, setTechs] = useState<TechTeam[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [technicians, setTechnicians] = useState<FloorTechnician[]>([]);
+  const [assignments, setAssignments] = useState<TechnicianAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [weekOffset, setWeekOffset] = useState(0);
 
   // Modals
   const [showCreate, setShowCreate] = useState(false);
   const [showTechs, setShowTechs] = useState(false);
+  const [showIndividuals, setShowIndividuals] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Create appointment form
@@ -109,17 +135,21 @@ export default function AppointmentsPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [{ data: apptData }, { data: techData }, { data: jobData }] = await Promise.all([
+    const [{ data: apptData }, { data: techData }, { data: jobData }, { data: personData }, { data: assignmentData }] = await Promise.all([
       supabase
         .from('appointments')
-        .select('*, tech:tech_teams(*), job:install_jobs(job_no,customer_name,product_name,stage,status,source,waiting_on,flag_note)')
+        .select('*, tech:tech_teams(*), job:install_jobs(job_no,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,stage,status,source,waiting_on,flag_note)')
         .order('slot_start'),
       supabase.from('tech_teams').select('*').order('name'),
-      supabase.from('install_jobs').select('job_no,customer_name,product_name,stage,status,source,waiting_on,flag_note').order('job_no', { ascending: false }).limit(200),
+      supabase.from('install_jobs').select('job_no,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,stage,status,source,waiting_on,flag_note').order('job_no', { ascending: false }).limit(200),
+      supabase.from('floor_technicians').select('id,team_id,name,phone,is_team_lead,is_active,created_at,updated_at').order('name'),
+      supabase.from('appointment_technicians').select('*').order('assigned_at'),
     ]);
     setAppointments((apptData ?? []) as Appointment[]);
     setTechs((techData ?? []) as TechTeam[]);
     setJobs((jobData ?? []) as Job[]);
+    setTechnicians((personData ?? []) as FloorTechnician[]);
+    setAssignments((assignmentData ?? []) as TechnicianAssignment[]);
     setLoading(false);
   }, [supabase]);
 
@@ -161,6 +191,18 @@ export default function AppointmentsPage() {
 
   // --- Update Status ---
   async function updateStatus(appt: Appointment, newStatus: string) {
+    if (newStatus === 'confirmed' && appt.job_id) {
+      const missing = appt.job ? missingJobFields(appt.job) : ['ข้อมูล Ticket'];
+      if (missing.length) {
+        toast.error(`ข้อมูลยังไม่ครบ: ${missing.join(', ')}`);
+        return;
+      }
+      const assigned = assignments.some((a) => a.appointment_id === appt.id && a.is_active);
+      if (!assigned) {
+        toast.error('กรุณาจ่ายงานให้ช่างรายบุคคลอย่างน้อย 1 คนก่อนยืนยัน');
+        return;
+      }
+    }
     const confirmedAt = newStatus === 'confirmed' ? new Date().toISOString() : null;
     const update = supabase.from('appointments').update({ status: newStatus, confirmed_at: confirmedAt });
     const { error } = appt.job_id && newStatus === 'confirmed'
@@ -235,10 +277,13 @@ export default function AppointmentsPage() {
       tech_id: techId, status: 'proposed', confirmed_at: null,
     }).eq('id', appt.id);
     if (error) { toast.error(error.message); return; }
+    await supabase.from('appointment_technicians').update({
+      is_active: false, is_lead: false, revoked_at: new Date().toISOString(),
+    }).eq('appointment_id', appt.id).eq('is_active', true);
     if (appt.job_id) {
       await supabase.from('install_jobs').update({
         status: 'รอหัวหน้าช่างยืนยัน', waiting_on: 'หัวหน้าช่าง',
-        waiting_since: new Date().toISOString(), updated_at: new Date().toISOString(),
+        waiting_since: new Date().toISOString(), assignees: [], updated_at: new Date().toISOString(),
       }).eq('job_no', appt.job_id);
       await supabase.from('job_activity').insert({
         job_no: appt.job_id, actor: 'หัวหน้าช่าง', action: 'reassign', field: 'tech_id',
@@ -291,6 +336,10 @@ export default function AppointmentsPage() {
           <p className="text-slate-500 text-sm mt-0.5">ตารางนัดหมายทีมช่าง</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <button onClick={() => setShowIndividuals(true)}
+            className="px-3 py-1.5 text-sm border border-violet-200 rounded-lg text-violet-700 hover:bg-violet-50">
+            👤 รายชื่อช่าง
+          </button>
           <button onClick={() => setShowTechs(true)}
             className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
             👷 ทีมช่าง
@@ -333,6 +382,10 @@ export default function AppointmentsPage() {
                   <div className="text-xs text-slate-500">
                     {fmtTime(appt.slot_start)} – {fmtTime(appt.slot_end)} · {appt.tech?.name ?? 'ไม่ระบุช่าง'}
                   </div>
+                  {appt.job_id ? <TechnicianAssignmentButton
+                    appointmentId={appt.id} appointmentTeamId={appt.tech_id} jobNo={appt.job_id}
+                    teams={techs} technicians={technicians} assignments={assignments} onChanged={loadData}
+                  /> : null}
                 </div>
                 <select value={appt.tech_id ?? ''} onChange={(e) => reassignTeam(appt, e.target.value)}
                   aria-label={`ย้ายทีมสำหรับ ${appt.job?.customer_name ?? appt.job_id ?? 'นัดหมาย'}`}
@@ -470,6 +523,10 @@ export default function AppointmentsPage() {
                       <td className="px-4 py-2 text-xs text-slate-400">{appt.notes ?? '—'}</td>
                       <td className="px-4 py-2">
                         <div className="flex items-center gap-1">
+                          {appt.job_id ? <TechnicianAssignmentButton
+                            appointmentId={appt.id} appointmentTeamId={appt.tech_id} jobNo={appt.job_id}
+                            teams={techs} technicians={technicians} assignments={assignments} onChanged={loadData}
+                          /> : null}
                           <select value={appt.tech_id ?? ''} onChange={(e) => reassignTeam(appt, e.target.value)}
                             aria-label={`ย้ายทีมสำหรับ ${appt.job?.customer_name ?? appt.job_id ?? 'นัดหมาย'}`}
                             className="border border-slate-200 rounded px-1.5 py-0.5 text-xs bg-white max-w-24">
@@ -508,6 +565,14 @@ export default function AppointmentsPage() {
           </table>
         </div>
       )}
+
+      <TechnicianManager
+        open={showIndividuals}
+        teams={techs}
+        technicians={technicians}
+        onClose={() => setShowIndividuals(false)}
+        onChanged={loadData}
+      />
 
       {/* ===== CREATE APPOINTMENT MODAL ===== */}
       {showCreate && (

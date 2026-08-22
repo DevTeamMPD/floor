@@ -247,6 +247,17 @@ export default function ShareQueuePage() {
     if (!form.tech_id) { alert("กรุณาเลือกทีมช่าง"); return; }
     if (!form.date) { alert("กรุณาเลือกวันที่"); return; }
     if ((form.end || "12:00") <= (form.start || "09:00")) { alert("เวลาสิ้นสุดต้องหลังเวลาเริ่ม"); return; }
+    const holidayMode = /วันหยุด|หยุด|ลาพัก|ไม่รับงาน/.test(form.notes) && !form.bill_no.trim() && !form.customer_name.trim();
+    if (!holidayMode) {
+      const missing: string[] = [];
+      if (!form.bill_no.trim()) missing.push("เลขบิล");
+      if (!form.customer_name.trim()) missing.push("ชื่อลูกค้า");
+      if (!form.customer_phone.trim()) missing.push("เบอร์โทร");
+      if (!form.address.trim() && !form.location_url.trim()) missing.push("ที่อยู่หรือ Google Maps");
+      if (!form.requirement.trim()) missing.push("Requirement/สเปก");
+      if (!form.survey.areaSqm.trim()) missing.push("พื้นที่ติดตั้ง");
+      if (missing.length) { alert(`กรุณากรอกข้อมูลสำคัญให้ครบ:\n• ${missing.join("\n• ")}`); return; }
+    }
     const endDate = form.endDate && form.endDate >= form.date ? form.endDate : form.date;
     const dates = eachDay(form.date, endDate);
     setSaving(true);
@@ -646,20 +657,20 @@ export default function ShareQueuePage() {
                   <>
                     <div className="flex gap-2">
                       <div className="flex-1">
-                        <label className="text-xs text-slate-500 block mb-1">เลขบิล</label>
+                        <label className="text-xs text-slate-500 block mb-1">เลขบิล *</label>
                         <input value={form.bill_no} onChange={(e) => setForm({ ...form, bill_no: e.target.value })} placeholder="เช่น 285739" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                       </div>
                       <div className="flex-1">
-                        <label className="text-xs text-slate-500 block mb-1">ชื่อลูกค้า</label>
+                        <label className="text-xs text-slate-500 block mb-1">ชื่อลูกค้า *</label>
                         <input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} placeholder="ชื่อ-นามสกุล" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                       </div>
                     </div>
                     <div>
-                      <label className="text-xs text-slate-500 block mb-1">เบอร์โทร</label>
+                      <label className="text-xs text-slate-500 block mb-1">เบอร์โทร *</label>
                       <input value={form.customer_phone} onChange={(e) => setForm({ ...form, customer_phone: e.target.value })} placeholder="0xx-xxxxxxx" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                     </div>
                     <div>
-                      <label className="text-xs text-slate-500 block mb-1">โลเคชั่น / ที่อยู่</label>
+                      <label className="text-xs text-slate-500 block mb-1">โลเคชั่น / ที่อยู่ *</label>
                       <textarea value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} rows={2} placeholder="ที่อยู่หน้างาน" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y" />
                     </div>
                     <div>
@@ -679,7 +690,7 @@ export default function ShareQueuePage() {
                 </div>
                 {!isHol && (
                   <div>
-                    <label className="text-xs text-slate-500 block mb-1">📋 Requirement งาน (สเปก)</label>
+                    <label className="text-xs text-slate-500 block mb-1">📋 Requirement งาน (สเปก) *</label>
                     <textarea value={form.requirement} onChange={(e) => setForm({ ...form, requirement: e.target.value })} rows={2} placeholder="เช่น สี Whitebuzz · รุ่น Rollsafe 1.6cm · พื้นที่ 15 ตรม · จำนวนโซน" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-y min-h-[56px]" />
                   </div>
                 )}
@@ -690,7 +701,7 @@ export default function ShareQueuePage() {
                 <div className="border-t pt-3 space-y-3">
                   <p className="text-xs font-semibold text-slate-700">🔎 ข้อมูลสำรวจหน้างาน <span className="text-slate-400 font-normal">(ไม่บังคับ — กรอกเท่าที่มี)</span></p>
                   <div>
-                    <label className="text-xs text-slate-500 block mb-1">พื้นที่ติดตั้ง (ตร.ม.)</label>
+                    <label className="text-xs text-slate-500 block mb-1">พื้นที่ติดตั้ง (ตร.ม.) *</label>
                     <input value={form.survey.areaSqm} onChange={(e) => setSurvey({ areaSqm: e.target.value })} placeholder="เช่น 24.5" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                   </div>
                   <div>
