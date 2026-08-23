@@ -59,13 +59,6 @@ BEGIN
     pin_hash       = EXCLUDED.pin_hash,
     pin_set_at     = now();
 
-  -- บันทึก activity
-  INSERT INTO public.technician_work_events (technician_id, event_type, metadata, created_at)
-  VALUES (v_tech_id, 'device_enrolled', jsonb_build_object(
-    'platform', p_platform, 'device_name', p_device_name, 'app_version', p_app_version
-  ), now())
-  ON CONFLICT DO NOTHING;
-
   RETURN jsonb_build_object(
     'deviceToken',  v_device_token,
     'deviceSecret', v_device_secret
@@ -128,11 +121,6 @@ AS $$
 BEGIN
   DELETE FROM public.floor_technician_devices
   WHERE technician_id = p_technician_id;
-
-  -- บันทึก activity
-  INSERT INTO public.technician_work_events (technician_id, event_type, metadata, created_at)
-  VALUES (p_technician_id, 'pin_reset', jsonb_build_object('reset_by', 'admin'), now())
-  ON CONFLICT DO NOTHING;
 
   RETURN true;
 END;
