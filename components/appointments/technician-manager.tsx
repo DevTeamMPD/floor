@@ -53,13 +53,14 @@ export default function TechnicianManager({ open, teams, technicians, onClose, o
       is_team_lead: form.is_team_lead, updated_at: new Date().toISOString(),
     };
     if (editingId) {
-      const { error } = await supabase.from("floor_technicians").update(values).eq("id", editingId);
+      const resetToken = pin ? crypto.randomUUID() : "";
+      const updateValues = resetToken ? { ...values, personal_token: resetToken } : values;
+      const { error } = await supabase.from("floor_technicians").update(updateValues).eq("id", editingId);
       if (error) toast.error(error.message);
       else {
-        const current = technicians.find((t) => t.id === editingId);
-        if (pin && current?.personal_token) {
+        if (pin) {
           const { error: pinError } = await supabase.rpc("set_floor_technician_pin", {
-            p_personal_token: current.personal_token,
+            p_personal_token: resetToken,
             p_pin: pin,
           });
           if (pinError) {
@@ -68,7 +69,8 @@ export default function TechnicianManager({ open, teams, technicians, onClose, o
             return;
           }
         }
-        toast.success("แก้ไขข้อมูลช่างแล้ว");
+        if (resetToken) setNewLink({ name: values.name, url: personalWorkUrl(resetToken), pin });
+        toast.success(resetToken ? "แก้ไขข้อมูลช่างและออกลิงก์/PIN ใหม่แล้ว" : "แก้ไขข้อมูลช่างแล้ว");
         reset();
         onChanged();
       }
@@ -188,8 +190,8 @@ export default function TechnicianManager({ open, teams, technicians, onClose, o
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-sm truncate">{t.name}{t.is_team_lead ? " · หัวหน้าทีม" : ""}</div>
                 <div className="text-xs text-slate-500">{teams.find((x) => x.id === t.team_id)?.name ?? "ไม่ระบุทีม"}{t.phone ? ` · ${t.phone}` : ""}</div>
-                <div className={`text-xs mt-0.5 ${t.pin_updated_at ? "text-emerald-600" : "text-amber-600"}`}>
-                  {t.pin_updated_at ? "ตั้ง PIN แล้ว" : "ยังไม่ได้ตั้ง PIN"}
+                <div className="text-xs mt-0.5 text-slate-400">
+                  สถานะ PIN ถูกซ่อนเพื่อความปลอดภัย
                 </div>
               </div>
               <button onClick={() => edit(t)} className="text-xs text-blue-600">แก้ไข</button>

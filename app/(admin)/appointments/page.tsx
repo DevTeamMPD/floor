@@ -135,16 +135,18 @@ export default function AppointmentsPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [{ data: apptData }, { data: techData }, { data: jobData }, { data: personData }, { data: assignmentData }] = await Promise.all([
+    const [{ data: apptData, error: apptError }, { data: techData, error: techError }, { data: jobData, error: jobError }, { data: personData, error: personError }, { data: assignmentData, error: assignmentError }] = await Promise.all([
       supabase
         .from('appointments')
         .select('*, tech:tech_teams(*), job:install_jobs(job_no,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,stage,status,source,waiting_on,flag_note)')
         .order('slot_start'),
       supabase.from('tech_teams').select('*').order('name'),
       supabase.from('install_jobs').select('job_no,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,stage,status,source,waiting_on,flag_note').order('job_no', { ascending: false }).limit(200),
-      supabase.from('floor_technicians').select('id,team_id,personal_token,name,phone,is_team_lead,is_active,created_at,updated_at,pin_updated_at').order('name'),
+      supabase.from('floor_technicians').select('id,team_id,name,phone,is_team_lead,is_active,created_at,updated_at').order('name'),
       supabase.from('appointment_technicians').select('*').order('assigned_at'),
     ]);
+    const loadError = apptError ?? techError ?? jobError ?? personError ?? assignmentError;
+    if (loadError) toast.error(`โหลดข้อมูลนัดหมายไม่ครบ: ${loadError.message}`);
     setAppointments((apptData ?? []) as Appointment[]);
     setTechs((techData ?? []) as TechTeam[]);
     setJobs((jobData ?? []) as Job[]);

@@ -1,7 +1,7 @@
 export interface FloorTechnician {
   id: string;
   team_id: string | null;
-  personal_token: string;
+  personal_token?: string | null;
   name: string;
   phone: string | null;
   is_team_lead: boolean;
