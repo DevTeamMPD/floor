@@ -11,6 +11,7 @@ interface Appt {
   slot_end: string;
   status: string;
 }
+interface JobDetail { customer_name: string | null; customer_phone: string | null; address: string | null; product_name: string | null; bill_no: string | null; source: string | null }
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   proposed: { label: "รอยืนยัน", cls: "bg-amber-100 text-amber-700 border-amber-200" },
@@ -30,7 +31,7 @@ export default function TechQueueView({ highlightDate, reloadKey }: { highlightD
   const supabase = createClient();
   const [teams, setTeams] = useState<Team[]>([]);
   const [appts, setAppts] = useState<Appt[]>([]);
-  const [jobs, setJobs] = useState<Record<string, string>>({});
+  const [jobs, setJobs] = useState<Record<string, JobDetail>>({});
   const [loading, setLoading] = useState(true);
 
   async function load() {
@@ -48,9 +49,9 @@ export default function TechQueueView({ highlightDate, reloadKey }: { highlightD
     setAppts(apps);
     const jobIds = Array.from(new Set(apps.map((a) => a.job_id).filter(Boolean))) as string[];
     if (jobIds.length) {
-      const { data: js } = await supabase.from("install_jobs").select("job_no, customer_name").in("job_no", jobIds);
-      const m: Record<string, string> = {};
-      (js ?? []).forEach((j: { job_no: string; customer_name: string | null }) => { m[j.job_no] = j.customer_name ?? ""; });
+      const { data: js } = await supabase.from("install_jobs").select("job_no,customer_name,customer_phone,address,product_name,bill_no,source").in("job_no", jobIds);
+      const m: Record<string, JobDetail> = {};
+      (js ?? []).forEach((j: JobDetail & { job_no: string }) => { m[j.job_no] = j; });
       setJobs(m);
     } else setJobs({});
     setLoading(false);
@@ -110,14 +111,8 @@ export default function TechQueueView({ highlightDate, reloadKey }: { highlightD
                 upcoming.map((a) => {
                   const d = new Date(a.slot_start);
                   const st = STATUS[a.status] ?? STATUS.proposed;
-                  return (
-                    <div key={a.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
-                      <div className="w-14 shrink-0 text-slate-600 font-medium">{DAY_TH[d.getDay()]} {d.getDate()}/{d.getMonth() + 1}</div>
-                      <div className="w-24 shrink-0 text-slate-500 text-xs">{fmtTime(a.slot_start)}–{fmtTime(a.slot_end)}</div>
-                      <div className="flex-1 truncate text-slate-800 text-xs">{a.job_id ? (jobs[a.job_id] || a.job_id) : "—"}</div>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full border shrink-0 ${st.cls}`}>{st.label}</span>
-                    </div>
-                  );
+                  const job = a.job_id ? jobs[a.job_id] : null;
+                  return <div key={a.id} className="px-3 py-3 text-sm"><div className="flex flex-wrap items-start gap-2"><div className="w-16 shrink-0 font-medium text-slate-700">{DAY_TH[d.getDay()]} {d.getDate()}/{d.getMonth() + 1}<div className="mt-0.5 text-xs font-normal text-slate-400">{fmtTime(a.slot_start)}–{fmtTime(a.slot_end)}</div></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-1.5"><span className="font-semibold text-slate-900">{job?.customer_name || a.job_id || "งานภายใน"}</span>{job?.source === "bbps" ? <span className="rounded bg-orange-100 px-1.5 py-0.5 text-[9px] text-orange-700">BBPS</span> : null}</div><div className="mt-1 grid gap-x-3 gap-y-0.5 text-xs text-slate-500 sm:grid-cols-2"><span>สินค้า: {job?.product_name || "—"}</span><span>โทร: {job?.customer_phone || "—"}</span><span className="sm:col-span-2 line-clamp-2">สถานที่: {job?.address || "—"}</span></div>{a.job_id ? <a href={`/orders/${encodeURIComponent(a.job_id)}`} className="mt-2 inline-flex text-xs font-medium text-blue-600">เปิดรายละเอียดและใบสั่งงาน →</a> : null}</div><span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] ${st.cls}`}>{st.label}</span></div></div>;
                 })
               )}
             </div>

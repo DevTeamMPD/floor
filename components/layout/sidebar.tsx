@@ -13,6 +13,7 @@ const CORE_NAV: NavItem[] = [
   { href: "/sales-queue", icon: "🗓️", label: "จองคิว", roles: ["admin", "sales"] },
   { href: "/tech-queue", icon: "👷", label: "คิวทีมช่าง", roles: ["admin", "sales"] },
   { href: "/operations", icon: "📥", label: "ต้องตัดสินใจ", roles: ["admin", "head_technician"] },
+  { href: "/warehouse", icon: "📦", label: "เตรียมสินค้า", roles: ["admin", "warehouse"] },
   { href: "/appointments", icon: "📅", label: "ปฏิทินทีม", roles: ["admin", "head_technician"] },
   { href: "/pipeline", icon: "📌", label: "งานกำลังดำเนินการ", roles: ["admin", "head_technician"] },
   { href: "/technicians", icon: "🔑", label: "ทีมช่าง / PIN", roles: ["admin", "head_technician"] },

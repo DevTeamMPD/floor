@@ -24,5 +24,5 @@ export const ROLE_HOME: Record<StaffRole, string> = {
   head_technician: "/operations",
   cs: "/cs-tracking",
   executive: "/exec",
-  warehouse: "/inventory",
+  warehouse: "/warehouse",
 };
