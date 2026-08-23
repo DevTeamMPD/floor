@@ -14,7 +14,7 @@ interface Job {
   job_no: string; source: string | null; bill_no: string | null; customer_name: string | null; customer_phone: string | null;
   address: string | null; location_url: string | null; product_name: string | null; survey_data: string | null;
   raw_payload: unknown; site_photos: string[] | null; pick_plan: unknown; status: string | null;
-  sku: string | null; product_skus: string[] | null; flag_note: string | null;
+  product_skus: string[] | null; flag_note: string | null;
 }
 interface Appointment { id: string; job_id: string; tech_id: string | null; slot_start: string; slot_end: string; status: string; notes: string | null; requirement: string | null }
 interface Team { id: string; name: string }
@@ -41,7 +41,7 @@ function legacyItems(value: unknown): DraftItem[] {
 }
 function skuItems(job: Job | null, materials: Material[]): DraftItem[] {
   if (!job) return [];
-  const skus = Array.from(new Set([...(job.product_skus ?? []), job.sku].filter((value): value is string => Boolean(value?.trim()))));
+  const skus = Array.from(new Set((job.product_skus ?? []).filter((value): value is string => Boolean(value?.trim()))));
   return skus.map((sku) => { const material = materials.find((row) => row.sku === sku); return { ...emptyItem("floor_material"), sku, itemName: material?.name || job.product_name || "วัสดุปูพื้น", unit: material?.unit || "แผ่น" }; });
 }
 function bbpsMaterialText(value: unknown) {
@@ -67,7 +67,7 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
     const { data: { user } } = await supabase.auth.getUser();
     const decodedJobNo = decodeURIComponent(jobNo);
     const [jobResult, apptResult, orderResult, profileResult, techResult, teamResult, materialResult] = await Promise.all([
-      supabase.from("install_jobs").select("job_no,source,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,raw_payload,site_photos,pick_plan,status,sku,product_skus,flag_note").eq("job_no", decodedJobNo).maybeSingle(),
+      supabase.from("install_jobs").select("job_no,source,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,raw_payload,site_photos,pick_plan,status,product_skus,flag_note").eq("job_no", decodedJobNo).maybeSingle(),
       supabase.from("appointments").select("id,job_id,tech_id,slot_start,slot_end,status,notes,requirement").eq("job_id", decodedJobNo).neq("status", "cancelled").order("slot_start", { ascending: false }),
       supabase.from("floor_work_orders").select("*").eq("job_no", decodedJobNo).order("created_at", { ascending: false }).limit(1).maybeSingle(),
       user ? supabase.from("floor_staff_profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
@@ -158,7 +158,7 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
     <div className="grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
       <div className="space-y-5">
         <Card title="1. ข้อมูลลูกค้าและนัดหมาย" subtitle="ข้อมูลต้นทางจากฝ่ายขายหรือ BBPS">
-          <div className="grid gap-4 sm:grid-cols-2"><Field label="ลูกค้า" value={job.customer_name} /><Field label="เบอร์โทร" value={job.customer_phone ? <a href={`tel:${job.customer_phone}`} className="text-blue-600">{job.customer_phone}</a> : null} /><Field label="วันติดตั้ง" value={thaiDate(appointment.slot_start)} /><Field label="สินค้า / ขอบเขตงาน" value={job.product_name || appointment.requirement} /><Field label="SKU จากต้นทาง" value={[...(job.product_skus ?? []), job.sku].filter(Boolean).join(", ")} /><Field label="แหล่งงาน" value={job.source === "bbps" ? "BBPS CRM" : "ฝ่ายขาย FloorNow"} /><div className="sm:col-span-2"><Field label="สถานที่ติดตั้ง" value={job.address} /></div>{job.location_url ? <a href={job.location_url} target="_blank" rel="noreferrer" className="w-fit rounded-xl bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700">📍 เปิดแผนที่</a> : null}</div>
+          <div className="grid gap-4 sm:grid-cols-2"><Field label="ลูกค้า" value={job.customer_name} /><Field label="เบอร์โทร" value={job.customer_phone ? <a href={`tel:${job.customer_phone}`} className="text-blue-600">{job.customer_phone}</a> : null} /><Field label="วันติดตั้ง" value={thaiDate(appointment.slot_start)} /><Field label="สินค้า / ขอบเขตงาน" value={job.product_name || appointment.requirement} /><Field label="SKU จากต้นทาง" value={(job.product_skus ?? []).join(", ")} /><Field label="แหล่งงาน" value={job.source === "bbps" ? "BBPS CRM" : "ฝ่ายขาย FloorNow"} /><div className="sm:col-span-2"><Field label="สถานที่ติดตั้ง" value={job.address} /></div>{job.location_url ? <a href={job.location_url} target="_blank" rel="noreferrer" className="w-fit rounded-xl bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700">📍 เปิดแผนที่</a> : null}</div>
         </Card>
         <Card title="2. รายละเอียดหน้างาน" subtitle="ข้อมูลสำรวจและรูปทั้งหมดที่ฝ่ายขายบันทึก">
           <div className="grid gap-3 sm:grid-cols-2">{Object.entries(survey).filter(([key, value]) => key !== "photos" && value !== "" && value != null && (!Array.isArray(value) || value.length)).map(([key, value]) => <Field key={key} label={key} value={Array.isArray(value) ? value.join(", ") : String(value)} />)}</div>
