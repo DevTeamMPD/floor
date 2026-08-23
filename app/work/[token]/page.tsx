@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 
 interface WorkAssignment {
   assignmentId: string; isLead: boolean; firstOpenedAt: string | null; lastOpenedAt: string | null;
@@ -11,6 +12,14 @@ interface WorkAssignment {
   customerPhone: string | null; address: string | null; locationUrl: string | null; productName: string | null;
   surveyData: string | null; pickPlan: unknown;
 }
+interface ResponsibleTechnician {
+  id: string;
+  is_lead: boolean;
+  first_opened_at: string | null;
+  acknowledged_at: string | null;
+  technician: { name: string | null; phone: string | null; is_team_lead: boolean | null } | null;
+}
+interface DetailJob { raw_payload: unknown; site_photos: string[] | null; survey_data: string | null }
 interface Workspace {
   technician: { id: string; name: string; phone: string | null; teamId: string | null; teamName: string | null; isTeamLead: boolean };
   assignments: WorkAssignment[];
@@ -60,6 +69,29 @@ function PickPlanDetails({ value }: { value: unknown }) {
     {plan?.note ? <div className="mt-3 whitespace-pre-wrap rounded-lg bg-white px-3 py-2 text-xs text-slate-700">{plan.note}</div> : null}
   </section>;
 }
+function parseJsonObject(value: unknown): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+function textOf(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div><div className="text-xs font-medium text-slate-400">{label}</div><div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{children || "—"}</div></div>;
+}
+function WorkSection({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+  return <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+    <div className="mb-4 flex items-start justify-between gap-3">
+      <div><h3 className="text-sm font-semibold text-slate-900">{title}</h3>{subtitle ? <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p> : null}</div>
+    </div>
+    {children}
+  </section>;
+}
 
 export default function TechnicianWorkspacePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
@@ -69,6 +101,8 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   const [pin, setPin] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [selected, setSelected] = useState<WorkAssignment | null>(null);
+  const [responsibles, setResponsibles] = useState<ResponsibleTechnician[]>([]);
+  const [detailJob, setDetailJob] = useState<DetailJob | null>(null);
   const [saving, setSaving] = useState(false);
   const pinStorageKey = `floor-work-pin:${token}`;
 
@@ -115,6 +149,8 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
 
   async function openWork(a: WorkAssignment) {
     setSelected(a);
+    setResponsibles([]);
+    setDetailJob(null);
     await supabase.rpc("record_technician_work_event", {
       p_token: token,
       p_pin: pin.trim(),
@@ -122,6 +158,25 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       p_event_type: "opened",
       p_user_agent: navigator.userAgent,
     });
+    const detailTasks: PromiseLike<unknown>[] = [
+      supabase
+        .from("appointment_technicians")
+        .select("id,is_lead,first_opened_at,acknowledged_at,technician:floor_technicians(name,phone,is_team_lead)")
+        .eq("appointment_id", a.appointmentId)
+        .eq("is_active", true)
+        .then(({ data }) => setResponsibles((data ?? []) as unknown as ResponsibleTechnician[])),
+    ];
+    if (a.jobNo) {
+      detailTasks.push(
+        supabase
+          .from("install_jobs")
+          .select("raw_payload,site_photos,survey_data")
+          .eq("job_no", a.jobNo)
+          .maybeSingle()
+          .then(({ data }) => setDetailJob((data ?? null) as DetailJob | null))
+      );
+    }
+    await Promise.all(detailTasks.map((task) => Promise.resolve(task)));
     void load(pin);
   }
 
@@ -200,19 +255,116 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       </div>
     </div>
 
-    {selected ? <div className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center" onClick={() => setSelected(null)}>
-      <div className="bg-white w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="p-5 border-b flex justify-between"><div><div className="text-xs text-slate-500">{thaiDate(selected.slotStart)}</div><h2 className="font-semibold mt-1">{selected.customerName ?? selected.jobNo ?? "งานติดตั้ง"}</h2><div className="text-sm text-blue-700">{time(selected.slotStart)}–{time(selected.slotEnd)} น.</div></div><button onClick={() => setSelected(null)} aria-label="ปิด" className="text-xl text-slate-400">×</button></div>
-        <div className="p-5 space-y-4 text-sm">
-          <div className="grid grid-cols-2 gap-3"><div><div className="text-xs text-slate-400">ทีม</div>{selected.teamName ?? "—"}</div><div><div className="text-xs text-slate-400">เลขบิล</div>{selected.billNo ?? "—"}</div></div>
-          {selected.customerPhone ? <div><div className="text-xs text-slate-400">เบอร์ลูกค้า</div><a className="text-blue-600" href={`tel:${selected.customerPhone}`}>{selected.customerPhone}</a></div> : null}
-          {selected.address ? <div><div className="text-xs text-slate-400">ที่อยู่หน้างาน</div><div className="whitespace-pre-wrap">{selected.address}</div></div> : null}
-          {selected.locationUrl ? <a href={selected.locationUrl} target="_blank" rel="noopener noreferrer" className="block text-center border border-blue-200 text-blue-700 rounded-lg py-2">📍 เปิด Google Maps</a> : null}
-          <div><div className="text-xs text-slate-400">สเปก / Requirement</div><div className="whitespace-pre-wrap">{selected.productName ?? selected.requirement ?? "—"}</div></div>
-          {selected.notes ? <div><div className="text-xs text-slate-400">หมายเหตุ</div><div className="whitespace-pre-wrap">{selected.notes}</div></div> : null}
-          <PickPlanDetails value={selected.pickPlan} />
+    {selected ? <div className="fixed inset-0 z-50 bg-slate-950/55 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setSelected(null)}>
+      <div className="bg-slate-50 w-full sm:max-w-4xl max-h-[96vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-5 py-4 backdrop-blur">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs font-medium text-blue-600">FloorNow · ใบสั่งงานกลาง</div>
+              <h2 className="mt-1 truncate text-xl font-semibold text-slate-950">{selected.customerName ?? selected.jobNo ?? "งานติดตั้ง"}</h2>
+              <div className="mt-1 text-sm text-slate-500">
+                งาน #{selected.jobNo ?? "—"} · {thaiDate(selected.slotStart)} · {time(selected.slotStart)}–{time(selected.slotEnd)} น.
+              </div>
+            </div>
+            <button onClick={() => setSelected(null)} aria-label="ปิด" className="rounded-full p-2 text-2xl leading-none text-slate-400 hover:bg-slate-100">×</button>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600">ฝ่ายขาย: กรอกข้อมูล</span>
+            <span className="rounded-full border border-blue-200 bg-blue-600 px-3 py-1.5 text-xs font-medium text-white">หัวหน้าช่าง: ตรวจ/จ่ายงาน</span>
+            <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600">ทีมช่าง: รับทราบ/อัปเดต</span>
+            <span className={`ml-auto rounded-full px-3 py-1.5 text-xs font-medium ${selected.acknowledgedAt ? "bg-emerald-100 text-emerald-700" : selected.firstOpenedAt ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
+              {selected.acknowledgedAt ? "รับทราบแล้ว" : selected.firstOpenedAt ? "เปิดใบงานแล้ว" : "ยังไม่รับทราบ"}
+            </span>
+          </div>
         </div>
-        <div className="p-4 border-t"><button onClick={acknowledge} disabled={saving || Boolean(selected.acknowledgedAt)} className="w-full rounded-xl py-3 bg-emerald-600 text-white font-medium disabled:bg-emerald-100 disabled:text-emerald-700">{selected.acknowledgedAt ? "✓ รับทราบงานแล้ว" : saving ? "กำลังบันทึก…" : "รับทราบงาน"}</button></div>
+
+        <div className="grid gap-4 p-4 sm:grid-cols-[1.35fr_0.85fr] sm:p-5">
+          <WorkSection title="📍 ข้อมูลงานที่ฝ่ายขายยืนยันแล้ว" subtitle="ข้อมูลหลักที่ช่างต้องใช้ก่อนออกงาน">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="ลูกค้า">{selected.customerName}</Field>
+              <Field label="เบอร์โทร">{selected.customerPhone ? <a href={`tel:${selected.customerPhone}`} className="text-blue-600 hover:underline">{selected.customerPhone}</a> : "—"}</Field>
+              <Field label="สินค้า / สเปก">{selected.productName ?? selected.requirement}</Field>
+              <Field label="เลขบิล / แหล่งที่มา">{[selected.billNo, selected.source === "bbps" ? "งาน BBPS" : selected.source].filter(Boolean).join(" · ")}</Field>
+              <div className="sm:col-span-2"><Field label="ที่อยู่หน้างาน">{selected.address}</Field></div>
+              {selected.locationUrl ? <div className="sm:col-span-2"><a href={selected.locationUrl} target="_blank" rel="noopener noreferrer" className="inline-flex rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100">📍 เปิด Google Maps</a></div> : null}
+              {selected.notes ? <div className="sm:col-span-2"><Field label="หมายเหตุคิว / หัวหน้าช่าง">{selected.notes}</Field></div> : null}
+            </div>
+          </WorkSection>
+
+          <WorkSection title="👥 ผู้รับผิดชอบ" subtitle="หลักฐานเปิดใบงานและรับทราบงาน">
+            <div className="space-y-2">
+              {(responsibles.length ? responsibles : [{
+                id: selected.assignmentId,
+                is_lead: selected.isLead,
+                first_opened_at: selected.firstOpenedAt,
+                acknowledged_at: selected.acknowledgedAt,
+                technician: { name: workspace.technician.name, phone: workspace.technician.phone, is_team_lead: workspace.technician.isTeamLead },
+              }]).map((r) => (
+                <div key={r.id} className="flex items-center gap-3 rounded-xl bg-slate-50 p-3">
+                  <div className="grid h-9 w-9 place-items-center rounded-full bg-blue-100 text-sm font-semibold text-blue-700">{(r.technician?.name ?? "ช").slice(0, 1)}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-slate-900">{r.technician?.name ?? "ไม่ระบุชื่อ"}{r.is_lead ? " · ผู้รับผิดชอบหลัก" : ""}</div>
+                    <div className="text-xs text-slate-500">{r.technician?.is_team_lead ? "หัวหน้าทีม" : "ช่างติดตั้ง"}{r.technician?.phone ? ` · ${r.technician.phone}` : ""}</div>
+                  </div>
+                  <div className={`rounded-lg px-2 py-1 text-xs ${r.acknowledged_at ? "bg-emerald-100 text-emerald-700" : r.first_opened_at ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
+                    {r.acknowledged_at ? "รับทราบ" : r.first_opened_at ? "เปิดแล้ว" : "ยังไม่เปิด"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </WorkSection>
+
+          <div className="space-y-4">
+            <PickPlanDetails value={selected.pickPlan} />
+            {(() => {
+              const survey = parseJsonObject(detailJob?.survey_data ?? selected.surveyData);
+              const photos = Array.isArray(survey?.photos) ? survey.photos.map(textOf).filter(Boolean) : [];
+              if (!survey && !photos.length) return null;
+              return <WorkSection title="🖼 ภาพหน้างานและข้อมูลที่ฝ่ายขายกรอก">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="พื้นที่ติดตั้ง">{textOf(survey?.areaSqm) ? `${textOf(survey?.areaSqm)} ตร.ม.` : "—"}</Field>
+                  <Field label="สภาพพื้น">{textOf(survey?.floorCondition) || "—"}</Field>
+                  <div className="sm:col-span-2"><Field label="หมายเหตุสำรวจ">{textOf(survey?.notes) || "—"}</Field></div>
+                </div>
+                {photos.length ? <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {photos.map((path, index) => {
+                    const url = path.startsWith("http") ? path : supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl;
+                    return <a key={path} href={url} target="_blank" rel="noopener noreferrer" className="block aspect-video overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={url} alt={`ภาพหน้างาน ${index + 1}`} className="h-full w-full object-cover" />
+                    </a>;
+                  })}
+                </div> : null}
+              </WorkSection>;
+            })()}
+            {selected.source === "bbps" ? <BbpsWorkOrderDetails rawPayload={detailJob?.raw_payload} /> : null}
+          </div>
+
+          <div className="space-y-4">
+            <WorkSection title="✅ ตรวจรับและปิดงาน" subtitle="เกณฑ์ที่ต้องเคลียร์ก่อนส่งมอบ">
+              <div className="space-y-2 text-sm text-slate-700">
+                <label className="flex items-center gap-2"><input type="checkbox" readOnly checked={Boolean(selected.acknowledgedAt)} /> ทีมช่างรับทราบงานแล้ว</label>
+                <label className="flex items-center gap-2"><input type="checkbox" readOnly checked={Boolean(selected.locationUrl || selected.address)} /> มีพิกัด/ที่อยู่สำหรับเดินทาง</label>
+                <label className="flex items-center gap-2"><input type="checkbox" readOnly checked={Boolean(selected.productName || selected.requirement)} /> มีสเปกงานติดตั้ง</label>
+                <label className="flex items-center gap-2"><input type="checkbox" readOnly checked={Boolean(selected.pickPlan)} /> มีใบสั่งหยิบของ/วัสดุ</label>
+              </div>
+            </WorkSection>
+
+            <WorkSection title="📸 อัปเดตหน้างานวันนี้" subtitle="สถานะเต็มจะไปต่อในแอปพนักงาน background GPS">
+              <div className="space-y-2 text-sm text-slate-700">
+                {["กำลังเดินทาง", "ถึงบ้านลูกค้าแล้ว", "กำลังติดตั้ง", "ติดตั้งงานเสร็จสมบูรณ์", "ลูกค้าเซ็นรับงาน"].map((label) => (
+                  <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-500">{label}</div>
+                ))}
+              </div>
+            </WorkSection>
+          </div>
+        </div>
+
+        <div className="sticky bottom-0 border-t border-slate-200 bg-white p-4">
+          <button onClick={acknowledge} disabled={saving || Boolean(selected.acknowledgedAt)} className="w-full rounded-xl bg-emerald-600 py-3 font-medium text-white disabled:bg-emerald-100 disabled:text-emerald-700">
+            {selected.acknowledgedAt ? "✓ รับทราบงานแล้ว" : saving ? "กำลังบันทึก…" : "รับทราบงาน"}
+          </button>
+        </div>
       </div>
     </div> : null}
   </main>;
