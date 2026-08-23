@@ -3,13 +3,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_PREFIXES = ["/login", "/auth", "/work", "/dispatch", "/track", "/eval", "/api"];
 const ROLE_ACCESS: Record<string, string[]> = {
-  sales: ["/", "/sales-queue", "/share/queue", "/tech-queue"],
-  head_technician: ["/", "/operations", "/appointments", "/pipeline", "/technicians", "/ncr"],
+  sales: ["/", "/sales-queue", "/share/queue", "/tech-queue", "/orders"],
+  head_technician: ["/", "/operations", "/orders", "/appointments", "/pipeline", "/technicians", "/ncr"],
   cs: ["/", "/cs-tracking", "/dashboard"],
   executive: ["/", "/exec", "/dashboard"],
-  warehouse: ["/", "/inventory", "/remnants", "/waste-cost", "/bom", "/purchase-orders"],
+  warehouse: ["/", "/warehouse", "/orders", "/inventory", "/remnants", "/waste-cost", "/bom", "/purchase-orders"],
 };
-const ROLE_HOME: Record<string, string> = { sales: "/sales-queue", head_technician: "/operations", cs: "/cs-tracking", executive: "/exec", warehouse: "/inventory" };
+const ROLE_HOME: Record<string, string> = { sales: "/sales-queue", head_technician: "/operations", cs: "/cs-tracking", executive: "/exec", warehouse: "/warehouse" };
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });

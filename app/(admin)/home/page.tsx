@@ -3,6 +3,7 @@ import { getCurrentStaff } from "@/lib/staff-server";
 
 const ACTIONS = [
   { href: "/operations", icon: "📥", title: "งานที่ต้องตัดสินใจ", desc: "ตรวจข้อมูล ยืนยันคิว จ่ายช่าง และปล่อยใบงาน" },
+  { href: "/warehouse", icon: "📦", title: "เตรียมสินค้าที่คลัง", desc: "รับใบสั่งงาน บันทึกจำนวนหยิบจริงและรูปหลักฐาน" },
   { href: "/sales-queue", icon: "🗓️", title: "จองคิวฝ่ายขาย", desc: "ดูคิวและสร้างงานขายตรง" },
   { href: "/appointments", icon: "📅", title: "ปฏิทินทีม", desc: "ดูคิวทั้งหมดและจัดทีมช่าง" },
   { href: "/cs-tracking", icon: "📞", title: "CS รอติดตาม", desc: "ติดตามลูกค้าหลังติดตั้ง" },

@@ -624,6 +624,7 @@ export default function ShareQueuePage() {
                       {detail.job_id && <span>เลขงาน <strong className="font-medium text-slate-700">{detail.job_id}</strong></span>}
                       {billNo && <span>เลขบิล <strong className="font-medium text-slate-700">{billNo}</strong></span>}
                     </div>
+                    {detail.job_id ? <a href={`/orders/${encodeURIComponent(detail.job_id)}`} className="mt-3 inline-flex rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">เปิดใบสั่งงานและสถานะการส่งต่อ</a> : null}
                   </div>
                   <button onClick={() => setDetail(null)} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-2xl text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="ปิด">×</button>
                 </div>

@@ -804,7 +804,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
               )}
 
               {/* S2: ใบสั่งงาน (หัวหน้าช่าง) — ของที่ต้องหยิบ + คำนวณความยาว */}
-              {job.stage === 2 && (
+              {false && job.stage === 2 && (
                 <div className="border-2 border-amber-300 rounded-xl p-4 bg-amber-50 space-y-3">
                   <p className="text-sm font-semibold text-amber-900">🧰 ใบสั่งงาน (หัวหน้าช่างระบุของที่ต้องหยิบ)</p>
 
@@ -857,9 +857,9 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
               {/* S2: ส่งต่อไป Operations เพื่อจ่ายงานรายบุคคล */}
               {job.stage === 2 && (
                 <div className="border rounded-xl p-4 bg-violet-50 space-y-2">
-                  <p className="text-sm font-semibold text-violet-800">📋 ปล่อยใบงานให้ทีมช่าง</p>
-                  <p className="text-xs text-violet-600">ใช้หน้า “ต้องตัดสินใจ” เพื่อจ่ายช่างรายบุคคล ระบุจำนวนแผ่น และปล่อยงานเข้าลิงก์พนักงานเพียงจุดเดียว</p>
-                  <a href="/operations" className="block w-full rounded-lg bg-violet-600 py-2 text-center text-sm font-semibold text-white hover:bg-violet-700">ไปหน้าต้องตัดสินใจ</a>
+                  <p className="text-sm font-semibold text-violet-800">📋 ใบสั่งงานกลาง FloorNow</p>
+                  <p className="text-xs text-violet-600">ตรวจข้อมูลลูกค้า จ่ายช่าง ระบุวัสดุ/อุปกรณ์ และส่งต่อคลังจากเอกสารเดียว</p>
+                  <a href={`/orders/${encodeURIComponent(job.jobNo)}`} className="block w-full rounded-lg bg-violet-600 py-2 text-center text-sm font-semibold text-white hover:bg-violet-700">เปิดใบสั่งงานฉบับเต็ม</a>
                 </div>
               )}
 

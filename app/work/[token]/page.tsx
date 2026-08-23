@@ -25,6 +25,8 @@ interface WorkProgressEvent {
   customerSignedName: string | null; customerSignaturePath: string | null; occurredAt: string;
 }
 interface WorkProgress { plannedSheetCount: number | null; pickedSheetCount: number | null; events: WorkProgressEvent[] }
+interface CentralWorkItem { id: string; category: string; itemName: string; sku: string | null; specification: string | null; plannedQty: number; actualQty: number | null; unit: string; sourceType: string; note: string | null }
+interface CentralWorkOrder { id: string; status: string; revision: number; note: string | null; warehouseAssignee: string | null; warehouseAcceptedAt: string | null; warehouseCompletedAt: string | null; isLead: boolean; items: CentralWorkItem[]; events: { id: number; eventType: string; actorName: string; note: string | null; photoPaths: string[]; occurredAt: string }[] }
 interface Workspace {
   technician: { id: string; name: string; phone: string | null; teamId: string | null; teamName: string | null; isTeamLead: boolean };
   assignments: WorkAssignment[];
@@ -148,6 +150,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   const [responsibles, setResponsibles] = useState<ResponsibleTechnician[]>([]);
   const [detailJob, setDetailJob] = useState<DetailJob | null>(null);
   const [workProgress, setWorkProgress] = useState<WorkProgress | null>(null);
+  const [centralWorkOrder, setCentralWorkOrder] = useState<CentralWorkOrder | null>(null);
   const [statusFiles, setStatusFiles] = useState<File[]>([]);
   const [statusNote, setStatusNote] = useState("");
   const [pickedSheetCount, setPickedSheetCount] = useState("");
@@ -252,6 +255,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     setResponsibles([]);
     setDetailJob(null);
     setWorkProgress(null);
+    setCentralWorkOrder(null);
     setStatusFiles([]);
     setStatusNote("");
     setPickedSheetCount("");
@@ -281,6 +285,10 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
             setWorkProgress(progress);
             if (progress?.pickedSheetCount != null) setPickedSheetCount(String(progress.pickedSheetCount));
           })
+      );
+      detailTasks.push(
+        supabase.rpc("get_technician_work_order_v2", { p_token: token, p_pin: pin.trim(), p_assignment_id: a.assignmentId })
+          .then(({ data }) => setCentralWorkOrder((data ?? null) as CentralWorkOrder | null))
       );
     }
     if (a.jobNo) {
@@ -520,6 +528,11 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
               </WorkSection>;
             })()}
             {selected.source === "bbps" ? <BbpsWorkOrderDetails rawPayload={detailJob?.raw_payload} /> : null}
+            {centralWorkOrder ? <WorkSection title="📦 ใบสั่งงานที่คลังเตรียมให้" subtitle={`Revision ${centralWorkOrder.revision} · ${centralWorkOrder.warehouseAssignee ? `ผู้เตรียม ${centralWorkOrder.warehouseAssignee}` : "ยังไม่มีผู้รับงานคลัง"}`}>
+              <div className="mb-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800">สถานะ: {{ head_review: "รอหัวหน้าช่างตรวจ", returned_sales: "ส่งกลับฝ่ายขาย", warehouse_waiting: "รอคลังรับงาน", warehouse_preparing: "กำลังเตรียมสินค้า", ready_to_install: "รอติดตั้ง", installing: "กำลังติดตั้ง", waiting_cs: "รอ CS โทรประเมิน", closed: "ปิดงานแล้ว", cancelled: "ยกเลิก" }[centralWorkOrder.status] ?? centralWorkOrder.status}</div>
+              <div className="space-y-2">{centralWorkOrder.items.map((item) => <div key={item.id} className="rounded-xl border border-slate-200 p-3 text-sm"><div className="font-medium text-slate-900">{item.itemName}{item.sku ? ` · ${item.sku}` : ""}</div><div className="mt-1 text-xs text-slate-500">{item.specification || "ไม่ระบุสเปก"} · ตามแผน {item.plannedQty} {item.unit} · หยิบจริง {item.actualQty ?? "—"} {item.unit}</div>{item.note ? <div className="mt-1 text-xs text-amber-700">{item.note}</div> : null}</div>)}</div>
+              {centralWorkOrder.note ? <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">หมายเหตุ: {centralWorkOrder.note}</div> : null}
+            </WorkSection> : null}
           </div>
 
           <div className="space-y-4">
@@ -528,7 +541,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
                 <label className="flex items-center gap-2"><input type="checkbox" readOnly checked={Boolean(selected.acknowledgedAt)} /> ทีมช่างรับทราบงานแล้ว</label>
                 <label className="flex items-center gap-2"><input type="checkbox" readOnly checked={Boolean(selected.locationUrl || selected.address)} /> มีพิกัด/ที่อยู่สำหรับเดินทาง</label>
                 <label className="flex items-center gap-2"><input type="checkbox" readOnly checked={Boolean(selected.productName || selected.requirement)} /> มีสเปกงานติดตั้ง</label>
-                <label className="flex items-center gap-2"><input type="checkbox" readOnly checked={Boolean(selected.pickPlan)} /> มีใบสั่งหยิบของ/วัสดุ</label>
+                <label className="flex items-center gap-2"><input type="checkbox" readOnly checked={Boolean(centralWorkOrder?.items.length || selected.pickPlan)} /> มีใบสั่งงานและรายการวัสดุ/อุปกรณ์</label>
               </div>
             </WorkSection>
 
@@ -540,6 +553,8 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
                 const currentIndex = WORK_STEPS.findIndex((step) => step.status === currentStatus);
                 const next = WORK_STEPS[currentIndex + 1];
                 const signed = events.find((event) => event.status === "customer_signed");
+                const workReady = !centralWorkOrder || centralWorkOrder.status === "ready_to_install" || centralWorkOrder.status === "installing";
+                const canStart = currentStatus || !centralWorkOrder || (centralWorkOrder.status === "ready_to_install" && centralWorkOrder.isLead);
                 return <div className="space-y-4">
                   <div className="space-y-2">{WORK_STEPS.map((step, index) => {
                     const event = events.find((item) => item.status === step.status);
@@ -553,14 +568,16 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
                     </div>;
                   })}</div>
 
-                  {next && selected.acknowledgedAt ? <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
-                    <div className="text-sm font-semibold text-blue-950">ขั้นต่อไป: {next.label}</div>
+                  {next && selected.acknowledgedAt && workReady && canStart ? <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+                    <div className="text-sm font-semibold text-blue-950">ขั้นต่อไป: {next.status === "travelling" && centralWorkOrder ? "รับงานติดตั้งและเริ่มเดินทาง" : next.label}</div>
                     {next.status === "travelling" ? <div className="mt-3"><label className="text-xs font-medium text-blue-800">จำนวนแผ่นที่หยิบจริง *</label><div className="mt-1 flex items-center gap-2"><input type="number" min={0} step={1} value={pickedSheetCount} onChange={(event) => setPickedSheetCount(event.target.value)} placeholder="จำนวนแผ่น" className="min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm" /><span className="text-xs text-blue-700">แผน {workProgress?.plannedSheetCount ?? "—"} แผ่น</span></div></div> : null}
                     <textarea value={statusNote} onChange={(event) => setStatusNote(event.target.value)} rows={2} placeholder="หมายเหตุ (ถ้ามี)" className="mt-3 w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm" />
                     <label className="mt-3 block cursor-pointer rounded-xl border border-dashed border-blue-300 bg-white px-3 py-3 text-center text-sm font-medium text-blue-700">📷 ถ่ายรูป / เลือกรูป<input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(event) => setStatusFiles(Array.from(event.target.files ?? []))} /></label>
                     {statusFiles.length ? <div className="mt-2 text-xs text-blue-700">เลือกรูปแล้ว {statusFiles.length} รูป</div> : null}
-                    <button onClick={() => void updateWorkStatus()} disabled={saving} className="mt-3 w-full rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving ? "กำลังบันทึก…" : next.button}</button>
+                    <button onClick={() => void updateWorkStatus()} disabled={saving} className="mt-3 w-full rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving ? "กำลังบันทึก…" : next.status === "travelling" && centralWorkOrder ? "รับงานติดตั้ง" : next.button}</button>
                   </div> : null}
+                  {next && selected.acknowledgedAt && !workReady ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">ยังเริ่มงานไม่ได้: ใบสั่งงานอยู่สถานะ {{ head_review: "รอหัวหน้าช่างตรวจ", warehouse_waiting: "รอคลังรับงาน", warehouse_preparing: "กำลังเตรียมสินค้า" }[centralWorkOrder?.status ?? ""] ?? centralWorkOrder?.status}</div> : null}
+                  {next && selected.acknowledgedAt && workReady && !canStart ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">หัวหน้าทีมที่ได้รับมอบหมายต้องกด “รับงานติดตั้ง” ก่อน</div> : null}
                   {next && !selected.acknowledgedAt ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">กดรับทราบงานก่อนเริ่มอัปเดตสถานะ</div> : null}
                   {currentStatus === "completed" && !signed ? <div className="rounded-xl border border-violet-200 bg-violet-50 p-3"><div className="mb-3 text-sm font-semibold text-violet-950">ลูกค้าเซ็นรับงาน</div><CustomerSignature busy={saving} onSubmit={saveCustomerSignature} /></div> : null}
                   {signed ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-700">✓ ลูกค้า {signed.customerSignedName} เซ็นรับงานแล้ว เวลา {new Date(signed.occurredAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })}</div> : null}
