@@ -50,4 +50,5 @@ export const secureStorage = {
 };
 
 export const DEVICE_TOKEN_KEY = "floornow-device-token";
+export const DEVICE_SECRET_KEY = "floornow-device-secret";
 export const ACTIVE_SESSION_KEY = "floornow-active-tracking-session";

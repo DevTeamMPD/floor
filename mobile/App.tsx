@@ -1,15 +1,13 @@
 import "./src/tracking-task";
 
-import type { Session } from "@supabase/supabase-js";
 import * as Application from "expo-application";
 import * as Device from "expo-device";
 import * as Location from "expo-location";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  AppState,
   Image,
   Linking,
   Modal,
@@ -28,10 +26,15 @@ import { config } from "./src/config";
 import {
   captureAndUploadStatusPhoto,
   extractCoordinates,
-  normalizeThaiPhone,
   uploadSignature,
 } from "./src/job-service";
-import { ACTIVE_SESSION_KEY, DEVICE_TOKEN_KEY, secureStorage } from "./src/secure-store";
+import { enrollWithPin, verifyPin } from "./src/pin-auth";
+import {
+  ACTIVE_SESSION_KEY,
+  DEVICE_SECRET_KEY,
+  DEVICE_TOKEN_KEY,
+  secureStorage,
+} from "./src/secure-store";
 import { supabase } from "./src/supabase";
 import { startBackgroundTracking, stopBackgroundTracking } from "./src/tracking-task";
 import type { JobStatus, MobileAssignment, MobileWorkspace } from "./src/types";
@@ -118,113 +121,187 @@ function Button({
   );
 }
 
-function LoginScreen({ onSession }: { onSession: (session: Session) => void }) {
-  const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState("");
-  const [sent, setSent] = useState(false);
+// ── PinInput: กรอก PIN 6 หลักแบบ dot ─────────────────────────────────────────
+
+function PinInput({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled: boolean }) {
+  const inputRef = useRef<TextInput>(null);
+  return (
+    <Pressable onPress={() => inputRef.current?.focus()} style={styles.pinRow} accessibilityRole="none">
+      {Array.from({ length: 6 }, (_, i) => (
+        <View key={i} style={[styles.pinCell, value.length === i && styles.pinCellActive]}>
+          <Text style={styles.pinDot}>{value[i] ? "●" : ""}</Text>
+        </View>
+      ))}
+      <TextInput
+        ref={inputRef}
+        value={value}
+        onChangeText={(t) => onChange(t.replace(/\D/g, "").slice(0, 6))}
+        keyboardType="number-pad"
+        maxLength={6}
+        editable={!disabled}
+        style={styles.pinHidden}
+        caretHidden
+      />
+    </Pressable>
+  );
+}
+
+// ── EnrollmentScreen: วาง URL → ตั้ง PIN ─────────────────────────────────────
+
+function EnrollmentScreen({ onEnrolled }: { onEnrolled: (deviceToken: string, deviceSecret: string) => void }) {
+  const [step, setStep] = useState<"link" | "pin" | "confirm">("link");
+  const [tokenText, setTokenText] = useState("");
+  const [personalToken, setPersonalToken] = useState("");
+  const [pin, setPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function sendOtp() {
-    setBusy(true);
-    const normalized = normalizeThaiPhone(phone);
-    const { error } = await supabase.auth.signInWithOtp({
-      phone: normalized,
-      options: { shouldCreateUser: true },
-    });
-    setBusy(false);
-    if (error) return Alert.alert("ส่ง OTP ไม่สำเร็จ", error.message);
-    setPhone(normalized);
-    setSent(true);
+  function validateLink() {
+    const token = tokenText.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i)?.[0];
+    if (!token) return Alert.alert("ลิงก์ไม่ถูกต้อง", "วางลิงก์หน้างานส่วนตัว /work/… หรือ UUID ที่หัวหน้าช่างส่งให้");
+    setPersonalToken(token);
+    setStep("pin");
   }
 
-  async function verifyOtp() {
-    setBusy(true);
-    const { data, error } = await supabase.auth.verifyOtp({ phone, token: otp.trim(), type: "sms" });
-    setBusy(false);
-    if (error || !data.session) return Alert.alert("OTP ไม่ถูกต้อง", error?.message ?? "กรุณาขอรหัสใหม่");
-    onSession(data.session);
+  function validatePin() {
+    if (pin.length !== 6) return Alert.alert("กรุณากรอก PIN ให้ครบ 6 หลัก");
+    setStep("confirm");
   }
+
+  async function confirmEnroll() {
+    if (confirmPin !== pin) {
+      setConfirmPin("");
+      return Alert.alert("PIN ไม่ตรงกัน", "กรุณากรอก PIN อีกครั้งให้ตรงกัน");
+    }
+    setBusy(true);
+    try {
+      const { deviceToken, deviceSecret } = await enrollWithPin(personalToken, pin);
+      onEnrolled(deviceToken, deviceSecret);
+    } catch (error) {
+      Alert.alert("ผูกบัญชีไม่สำเร็จ", errorMessage(error));
+      setConfirmPin("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.centered} keyboardShouldPersistTaps="handled">
+        <View style={styles.brandMark}><Text style={styles.brandMarkText}>FN</Text></View>
+        <Text style={styles.title}>ผูกบัญชีกับพนักงาน</Text>
+
+        {step === "link" && (
+          <>
+            <Text style={styles.subtitle}>ทำครั้งเดียวต่อเครื่อง จากนั้นระบบจะจำบัญชีนี้อย่างปลอดภัย</Text>
+            <View style={styles.card}>
+              <Text style={styles.label}>ลิงก์หน้างานส่วนตัว</Text>
+              <TextInput
+                value={tokenText}
+                onChangeText={setTokenText}
+                autoCapitalize="none"
+                placeholder="วางลิงก์ /work/… ที่หัวหน้าช่างส่งให้"
+                style={[styles.input, styles.multiline]}
+                multiline
+              />
+              <Button label="ถัดไป: ตั้ง PIN" onPress={validateLink} disabled={!tokenText.trim()} />
+            </View>
+          </>
+        )}
+
+        {step === "pin" && (
+          <>
+            <Text style={styles.subtitle}>ตั้ง PIN 6 หลัก สำหรับเข้าแอปครั้งถัดไป</Text>
+            <View style={styles.card}>
+              <Text style={styles.label}>PIN 6 หลัก (ตัวเลขเท่านั้น)</Text>
+              <PinInput value={pin} onChange={setPin} disabled={busy} />
+              <Button label="ถัดไป: ยืนยัน PIN" onPress={validatePin} disabled={pin.length !== 6} />
+              <Button label="‹ กลับ" tone="secondary" onPress={() => { setStep("link"); setPin(""); }} />
+            </View>
+          </>
+        )}
+
+        {step === "confirm" && (
+          <>
+            <Text style={styles.subtitle}>กรอก PIN อีกครั้งเพื่อยืนยัน</Text>
+            <View style={styles.card}>
+              <Text style={styles.label}>ยืนยัน PIN</Text>
+              <PinInput value={confirmPin} onChange={setConfirmPin} disabled={busy} />
+              <Button
+                label={busy ? "กำลังผูกบัญชี…" : "ยืนยันและผูกเครื่อง"}
+                onPress={confirmEnroll}
+                disabled={busy || confirmPin.length !== 6}
+              />
+              <Button label="‹ กลับ" tone="secondary" onPress={() => { setStep("pin"); setConfirmPin(""); }} disabled={busy} />
+            </View>
+          </>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+// ── PinScreen: ใส่ PIN ทุกครั้งที่เปิดแอป ─────────────────────────────────────
+
+function PinScreen({
+  deviceToken,
+  onVerified,
+  onReset,
+}: {
+  deviceToken: string;
+  onVerified: () => void;
+  onReset: () => void;
+}) {
+  const [pin, setPin] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [attempts, setAttempts] = useState(0);
+
+  async function verify() {
+    if (pin.length !== 6) return;
+    setBusy(true);
+    try {
+      await verifyPin(deviceToken, pin);
+      onVerified();
+    } catch (error) {
+      const msg = errorMessage(error);
+      const next = attempts + 1;
+      setAttempts(next);
+      setPin("");
+      if (msg.includes("ถูกรีเซ็ต")) {
+        Alert.alert("บัญชีถูกรีเซ็ต", "หัวหน้าช่างได้รีเซ็ต PIN แล้ว กรุณาผูกเครื่องใหม่", [
+          { text: "ผูกเครื่องใหม่", onPress: onReset },
+        ]);
+      } else {
+        Alert.alert("PIN ไม่ถูกต้อง", next >= 5 ? `ลองแล้ว ${next} ครั้ง — ถ้าลืม PIN ติดต่อหัวหน้าช่างรีเซ็ต` : `กรุณาลองใหม่ (ครั้งที่ ${next})`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (pin.length === 6 && !busy) void verify();
+  }, [pin]);
 
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.centered}>
         <View style={styles.brandMark}><Text style={styles.brandMarkText}>FN</Text></View>
         <Text style={styles.title}>FloorNow Worker</Text>
-        <Text style={styles.subtitle}>เข้าสู่ระบบด้วยเบอร์โทรศัพท์ของพนักงาน</Text>
+        <Text style={styles.subtitle}>ใส่ PIN 6 หลักเพื่อเข้าสู่ระบบ</Text>
         <View style={styles.card}>
-          <Text style={styles.label}>เบอร์โทรศัพท์</Text>
-          <TextInput
-            value={phone}
-            onChangeText={setPhone}
-            editable={!sent && !busy}
-            keyboardType="phone-pad"
-            placeholder="เช่น 0922563661"
-            style={styles.input}
-          />
-          {sent ? (
-            <>
-              <Text style={styles.label}>รหัส OTP 6 หลัก</Text>
-              <TextInput
-                value={otp}
-                onChangeText={setOtp}
-                keyboardType="number-pad"
-                maxLength={6}
-                placeholder="000000"
-                style={styles.input}
-              />
-              <Button label={busy ? "กำลังตรวจสอบ…" : "ยืนยัน OTP"} onPress={verifyOtp} disabled={busy || otp.length !== 6} />
-              <Button label="เปลี่ยนเบอร์โทร" onPress={() => { setSent(false); setOtp(""); }} tone="secondary" disabled={busy} />
-            </>
-          ) : (
-            <Button label={busy ? "กำลังส่ง…" : "ส่งรหัส OTP"} onPress={sendOtp} disabled={busy || phone.replace(/\D/g, "").length < 9} />
-          )}
+          <PinInput value={pin} onChange={setPin} disabled={busy} />
+          {busy && <ActivityIndicator style={{ marginTop: 8 }} />}
         </View>
+        <Pressable onPress={onReset} style={{ marginTop: 16 }}>
+          <Text style={styles.linkText}>ลืม PIN? ให้หัวหน้าช่างรีเซ็ต</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
 }
 
-function EnrollmentScreen({ onEnrolled }: { onEnrolled: (deviceToken: string) => void }) {
-  const [tokenText, setTokenText] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function enroll() {
-    const token = tokenText.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i)?.[0];
-    if (!token) return Alert.alert("ลิงก์ไม่ถูกต้อง", "วางลิงก์หน้างานส่วนตัวหรือ token ที่ได้รับจากหัวหน้าช่าง");
-    setBusy(true);
-    const { data, error } = await supabase.rpc("register_floor_technician_device", {
-      p_personal_token: token,
-      p_platform: Platform.OS,
-      p_device_name: Device.modelName ?? Device.deviceName ?? "ไม่ระบุอุปกรณ์",
-      p_app_version: Application.nativeApplicationVersion ?? "dev",
-    });
-    setBusy(false);
-    if (error || !data?.deviceToken) return Alert.alert("ผูกบัญชีไม่สำเร็จ", error?.message ?? "ไม่พบพนักงาน");
-    await secureStorage.setItem(DEVICE_TOKEN_KEY, data.deviceToken as string);
-    onEnrolled(data.deviceToken as string);
-  }
-
-  return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.centered}>
-        <Text style={styles.title}>ผูกบัญชีกับพนักงาน</Text>
-        <Text style={styles.subtitle}>ทำครั้งเดียวต่อเครื่อง จากนั้นระบบจะจำบัญชีนี้อย่างปลอดภัย</Text>
-        <View style={styles.card}>
-          <Text style={styles.label}>ลิงก์หน้างานส่วนตัว</Text>
-          <TextInput
-            value={tokenText}
-            onChangeText={setTokenText}
-            autoCapitalize="none"
-            placeholder="วางลิงก์ /work/… ที่หัวหน้าช่างส่งให้"
-            style={[styles.input, styles.multiline]}
-            multiline
-          />
-          <Button label={busy ? "กำลังผูกบัญชี…" : "ยืนยันเครื่องนี้"} onPress={enroll} disabled={busy || !tokenText.trim()} />
-        </View>
-      </View>
-    </SafeAreaView>
-  );
-}
+// ── PermissionScreen ──────────────────────────────────────────────────────────
 
 function PermissionScreen({ deviceToken, onReady }: { deviceToken: string; onReady: () => void }) {
   const [busy, setBusy] = useState(false);
@@ -260,7 +337,7 @@ function PermissionScreen({ deviceToken, onReady }: { deviceToken: string; onRea
         <Text style={styles.subtitle}>ใช้เฉพาะตั้งแต่กดเริ่มเดินทางจนลูกค้าเซ็นรับงาน และหยุดอัตโนมัติเมื่อปิดงาน</Text>
         <View style={styles.card}>
           <Text style={styles.permissionItem}>1. อนุญาตตำแหน่งแบบแม่นยำ</Text>
-          <Text style={styles.permissionItem}>2. เลือก “อนุญาตตลอดเวลา”</Text>
+          <Text style={styles.permissionItem}>2. เลือก "อนุญาตตลอดเวลา"</Text>
           <Text style={styles.permissionItem}>3. Android จะแสดง notification ระหว่างแชร์ตำแหน่ง</Text>
           <Button label={busy ? "กำลังตรวจสอบ…" : "เปิดใช้งาน Background GPS"} onPress={requestPermission} disabled={busy} />
         </View>
@@ -269,6 +346,8 @@ function PermissionScreen({ deviceToken, onReady }: { deviceToken: string; onRea
   );
 }
 
+// ── WorkOrderDetails ──────────────────────────────────────────────────────────
+
 function WorkOrderDetails({ payload }: { payload: unknown }) {
   const orders = workOrdersOf(payload);
   if (!orders.length) return null;
@@ -276,7 +355,9 @@ function WorkOrderDetails({ payload }: { payload: unknown }) {
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>ใบสั่งงาน BBPS</Text>
       {orders.map((order, index) => {
-        const photos = [...(order.design_images ?? []), ...(order.site_photos ?? [])].filter((url) => typeof url === "string" && url.startsWith("http"));
+        const photos = [...(order.design_images ?? []), ...(order.site_photos ?? [])].filter(
+          (url) => typeof url === "string" && url.startsWith("http"),
+        );
         const fields = [
           ["งานพื้น", order.task_floor],
           ["รายละเอียดงาน", order.task_details],
@@ -291,14 +372,25 @@ function WorkOrderDetails({ payload }: { payload: unknown }) {
         return (
           <View key={order.id ?? index} style={styles.workOrder}>
             <Text style={styles.workOrderTitle}>ใบสั่งงานครั้งที่ {order.seq ?? index + 1}</Text>
-            {fields.map(([label, value]) => <View key={label} style={styles.fact}><Text style={styles.factLabel}>{label}</Text><Text style={styles.factValue}>{value}</Text></View>)}
-            {photos.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>{photos.map((url) => <Image key={url} source={{ uri: url }} style={styles.photo} />)}</ScrollView> : null}
+            {fields.map(([label, value]) => (
+              <View key={label} style={styles.fact}>
+                <Text style={styles.factLabel}>{label}</Text>
+                <Text style={styles.factValue}>{value}</Text>
+              </View>
+            ))}
+            {photos.length ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
+                {photos.map((url) => <Image key={url} source={{ uri: url }} style={styles.photo} />)}
+              </ScrollView>
+            ) : null}
           </View>
         );
       })}
     </View>
   );
 }
+
+// ── SignatureModal ─────────────────────────────────────────────────────────────
 
 function SignatureModal({
   visible,
@@ -315,7 +407,10 @@ function SignatureModal({
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <SafeAreaView style={styles.safe}>
-        <View style={styles.modalHeader}><Text style={styles.title}>ลูกค้าเซ็นรับงาน</Text><Pressable onPress={onClose}><Text style={styles.close}>ปิด</Text></Pressable></View>
+        <View style={styles.modalHeader}>
+          <Text style={styles.title}>ลูกค้าเซ็นรับงาน</Text>
+          <Pressable onPress={onClose}><Text style={styles.close}>ปิด</Text></Pressable>
+        </View>
         <View style={styles.signatureBody}>
           <Text style={styles.label}>ชื่อผู้รับงาน</Text>
           <TextInput value={name} onChangeText={setName} placeholder="ชื่อ–นามสกุล" style={styles.input} />
@@ -337,53 +432,77 @@ function SignatureModal({
   );
 }
 
+// ── Main App ──────────────────────────────────────────────────────────────────
+
+type AppScreen = "booting" | "enrollment" | "pin" | "permission" | "workspace";
+
 export default function App() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [booting, setBooting] = useState(true);
+  const [screen, setScreen] = useState<AppScreen>("booting");
   const [deviceToken, setDeviceToken] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<MobileWorkspace | null>(null);
   const [selected, setSelected] = useState<MobileAssignment | null>(null);
-  const [permissionReady, setPermissionReady] = useState(false);
   const [pickedSheets, setPickedSheets] = useState("");
   const [plannedSheets, setPlannedSheets] = useState("");
   const [busy, setBusy] = useState(false);
   const [signatureOpen, setSignatureOpen] = useState(false);
 
+  // Boot: ตรวจว่ามี device_token ใน SecureStore ไหม
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setBooting(false);
+    secureStorage.getItem(DEVICE_TOKEN_KEY).then((token) => {
+      if (token) {
+        setDeviceToken(token);
+        setScreen("pin");
+      } else {
+        setScreen("enrollment");
+      }
     });
-    const { data } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") supabase.auth.startAutoRefresh();
-      else supabase.auth.stopAutoRefresh();
-    });
-    return () => { data.subscription.unsubscribe(); subscription.remove(); };
   }, []);
 
-  useEffect(() => {
-    if (!session) { setDeviceToken(null); setWorkspace(null); return; }
-    secureStorage.getItem(DEVICE_TOKEN_KEY).then(setDeviceToken);
-  }, [session]);
-
-  const loadWorkspace = useCallback(async () => {
-    if (!deviceToken) return;
-    const { data, error } = await supabase.rpc("get_floor_mobile_workspace", { p_device_token: deviceToken });
-    if (error || !data) return Alert.alert("โหลดงานไม่สำเร็จ", error?.message ?? "กรุณาลองใหม่");
+  const loadWorkspace = useCallback(async (token?: string) => {
+    const dt = token ?? deviceToken;
+    if (!dt) return;
+    const { data, error } = await supabase.rpc("get_floor_mobile_workspace", { p_device_token: dt });
+    if (error || !data) {
+      Alert.alert("โหลดงานไม่สำเร็จ", error?.message ?? "กรุณาลองใหม่");
+      return;
+    }
     const next = data as MobileWorkspace;
     setWorkspace(next);
-    setPermissionReady(next.device.backgroundPermission === "always");
+    if (!next.device.backgroundPermission || next.device.backgroundPermission !== "always") {
+      setScreen("permission");
+    } else {
+      setScreen("workspace");
+    }
     if (selected) {
       const updated = next.assignments.find((item) => item.assignmentId === selected.assignmentId) ?? null;
       setSelected(updated);
     }
   }, [deviceToken, selected]);
 
-  useEffect(() => { void loadWorkspace(); }, [deviceToken]);
+  // Enrollment สำเร็จ
+  async function handleEnrolled(dt: string, ds: string) {
+    await secureStorage.setItem(DEVICE_TOKEN_KEY, dt);
+    await secureStorage.setItem(DEVICE_SECRET_KEY, ds);
+    setDeviceToken(dt);
+    await loadWorkspace(dt);
+  }
+
+  // PIN verify สำเร็จ
+  async function handlePinVerified() {
+    await loadWorkspace();
+  }
+
+  // Reset: ลบ token ออก → กลับ enrollment
+  async function handleReset() {
+    await secureStorage.removeItem(DEVICE_TOKEN_KEY);
+    await secureStorage.removeItem(DEVICE_SECRET_KEY);
+    setDeviceToken(null);
+    setWorkspace(null);
+    setScreen("enrollment");
+  }
 
   const upcoming = useMemo(
-    () => (workspace?.assignments ?? []).filter((assignment) => new Date(assignment.slotEnd).getTime() >= Date.now() - 12 * 60 * 60 * 1000),
+    () => (workspace?.assignments ?? []).filter((a) => new Date(a.slotEnd).getTime() >= Date.now() - 12 * 60 * 60 * 1000),
     [workspace],
   );
 
@@ -471,10 +590,7 @@ export default function App() {
     await loadWorkspace();
   }
 
-  async function recordAssignmentEvent(
-    assignment: MobileAssignment,
-    eventType: "opened" | "acknowledged",
-  ) {
+  async function recordAssignmentEvent(assignment: MobileAssignment, eventType: "opened" | "acknowledged") {
     if (!deviceToken) return false;
     const { data, error } = await supabase.rpc("record_floor_mobile_assignment_event", {
       p_device_token: deviceToken,
@@ -482,9 +598,7 @@ export default function App() {
       p_event_type: eventType,
     });
     if (error || !data) {
-      if (eventType === "acknowledged") {
-        Alert.alert("รับทราบงานไม่สำเร็จ", error?.message ?? "กรุณาลองใหม่");
-      }
+      if (eventType === "acknowledged") Alert.alert("รับทราบงานไม่สำเร็จ", error?.message ?? "กรุณาลองใหม่");
       return false;
     }
     return true;
@@ -496,15 +610,6 @@ export default function App() {
     const saved = await recordAssignmentEvent(selected, "acknowledged");
     if (saved) await loadWorkspace();
     setBusy(false);
-  }
-
-  async function signOut() {
-    const active = await secureStorage.getItem(ACTIVE_SESSION_KEY);
-    if (active) {
-      Alert.alert("ยังออกจากระบบไม่ได้", "กรุณาปิดงานและให้ลูกค้าเซ็นรับงานก่อน เพื่อไม่ให้ Background GPS หยุดส่งข้อมูล");
-      return;
-    }
-    await supabase.auth.signOut();
   }
 
   async function saveSignature(name: string, dataUrl: string) {
@@ -530,18 +635,56 @@ export default function App() {
     }
   }
 
-  if (booting) return <SafeAreaView style={styles.safe}><View style={styles.centered}><ActivityIndicator size="large" /></View></SafeAreaView>;
-  if (!session) return <LoginScreen onSession={setSession} />;
-  if (!deviceToken) return <EnrollmentScreen onEnrolled={setDeviceToken} />;
-  if (!workspace) return <SafeAreaView style={styles.safe}><View style={styles.centered}><ActivityIndicator size="large" /><Text style={styles.subtitle}>กำลังโหลดงาน…</Text></View></SafeAreaView>;
-  if (!permissionReady) return <PermissionScreen deviceToken={deviceToken} onReady={() => { setPermissionReady(true); void loadWorkspace(); }} />;
+  // ── Render by screen state ──────────────────────────────────────────────────
+
+  if (screen === "booting") {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.centered}><ActivityIndicator size="large" /></View>
+      </SafeAreaView>
+    );
+  }
+
+  if (screen === "enrollment") {
+    return <EnrollmentScreen onEnrolled={handleEnrolled} />;
+  }
+
+  if (screen === "pin" && deviceToken) {
+    return <PinScreen deviceToken={deviceToken} onVerified={handlePinVerified} onReset={handleReset} />;
+  }
+
+  if (screen === "permission" && deviceToken) {
+    return (
+      <PermissionScreen
+        deviceToken={deviceToken}
+        onReady={() => { void loadWorkspace(); }}
+      />
+    );
+  }
+
+  if (!workspace) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" />
+          <Text style={styles.subtitle}>กำลังโหลดงาน…</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="light" />
       <View style={styles.header}>
-        <View><Text style={styles.headerEyebrow}>FloorNow · หน้างานของฉัน</Text><Text style={styles.headerTitle}>{workspace.technician.name}</Text><Text style={styles.headerMeta}>{workspace.technician.teamName ?? "ไม่ระบุทีม"}</Text></View>
-        <Pressable onPress={() => void signOut()}><Text style={styles.headerAction}>ออกจากระบบ</Text></Pressable>
+        <View>
+          <Text style={styles.headerEyebrow}>FloorNow · หน้างานของฉัน</Text>
+          <Text style={styles.headerTitle}>{workspace.technician.name}</Text>
+          <Text style={styles.headerMeta}>{workspace.technician.teamName ?? "ไม่ระบุทีม"}</Text>
+        </View>
+        <Pressable onPress={handleReset}>
+          <Text style={styles.headerAction}>ออกจากระบบ</Text>
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.page}>
@@ -553,8 +696,17 @@ export default function App() {
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>การรับทราบงาน</Text>
-              <Text style={styles.factValue}>{selected.acknowledgedAt ? `รับทราบแล้ว ${thaiDate(selected.acknowledgedAt)} ${thaiTime(selected.acknowledgedAt)} น.` : "กรุณาตรวจรายละเอียดทั้งหมดก่อนกดรับทราบ"}</Text>
-              <Button label={selected.acknowledgedAt ? "✓ รับทราบงานแล้ว" : busy ? "กำลังบันทึก…" : "รับทราบงาน"} tone="success" onPress={() => void acknowledgeAssignment()} disabled={busy || Boolean(selected.acknowledgedAt)} />
+              <Text style={styles.factValue}>
+                {selected.acknowledgedAt
+                  ? `รับทราบแล้ว ${thaiDate(selected.acknowledgedAt)} ${thaiTime(selected.acknowledgedAt)} น.`
+                  : "กรุณาตรวจรายละเอียดทั้งหมดก่อนกดรับทราบ"}
+              </Text>
+              <Button
+                label={selected.acknowledgedAt ? "✓ รับทราบงานแล้ว" : busy ? "กำลังบันทึก…" : "รับทราบงาน"}
+                tone="success"
+                onPress={() => void acknowledgeAssignment()}
+                disabled={busy || Boolean(selected.acknowledgedAt)}
+              />
             </View>
 
             <View style={styles.section}>
@@ -571,24 +723,54 @@ export default function App() {
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>วัสดุที่นำไปหน้างาน</Text>
-              <View style={styles.materialRow}><View><Text style={styles.factLabel}>หัวหน้ากำหนด</Text><Text style={styles.materialNumber}>{selected.plannedSheetCount ?? 0} แผ่น</Text></View><View><Text style={styles.factLabel}>ช่างหยิบจริง</Text><Text style={styles.materialNumber}>{selected.pickedSheetCount ?? "—"} แผ่น</Text></View></View>
-              {workspace.technician.isTeamLead && !selected.trackingSession ? <><TextInput value={plannedSheets} onChangeText={setPlannedSheets} keyboardType="number-pad" placeholder="จำนวนแผ่นที่กำหนด" style={styles.input} /><Button label="บันทึกจำนวนที่กำหนด" tone="secondary" onPress={savePlan} disabled={busy} /></> : null}
-              {!selected.trackingSession ? <><Text style={styles.label}>จำนวนแผ่นที่หยิบมา</Text><TextInput value={pickedSheets} onChangeText={setPickedSheets} keyboardType="number-pad" placeholder="0" style={styles.input} /><Button label={busy ? "กำลังเริ่มงาน…" : "ถ่ายภาพและเริ่มเดินทาง"} onPress={startJob} disabled={busy || !pickedSheets} /></> : null}
+              <View style={styles.materialRow}>
+                <View><Text style={styles.factLabel}>หัวหน้ากำหนด</Text><Text style={styles.materialNumber}>{selected.plannedSheetCount ?? 0} แผ่น</Text></View>
+                <View><Text style={styles.factLabel}>ช่างหยิบจริง</Text><Text style={styles.materialNumber}>{selected.pickedSheetCount ?? "—"} แผ่น</Text></View>
+              </View>
+              {workspace.technician.isTeamLead && !selected.trackingSession ? (
+                <>
+                  <TextInput value={plannedSheets} onChangeText={setPlannedSheets} keyboardType="number-pad" placeholder="จำนวนแผ่นที่กำหนด" style={styles.input} />
+                  <Button label="บันทึกจำนวนที่กำหนด" tone="secondary" onPress={savePlan} disabled={busy} />
+                </>
+              ) : null}
+              {!selected.trackingSession ? (
+                <>
+                  <Text style={styles.label}>จำนวนแผ่นที่หยิบมา</Text>
+                  <TextInput value={pickedSheets} onChangeText={setPickedSheets} keyboardType="number-pad" placeholder="0" style={styles.input} />
+                  <Button label={busy ? "กำลังเริ่มงาน…" : "ถ่ายภาพและเริ่มเดินทาง"} onPress={startJob} disabled={busy || !pickedSheets} />
+                </>
+              ) : null}
             </View>
 
-            {selected.trackingSession ? <View style={styles.section}>
-              <Text style={styles.sectionTitle}>สถานะงาน</Text>
-              <View style={styles.liveState}><Text style={styles.liveDot}>●</Text><View><Text style={styles.liveTitle}>{STATUS_LABELS[selected.trackingSession.status]}</Text><Text style={styles.factLabel}>Background GPS กำลังทำงาน</Text></View></View>
-              <Button label="ถึงบ้านลูกค้าแล้ว · ถ่ายภาพ" onPress={() => setStatus("arrived")} disabled={busy || selected.trackingSession.status !== "travelling"} />
-              <Button label="เริ่มติดตั้ง · ถ่ายภาพ" onPress={() => setStatus("installing")} disabled={busy || selected.trackingSession.status !== "arrived"} />
-              <Button label="ติดตั้งเสร็จ · ถ่ายภาพ" tone="success" onPress={() => setStatus("completed")} disabled={busy || selected.trackingSession.status !== "installing"} />
-              {selected.trackingSession.status === "completed" ? <Button label="เปิดให้ลูกค้าเซ็นรับงาน" tone="success" onPress={() => setSignatureOpen(true)} disabled={busy} /> : null}
-              <Button label="แชร์ลิงก์สถานะให้ลูกค้า" tone="secondary" onPress={() => Share.share({ message: `${config.customerTrackingBaseUrl}/${selected.trackingSession!.customerToken}` })} />
-            </View> : null}
+            {selected.trackingSession ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>สถานะงาน</Text>
+                <View style={styles.liveState}>
+                  <Text style={styles.liveDot}>●</Text>
+                  <View>
+                    <Text style={styles.liveTitle}>{STATUS_LABELS[selected.trackingSession.status]}</Text>
+                    <Text style={styles.factLabel}>Background GPS กำลังทำงาน</Text>
+                  </View>
+                </View>
+                <Button label="ถึงบ้านลูกค้าแล้ว · ถ่ายภาพ" onPress={() => setStatus("arrived")} disabled={busy || selected.trackingSession.status !== "travelling"} />
+                <Button label="เริ่มติดตั้ง · ถ่ายภาพ" onPress={() => setStatus("installing")} disabled={busy || selected.trackingSession.status !== "arrived"} />
+                <Button label="ติดตั้งเสร็จ · ถ่ายภาพ" tone="success" onPress={() => setStatus("completed")} disabled={busy || selected.trackingSession.status !== "installing"} />
+                {selected.trackingSession.status === "completed" ? (
+                  <Button label="เปิดให้ลูกค้าเซ็นรับงาน" tone="success" onPress={() => setSignatureOpen(true)} disabled={busy} />
+                ) : null}
+                <Button label="แชร์ลิงก์สถานะให้ลูกค้า" tone="secondary" onPress={() => Share.share({ message: `${config.customerTrackingBaseUrl}/${selected.trackingSession!.customerToken}` })} />
+              </View>
+            ) : null}
           </>
         ) : (
           <>
-            <View style={styles.listHeader}><View><Text style={styles.title}>ตารางงานของฉัน</Text><Text style={styles.subtitle}>งานที่ได้รับมอบหมาย {upcoming.length} งาน</Text></View><Pressable onPress={() => void loadWorkspace()}><Text style={styles.refresh}>รีเฟรช</Text></Pressable></View>
+            <View style={styles.listHeader}>
+              <View>
+                <Text style={styles.title}>ตารางงานของฉัน</Text>
+                <Text style={styles.subtitle}>งานที่ได้รับมอบหมาย {upcoming.length} งาน</Text>
+              </View>
+              <Pressable onPress={() => void loadWorkspace()}><Text style={styles.refresh}>รีเฟรช</Text></Pressable>
+            </View>
             {upcoming.map((assignment) => (
               <Pressable
                 key={assignment.assignmentId}
@@ -603,7 +785,12 @@ export default function App() {
                 <Text style={styles.jobDate}>{thaiDate(assignment.slotStart)}</Text>
                 <Text style={styles.jobTitle}>{assignment.customerName ?? assignment.jobNo ?? "งานติดตั้ง"}</Text>
                 <Text style={styles.jobMeta}>{thaiTime(assignment.slotStart)}–{thaiTime(assignment.slotEnd)} · {assignment.productName ?? assignment.requirement ?? "ยังไม่ระบุสเปก"}</Text>
-                <View style={styles.badges}><Text style={styles.badge}>{assignment.teamName ?? "ทีมช่าง"}</Text>{assignment.trackingSession ? <Text style={styles.badgeLive}>{STATUS_LABELS[assignment.trackingSession.status]}</Text> : <Text style={styles.badgeWaiting}>รอเริ่มงาน</Text>}</View>
+                <View style={styles.badges}>
+                  <Text style={styles.badge}>{assignment.teamName ?? "ทีมช่าง"}</Text>
+                  {assignment.trackingSession
+                    ? <Text style={styles.badgeLive}>{STATUS_LABELS[assignment.trackingSession.status]}</Text>
+                    : <Text style={styles.badgeWaiting}>รอเริ่มงาน</Text>}
+                </View>
               </Pressable>
             ))}
             {!upcoming.length ? <View style={styles.empty}><Text style={styles.subtitle}>ยังไม่มีงานที่ได้รับมอบหมาย</Text></View> : null}
@@ -615,6 +802,8 @@ export default function App() {
     </SafeAreaView>
   );
 }
+
+// ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#f3f6fb" },
@@ -634,12 +823,22 @@ const styles = StyleSheet.create({
   buttonDim: { opacity: 0.48 },
   buttonText: { color: "#fff", fontWeight: "600" },
   buttonTextSecondary: { color: "#1559c9" },
+  linkText: { color: "#1559c9", fontSize: 13, textAlign: "center" },
+  // PIN
+  pinRow: { flexDirection: "row", justifyContent: "center", gap: 10, marginVertical: 8 },
+  pinCell: { width: 44, height: 54, borderRadius: 10, borderWidth: 1.5, borderColor: "#cfd9e7", backgroundColor: "#f6f8fc", alignItems: "center", justifyContent: "center" },
+  pinCellActive: { borderColor: "#1559c9", backgroundColor: "#eef4ff" },
+  pinDot: { fontSize: 22, color: "#172033" },
+  pinHidden: { position: "absolute", opacity: 0, width: 1, height: 1 },
+  // Permission
   permissionItem: { color: "#34435a", paddingVertical: 5 },
+  // Header
   header: { backgroundColor: "#101827", paddingHorizontal: 18, paddingVertical: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   headerEyebrow: { color: "#93a4bb", fontSize: 12 },
   headerTitle: { color: "#fff", fontSize: 20, fontWeight: "700", marginTop: 3 },
   headerMeta: { color: "#c5d0de", fontSize: 13, marginTop: 2 },
   headerAction: { color: "#9fc0ff", fontSize: 13 },
+  // Page
   page: { padding: 16, paddingBottom: 40 },
   listHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 },
   refresh: { color: "#1559c9", fontWeight: "600" },
