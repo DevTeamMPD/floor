@@ -31,17 +31,42 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   const supabase = useMemo(() => createClient(), []);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pin, setPin] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
   const [selected, setSelected] = useState<WorkAssignment | null>(null);
   const [saving, setSaving] = useState(false);
+  const pinStorageKey = `floor-work-pin:${token}`;
 
-  const load = useCallback(async () => {
-    const { data, error } = await supabase.rpc("get_technician_workspace", { p_token: token });
-    if (!error && data) setWorkspace(data as Workspace);
-    else setWorkspace(null);
+  const load = useCallback(async (pinValue: string) => {
+    const normalized = pinValue.trim();
+    if (!normalized) {
+      setWorkspace(null);
+      setLoading(false);
+      return false;
+    }
+    const { data, error } = await supabase.rpc("get_technician_workspace", { p_token: token, p_pin: normalized });
+    if (!error && data) {
+      setWorkspace(data as Workspace);
+      setAuthError(null);
+      setLoading(false);
+      if (typeof window !== "undefined") window.sessionStorage.setItem(pinStorageKey, normalized);
+      return true;
+    }
+    setWorkspace(null);
     setLoading(false);
-  }, [supabase, token]);
+    return false;
+  }, [pinStorageKey, supabase, token]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.sessionStorage.getItem(pinStorageKey);
+    if (saved) {
+      setPin(saved);
+      void load(saved);
+      return;
+    }
+    setLoading(false);
+  }, [load, pinStorageKey]);
 
   const upcoming = useMemo(() => {
     const now = Date.now() - 12 * 60 * 60 * 1000;
@@ -56,26 +81,71 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   async function openWork(a: WorkAssignment) {
     setSelected(a);
     await supabase.rpc("record_technician_work_event", {
-      p_token: token, p_assignment_id: a.assignmentId, p_event_type: "opened", p_user_agent: navigator.userAgent,
+      p_token: token,
+      p_pin: pin.trim(),
+      p_assignment_id: a.assignmentId,
+      p_event_type: "opened",
+      p_user_agent: navigator.userAgent,
     });
-    void load();
+    void load(pin);
   }
 
   async function acknowledge() {
     if (!selected) return;
     setSaving(true);
     const { data, error } = await supabase.rpc("record_technician_work_event", {
-      p_token: token, p_assignment_id: selected.assignmentId, p_event_type: "acknowledged", p_user_agent: navigator.userAgent,
+      p_token: token,
+      p_pin: pin.trim(),
+      p_assignment_id: selected.assignmentId,
+      p_event_type: "acknowledged",
+      p_user_agent: navigator.userAgent,
     });
     if (!error && data) {
       setSelected({ ...selected, acknowledgedAt: new Date().toISOString() });
-      await load();
+      await load(pin);
     }
     setSaving(false);
   }
 
+  async function unlock() {
+    setLoading(true);
+    setAuthError(null);
+    const ok = await load(pin);
+    if (!ok) {
+      setAuthError("PIN ไม่ถูกต้อง หรือยังไม่ได้ตั้ง PIN ให้ลิงก์นี้");
+      setLoading(false);
+    }
+  }
+
   if (loading) return <main className="min-h-screen bg-slate-50 grid place-items-center text-slate-500">กำลังโหลดตารางงาน…</main>;
-  if (!workspace) return <main className="min-h-screen bg-slate-50 grid place-items-center p-6 text-center"><div><div className="text-4xl mb-3">🔒</div><h1 className="font-semibold">ลิงก์ไม่ถูกต้องหรือถูกยกเลิก</h1><p className="text-sm text-slate-500 mt-1">กรุณาขอลิงก์ใหม่จากหัวหน้าช่าง</p></div></main>;
+  if (!workspace) return <main className="min-h-screen bg-slate-50 grid place-items-center p-6">
+    <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-400">FloorNow · หน้างานของฉัน</div>
+      <h1 className="mt-2 text-xl font-semibold text-slate-900">ใส่ PIN เพื่อเปิดตารางงาน</h1>
+      <p className="mt-1 text-sm text-slate-500">ใช้รหัสจากหัวหน้าช่างร่วมกับลิงก์ประจำตัวนี้</p>
+      <div className="mt-4 space-y-3">
+        <div>
+          <label className="text-xs font-medium text-slate-500">PIN 4-6 หลัก</label>
+          <input
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            placeholder="123456"
+            className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-3 text-base outline-none focus:border-blue-500"
+          />
+        </div>
+        {authError ? <p className="text-sm text-red-600">{authError}</p> : null}
+        <button
+          onClick={() => void unlock()}
+          disabled={!pin.trim()}
+          className="w-full rounded-xl bg-blue-600 px-4 py-3 font-medium text-white disabled:opacity-50"
+        >
+          เปิดตารางงาน
+        </button>
+      </div>
+    </div>
+  </main>;
 
   return <main className="min-h-screen bg-slate-50 pb-12">
     <header className="bg-slate-950 text-white px-4 py-5">

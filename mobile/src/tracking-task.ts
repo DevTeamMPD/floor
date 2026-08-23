@@ -38,15 +38,6 @@ async function saveOutbox(sessionId: string, points: QueuedLocationPoint[]) {
   return AsyncStorage.setItem(key, JSON.stringify(points.slice(-500)));
 }
 
-async function ensureFreshSession() {
-  const { data } = await supabase.auth.getSession();
-  const session = data.session;
-  if (!session) return null;
-  if ((session.expires_at ?? 0) * 1000 > Date.now() + 2 * 60_000) return session;
-  const refreshed = await supabase.auth.refreshSession();
-  return refreshed.data.session;
-}
-
 TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
   LOCATION_TASK_NAME,
   async ({ data, error }) => {
@@ -77,9 +68,6 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
     let outbox = [...await loadOutbox(active.sessionId), ...points].slice(-500);
     await saveOutbox(active.sessionId, outbox);
 
-    const session = await ensureFreshSession();
-    if (!session) return;
-
     for (let attempt = 0; attempt < 3 && outbox.length; attempt += 1) {
       const batch = outbox.slice(0, 50);
       const { error: locationError } = await supabase.rpc("record_floor_location_batch", {
@@ -99,10 +87,7 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(
 
     const response = await fetch(`${config.floorNowApiUrl}/api/tracking/eta`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         deviceToken,
         sessionId: active.sessionId,

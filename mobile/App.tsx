@@ -1,6 +1,5 @@
 import "./src/tracking-task";
 
-import type { Session } from "@supabase/supabase-js";
 import * as Application from "expo-application";
 import * as Device from "expo-device";
 import * as Location from "expo-location";
@@ -28,7 +27,6 @@ import { config } from "./src/config";
 import {
   captureAndUploadStatusPhoto,
   extractCoordinates,
-  normalizeThaiPhone,
   uploadSignature,
 } from "./src/job-service";
 import { ACTIVE_SESSION_KEY, DEVICE_TOKEN_KEY, secureStorage } from "./src/secure-store";
@@ -89,6 +87,15 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "เกิดข้อผิดพลาด กรุณาลองใหม่";
 }
 
+function extractTechnicianToken(value: string) {
+  const cleaned = value
+    .trim()
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\s+/g, "");
+  const match = cleaned.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i);
+  return match?.[0] ?? null;
+}
+
 function Button({
   label,
   onPress,
@@ -118,31 +125,34 @@ function Button({
   );
 }
 
-function LoginScreen({ onSession }: { onSession: (session: Session) => void }) {
-  const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState("");
-  const [sent, setSent] = useState(false);
+function PairingScreen({ onPaired }: { onPaired: (deviceToken: string) => void }) {
+  const [tokenText, setTokenText] = useState("");
+  const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function sendOtp() {
+  async function pair() {
+    const token = extractTechnicianToken(tokenText);
+    const pinValue = pin.trim().replace(/\D/g, "");
+    if (!token) {
+      Alert.alert("ลิงก์ไม่ถูกต้อง", "วางลิงก์หน้างานส่วนตัวหรือ token ที่ได้รับจากหัวหน้าช่าง");
+      return;
+    }
+    if (!/^\d{4,6}$/.test(pinValue)) {
+      Alert.alert("PIN ไม่ถูกต้อง", "PIN ต้องเป็นตัวเลข 4-6 หลัก");
+      return;
+    }
     setBusy(true);
-    const normalized = normalizeThaiPhone(phone);
-    const { error } = await supabase.auth.signInWithOtp({
-      phone: normalized,
-      options: { shouldCreateUser: true },
+    const { data, error } = await supabase.rpc("register_floor_technician_device", {
+      p_personal_token: token,
+      p_pin: pinValue,
+      p_platform: Platform.OS,
+      p_device_name: Device.modelName ?? Device.deviceName ?? "ไม่ระบุอุปกรณ์",
+      p_app_version: Application.nativeApplicationVersion ?? "dev",
     });
     setBusy(false);
-    if (error) return Alert.alert("ส่ง OTP ไม่สำเร็จ", error.message);
-    setPhone(normalized);
-    setSent(true);
-  }
-
-  async function verifyOtp() {
-    setBusy(true);
-    const { data, error } = await supabase.auth.verifyOtp({ phone, token: otp.trim(), type: "sms" });
-    setBusy(false);
-    if (error || !data.session) return Alert.alert("OTP ไม่ถูกต้อง", error?.message ?? "กรุณาขอรหัสใหม่");
-    onSession(data.session);
+    if (error || !data?.deviceToken) return Alert.alert("ผูกบัญชีไม่สำเร็จ", error?.message ?? "PIN หรือ token ไม่ถูกต้อง");
+    await secureStorage.setItem(DEVICE_TOKEN_KEY, data.deviceToken as string);
+    onPaired(data.deviceToken as string);
   }
 
   return (
@@ -150,76 +160,27 @@ function LoginScreen({ onSession }: { onSession: (session: Session) => void }) {
       <View style={styles.centered}>
         <View style={styles.brandMark}><Text style={styles.brandMarkText}>FN</Text></View>
         <Text style={styles.title}>FloorNow Worker</Text>
-        <Text style={styles.subtitle}>เข้าสู่ระบบด้วยเบอร์โทรศัพท์ของพนักงาน</Text>
-        <View style={styles.card}>
-          <Text style={styles.label}>เบอร์โทรศัพท์</Text>
-          <TextInput
-            value={phone}
-            onChangeText={setPhone}
-            editable={!sent && !busy}
-            keyboardType="phone-pad"
-            placeholder="เช่น 0922563661"
-            style={styles.input}
-          />
-          {sent ? (
-            <>
-              <Text style={styles.label}>รหัส OTP 6 หลัก</Text>
-              <TextInput
-                value={otp}
-                onChangeText={setOtp}
-                keyboardType="number-pad"
-                maxLength={6}
-                placeholder="000000"
-                style={styles.input}
-              />
-              <Button label={busy ? "กำลังตรวจสอบ…" : "ยืนยัน OTP"} onPress={verifyOtp} disabled={busy || otp.length !== 6} />
-              <Button label="เปลี่ยนเบอร์โทร" onPress={() => { setSent(false); setOtp(""); }} tone="secondary" disabled={busy} />
-            </>
-          ) : (
-            <Button label={busy ? "กำลังส่ง…" : "ส่งรหัส OTP"} onPress={sendOtp} disabled={busy || phone.replace(/\D/g, "").length < 9} />
-          )}
-        </View>
-      </View>
-    </SafeAreaView>
-  );
-}
-
-function EnrollmentScreen({ onEnrolled }: { onEnrolled: (deviceToken: string) => void }) {
-  const [tokenText, setTokenText] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function enroll() {
-    const token = tokenText.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i)?.[0];
-    if (!token) return Alert.alert("ลิงก์ไม่ถูกต้อง", "วางลิงก์หน้างานส่วนตัวหรือ token ที่ได้รับจากหัวหน้าช่าง");
-    setBusy(true);
-    const { data, error } = await supabase.rpc("register_floor_technician_device", {
-      p_personal_token: token,
-      p_platform: Platform.OS,
-      p_device_name: Device.modelName ?? Device.deviceName ?? "ไม่ระบุอุปกรณ์",
-      p_app_version: Application.nativeApplicationVersion ?? "dev",
-    });
-    setBusy(false);
-    if (error || !data?.deviceToken) return Alert.alert("ผูกบัญชีไม่สำเร็จ", error?.message ?? "ไม่พบพนักงาน");
-    await secureStorage.setItem(DEVICE_TOKEN_KEY, data.deviceToken as string);
-    onEnrolled(data.deviceToken as string);
-  }
-
-  return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.centered}>
-        <Text style={styles.title}>ผูกบัญชีกับพนักงาน</Text>
-        <Text style={styles.subtitle}>ทำครั้งเดียวต่อเครื่อง จากนั้นระบบจะจำบัญชีนี้อย่างปลอดภัย</Text>
+        <Text style={styles.subtitle}>วางลิงก์หน้างาน + ใส่ PIN ที่หัวหน้าช่างให้</Text>
         <View style={styles.card}>
           <Text style={styles.label}>ลิงก์หน้างานส่วนตัว</Text>
           <TextInput
             value={tokenText}
             onChangeText={setTokenText}
             autoCapitalize="none"
-            placeholder="วางลิงก์ /work/… ที่หัวหน้าช่างส่งให้"
+            placeholder="วางลิงก์ /work/… หรือ UUID"
             style={[styles.input, styles.multiline]}
             multiline
           />
-          <Button label={busy ? "กำลังผูกบัญชี…" : "ยืนยันเครื่องนี้"} onPress={enroll} disabled={busy || !tokenText.trim()} />
+          <Text style={styles.label}>PIN 4-6 หลัก</Text>
+          <TextInput
+            value={pin}
+            onChangeText={(value) => setPin(value.replace(/\D/g, "").slice(0, 6))}
+            keyboardType="number-pad"
+            maxLength={6}
+            placeholder="123456"
+            style={styles.input}
+          />
+          <Button label={busy ? "กำลังผูกบัญชี…" : "ยืนยันเครื่องนี้"} onPress={pair} disabled={busy || !tokenText.trim() || !pin.trim()} />
         </View>
       </View>
     </SafeAreaView>
@@ -338,7 +299,6 @@ function SignatureModal({
 }
 
 export default function App() {
-  const [session, setSession] = useState<Session | null>(null);
   const [booting, setBooting] = useState(true);
   const [deviceToken, setDeviceToken] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<MobileWorkspace | null>(null);
@@ -350,27 +310,35 @@ export default function App() {
   const [signatureOpen, setSignatureOpen] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
+    secureStorage.getItem(DEVICE_TOKEN_KEY).then((token) => {
+      setDeviceToken(token);
       setBooting(false);
     });
-    const { data } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") supabase.auth.startAutoRefresh();
-      else supabase.auth.stopAutoRefresh();
-    });
-    return () => { data.subscription.unsubscribe(); subscription.remove(); };
   }, []);
 
   useEffect(() => {
-    if (!session) { setDeviceToken(null); setWorkspace(null); return; }
-    secureStorage.getItem(DEVICE_TOKEN_KEY).then(setDeviceToken);
-  }, [session]);
+    if (!deviceToken) {
+      setWorkspace(null);
+      setSelected(null);
+      setPermissionReady(false);
+      return;
+    }
+    void loadWorkspace();
+  }, [deviceToken]);
 
   const loadWorkspace = useCallback(async () => {
     if (!deviceToken) return;
     const { data, error } = await supabase.rpc("get_floor_mobile_workspace", { p_device_token: deviceToken });
-    if (error || !data) return Alert.alert("โหลดงานไม่สำเร็จ", error?.message ?? "กรุณาลองใหม่");
+    if (error || !data) {
+      Alert.alert("โหลดงานไม่สำเร็จ", error?.message ?? "กรุณาลองใหม่");
+      await secureStorage.removeItem(DEVICE_TOKEN_KEY);
+      await secureStorage.removeItem(ACTIVE_SESSION_KEY);
+      setDeviceToken(null);
+      setWorkspace(null);
+      setSelected(null);
+      setPermissionReady(false);
+      return;
+    }
     const next = data as MobileWorkspace;
     setWorkspace(next);
     setPermissionReady(next.device.backgroundPermission === "always");
@@ -379,8 +347,6 @@ export default function App() {
       setSelected(updated);
     }
   }, [deviceToken, selected]);
-
-  useEffect(() => { void loadWorkspace(); }, [deviceToken]);
 
   const upcoming = useMemo(
     () => (workspace?.assignments ?? []).filter((assignment) => new Date(assignment.slotEnd).getTime() >= Date.now() - 12 * 60 * 60 * 1000),
@@ -462,6 +428,7 @@ export default function App() {
     if (!Number.isInteger(count) || count < 0) return Alert.alert("กรุณาระบุจำนวนแผ่นที่ถูกต้อง");
     setBusy(true);
     const { data, error } = await supabase.rpc("set_floor_job_material_plan", {
+      p_device_token: deviceToken,
       p_appointment_id: selected.appointmentId,
       p_planned_sheet_count: count,
       p_planned_by: workspace?.technician.name ?? "หัวหน้าช่าง",
@@ -504,7 +471,12 @@ export default function App() {
       Alert.alert("ยังออกจากระบบไม่ได้", "กรุณาปิดงานและให้ลูกค้าเซ็นรับงานก่อน เพื่อไม่ให้ Background GPS หยุดส่งข้อมูล");
       return;
     }
-    await supabase.auth.signOut();
+    await secureStorage.removeItem(DEVICE_TOKEN_KEY);
+    await secureStorage.removeItem(ACTIVE_SESSION_KEY);
+    setDeviceToken(null);
+    setWorkspace(null);
+    setSelected(null);
+    setPermissionReady(false);
   }
 
   async function saveSignature(name: string, dataUrl: string) {
@@ -531,8 +503,7 @@ export default function App() {
   }
 
   if (booting) return <SafeAreaView style={styles.safe}><View style={styles.centered}><ActivityIndicator size="large" /></View></SafeAreaView>;
-  if (!session) return <LoginScreen onSession={setSession} />;
-  if (!deviceToken) return <EnrollmentScreen onEnrolled={setDeviceToken} />;
+  if (!deviceToken) return <PairingScreen onPaired={setDeviceToken} />;
   if (!workspace) return <SafeAreaView style={styles.safe}><View style={styles.centered}><ActivityIndicator size="large" /><Text style={styles.subtitle}>กำลังโหลดงาน…</Text></View></SafeAreaView>;
   if (!permissionReady) return <PermissionScreen deviceToken={deviceToken} onReady={() => { setPermissionReady(true); void loadWorkspace(); }} />;
 

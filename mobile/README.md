@@ -1,10 +1,10 @@
 # FloorNow Worker
 
-แอป Expo SDK 57 สำหรับช่าง Android และ iPhone ใช้ Background Location, Supabase Phone OTP, กล้อง, ลายเซ็นลูกค้า และ offline GPS outbox
+แอป Expo SDK 57 สำหรับช่าง Android และ iPhone ใช้ Background Location, ลิงก์หน้างาน + PIN, กล้อง, ลายเซ็นลูกค้า และ offline GPS outbox
 
 ## เริ่มพัฒนา
 
-1. คัดลอก `.env.example` เป็น `.env.local` แล้วใส่ Supabase publishable key
+1. คัดลอก `.env.example` เป็น `.env.local` แล้วใส่ Supabase publishable key และ URL ของเว็บหลัก
 2. ใช้ development build บนเครื่องจริง ไม่ใช้ Expo Go สำหรับ Background Location
 3. ตรวจ config และ type ก่อน build
 

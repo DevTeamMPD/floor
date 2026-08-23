@@ -55,11 +55,6 @@ function estimateEta(origin: { latitude: number; longitude: number }, destinatio
 }
 
 export async function POST(request: Request) {
-  const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
-
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
@@ -68,15 +63,8 @@ export async function POST(request: Request) {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      global: { headers: { Authorization: authorization } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    },
+    { auth: { persistSession: false, autoRefreshToken: false } },
   );
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData.user) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
 
   const { origin, destination, deviceToken, sessionId } = parsed.data;
   const { data: allowed, error: authorizationError } = await supabase.rpc("can_request_floor_tracking_eta", {

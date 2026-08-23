@@ -1,10 +1,10 @@
 # FloorNow Background GPS
 
-สถานะ: โค้ดเว็บ, schema/RPC และแอปพนักงาน Android/iPhone พร้อมสำหรับรอบทดสอบเครื่องจริง แต่ยังไม่ใช่ Store build จนกว่าจะตั้ง SMS และ EAS credentials
+สถานะ: โค้ดเว็บ, schema/RPC และแอปพนักงาน Android/iPhone พร้อมสำหรับรอบทดสอบเครื่องจริง แต่ยังไม่ใช่ Store build จนกว่าจะตั้งค่า signing ของ EAS และทดสอบเครื่องจริงครบ
 
 ## Flow ที่ระบบบังคับ
 
-1. พนักงานเข้าแอปด้วย OTP เบอร์โทร และผูกบัญชีกับลิงก์พนักงานเดิมครั้งแรกครั้งเดียว
+1. พนักงานเข้าแอปด้วยลิงก์หน้างานส่วนตัว + PIN ครั้งแรกครั้งเดียว
 2. แอปขอสิทธิ์ตำแหน่งแบบ Always และบันทึกว่าเครื่องใดได้รับอนุญาต
 3. เมื่อเปิดใบงาน ระบบบันทึกหลักฐาน `opened`; พนักงานต้องกด `รับทราบงาน`
 4. หัวหน้าช่างต้องกำหนดจำนวนแผ่นก่อน พนักงานจึงเห็นค่าเริ่มต้นและกรอกจำนวนที่หยิบจริง
@@ -16,7 +16,7 @@
 
 ## Security
 
-- RPC พนักงานใช้ได้เฉพาะ role `authenticated` และตรวจทั้ง `auth.uid()`, device token และ assignment ของช่าง
+- RPC พนักงานใช้ได้เฉพาะลิงก์/เครื่องที่จับคู่แล้ว และตรวจทั้ง device token, PIN และ assignment ของช่าง
 - anon ใช้ได้เฉพาะ `get_floor_customer_tracking(customerToken)`
 - ตาราง GPS เปิด RLS และไม่มี direct grants สำหรับ anon/authenticated; อ่านและเขียนผ่าน RPC ที่จำกัดขอบเขตเท่านั้น
 - Raw latitude/longitude ไม่ถูกส่งให้หน้าลูกค้า
@@ -34,11 +34,11 @@ EXPO_PUBLIC_FLOORNOW_API_URL=https://floor-delta.vercel.app
 EXPO_PUBLIC_CUSTOMER_TRACKING_BASE_URL=https://floor-delta.vercel.app/track
 ```
 
-Supabase Auth:
+Auth:
 
-- เปิด Phone provider
-- ตั้ง SMS provider และ sender ที่ใช้จริง
-- OTP เป็น Auth หลัก; session ถูกเก็บใน SecureStore ของเครื่อง
+- ใช้ลิงก์หน้างาน + PIN แทน OTP/SMS
+- แอปเก็บ `deviceToken` และสถานะงานปัจจุบันใน SecureStore ของเครื่อง
+- ถ้าหัวหน้าช่างออกลิงก์ใหม่ เครื่องเดิมจะใช้ต่อไม่ได้จนกว่าจะผูกใหม่
 
 ## ข้อจำกัดของระบบปฏิบัติการ
 

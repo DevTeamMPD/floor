@@ -1,12 +1,14 @@
 export interface FloorTechnician {
   id: string;
   team_id: string | null;
+  personal_token: string;
   name: string;
   phone: string | null;
   is_team_lead: boolean;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  pin_updated_at?: string | null;
 }
 
 export interface TechnicianAssignment {
