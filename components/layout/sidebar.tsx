@@ -1,177 +1,92 @@
 "use client";
-import { useState } from "react";
+
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+import { ROLE_LABELS, type StaffProfile, type StaffRole } from "@/lib/staff";
 
-const NAV = [
-  { href: "/exec",            icon: "📈", label: "ภาพรวมผู้บริหาร" },
-  { href: "/dashboard",       icon: "⭐", label: "แดชบอร์ดความพึงพอใจ" },
-  { href: "/pipeline",        icon: "📌", label: "Pipeline" },
-  { href: "/jobs",            icon: "💼", label: "งานทั้งหมด" },
-  { href: "/queue",           icon: "🕑", label: "คิวงาน" },
-  { href: "/service",         icon: "🛠", label: "บริการ" },
-  { href: "/cs-tracking",     icon: "📞", label: "CS ติดตาม" },
-  { href: "/inventory",       icon: "📦", label: "คลังวัสดุ" },
-  { href: "/waste-cost",      icon: "♻️", label: "ต้นทุนเศษ" },
-  { href: "/remnants",        icon: "✂️", label: "เศษวัสดุ" },
-  { href: "/bom",             icon: "📐", label: "BOQ / BOM" },
-  { href: "/purchase-orders", icon: "🛒", label: "ใบสั่งซื้อ" },
-  { href: "/appointments",    icon: "📅", label: "นัดหมาย" },
-  { href: "/tech-queue",      icon: "👷", label: "คิวช่าง" },
-  { href: "/technicians",    icon: "🔑", label: "จัดการช่าง" },
-  { href: "/documents",       icon: "📄", label: "เอกสาร" },
-  { href: "/ncr",             icon: "🔴", label: "NCR" },
-  { href: "/docs",            icon: "📖", label: "คู่มือ" },
+interface NavItem { href: string; icon: string; label: string; roles: StaffRole[] }
+
+const CORE_NAV: NavItem[] = [
+  { href: "/home", icon: "🏠", label: "หน้าแรก", roles: ["admin"] },
+  { href: "/sales-queue", icon: "🗓️", label: "จองคิว", roles: ["admin", "sales"] },
+  { href: "/tech-queue", icon: "👷", label: "คิวทีมช่าง", roles: ["admin", "sales"] },
+  { href: "/operations", icon: "📥", label: "ต้องตัดสินใจ", roles: ["admin", "head_technician"] },
+  { href: "/appointments", icon: "📅", label: "ปฏิทินทีม", roles: ["admin", "head_technician"] },
+  { href: "/pipeline", icon: "📌", label: "งานกำลังดำเนินการ", roles: ["admin", "head_technician"] },
+  { href: "/technicians", icon: "🔑", label: "ทีมช่าง / PIN", roles: ["admin", "head_technician"] },
+  { href: "/cs-tracking", icon: "📞", label: "CS รอติดตาม", roles: ["admin", "cs"] },
+  { href: "/dashboard", icon: "⭐", label: "คุณภาพและความพึงพอใจ", roles: ["admin", "cs", "executive"] },
+  { href: "/exec", icon: "📈", label: "ภาพรวมผู้บริหาร", roles: ["admin", "executive"] },
+  { href: "/staff", icon: "👥", label: "บัญชีพนักงาน", roles: ["admin"] },
 ];
 
-// 5 most-used items for mobile bottom nav
-const BOTTOM_NAV = [
-  { href: "/exec",         icon: "📈", label: "ภาพรวม" },
-  { href: "/pipeline",     icon: "📌", label: "Pipeline" },
-  { href: "/queue",        icon: "🕑", label: "คิวงาน" },
-  { href: "/documents",    icon: "📄", label: "เอกสาร" },
+const EXPERIMENTAL_NAV: NavItem[] = [
+  { href: "/service", icon: "🛠", label: "บริการ / SKU", roles: ["admin"] },
+  { href: "/inventory", icon: "📦", label: "คลังวัสดุ", roles: ["admin", "warehouse"] },
+  { href: "/waste-cost", icon: "♻️", label: "ต้นทุนเศษ", roles: ["admin", "warehouse"] },
+  { href: "/remnants", icon: "✂️", label: "เศษวัสดุ", roles: ["admin", "warehouse"] },
+  { href: "/bom", icon: "📐", label: "BOQ / BOM", roles: ["admin", "warehouse"] },
+  { href: "/purchase-orders", icon: "🛒", label: "ใบสั่งซื้อ", roles: ["admin", "warehouse"] },
+  { href: "/documents", icon: "📄", label: "เอกสารแบบเดิม", roles: ["admin"] },
+  { href: "/ncr", icon: "🔴", label: "NCR", roles: ["admin", "head_technician"] },
 ];
 
-export default function Sidebar() {
+function NavLink({ item, active, onClick }: { item: NavItem; active: boolean; onClick?: () => void }) {
+  return <Link href={item.href} onClick={onClick} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${active ? "bg-blue-600 font-medium text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}>
+    <span>{item.icon}</span><span>{item.label}</span>
+  </Link>;
+}
+
+export default function Sidebar({ staff }: { staff: StaffProfile }) {
   const path = usePathname();
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const core = useMemo(() => CORE_NAV.filter((item) => item.roles.includes(staff.role)), [staff.role]);
+  const experimental = useMemo(() => EXPERIMENTAL_NAV.filter((item) => item.roles.includes(staff.role)), [staff.role]);
 
-  return (
-    <>
-      {/* ── DESKTOP: Fixed left sidebar ──────────────────────────────── */}
-      <aside
-        className="hidden md:flex fixed left-0 top-0 h-screen w-[252px] flex-col"
-        style={{ background: "#0B1120" }}
-      >
-        <div className="px-5 pt-6 pb-4">
-          <div className="text-white font-bold text-lg tracking-tight">🏛 MPD Workspace</div>
-          <div className="text-slate-400 text-xs mt-0.5">ระบบติดตามงานติดตั้ง</div>
-        </div>
-        <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto">
-          {NAV.map((n) => {
-            const active = path === n.href || path.startsWith(n.href + "/");
-            return (
-              <Link
-                key={n.href}
-                href={n.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                  active
-                    ? "bg-blue-600 text-white font-medium"
-                    : "text-slate-400 hover:text-white hover:bg-white/5"
-                }`}
-              >
-                <span>{n.icon}</span>
-                <span>{n.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-        <div className="px-4 py-4 border-t border-white/10">
-          <div className="text-slate-500 text-xs">บริษัท มีภูมิดี จำกัด</div>
-        </div>
-      </aside>
+  function active(item: NavItem) { return path === item.href || path.startsWith(item.href + "/"); }
+  async function signOut() {
+    await createClient().auth.signOut();
+    router.replace("/login");
+    router.refresh();
+  }
 
-      {/* ── MOBILE: Top header bar ────────────────────────────────────── */}
-      <header
-        className="md:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 h-14"
-        style={{ background: "#0B1120" }}
-      >
-        <span className="text-white font-bold text-base tracking-tight">🏛 MPD Workspace</span>
-        <button
-          onClick={() => setMenuOpen(true)}
-          className="text-white p-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition-colors"
-          aria-label="เมนู"
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <line x1="3" y1="12" x2="21" y2="12" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
-        </button>
-      </header>
+  const navigation = <>
+    <nav className="space-y-1">{core.map((item) => <NavLink key={item.href} item={item} active={active(item)} onClick={() => setMenuOpen(false)} />)}</nav>
+    {experimental.length ? <div className="mt-5 border-t border-white/10 pt-4">
+      <button onClick={() => setToolsOpen((value) => !value)} className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-slate-400 hover:bg-white/5 hover:text-white"><span>เครื่องมือทดลอง</span><span>{toolsOpen ? "−" : "+"}</span></button>
+      {toolsOpen ? <nav className="mt-1 space-y-1">{experimental.map((item) => <NavLink key={item.href} item={item} active={active(item)} onClick={() => setMenuOpen(false)} />)}</nav> : null}
+    </div> : null}
+  </>;
 
-      {/* ── MOBILE: Slide-out full menu overlay ──────────────────────── */}
-      {menuOpen && (
-        <div
-          className="md:hidden fixed inset-0 z-50 flex"
-          onClick={() => setMenuOpen(false)}
-        >
-          <div className="absolute inset-0 bg-black/60" />
-          <div
-            className="relative z-10 flex flex-col h-full w-72 shadow-2xl"
-            style={{ background: "#0B1120" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-5 pt-5 pb-4">
-              <div>
-                <div className="text-white font-bold text-lg tracking-tight">🏛 MPD Workspace</div>
-                <div className="text-slate-400 text-xs mt-0.5">ระบบติดตามงานติดตั้ง</div>
-              </div>
-              <button
-                onClick={() => setMenuOpen(false)}
-                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-                aria-label="ปิด"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-            <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto pb-4">
-              {NAV.map((n) => {
-                const active = path === n.href || path.startsWith(n.href + "/");
-                return (
-                  <Link
-                    key={n.href}
-                    href={n.href}
-                    onClick={() => setMenuOpen(false)}
-                    className={`flex items-center gap-3 px-3 py-3 rounded-lg text-sm transition-colors ${
-                      active
-                        ? "bg-blue-600 text-white font-medium"
-                        : "text-slate-400 hover:text-white hover:bg-white/5"
-                    }`}
-                  >
-                    <span className="text-lg">{n.icon}</span>
-                    <span>{n.label}</span>
-                  </Link>
-                );
-              })}
-            </nav>
-            <div className="px-4 py-4 border-t border-white/10">
-              <div className="text-slate-500 text-xs">บริษัท มีภูมิดี จำกัด</div>
-            </div>
-          </div>
-        </div>
-      )}
+  const profile = <div className="border-t border-white/10 px-4 py-4">
+    <div className="truncate text-sm font-medium text-white">{staff.full_name}</div>
+    <div className="mt-0.5 text-xs text-slate-400">{ROLE_LABELS[staff.role]}</div>
+    <button onClick={signOut} className="mt-3 text-xs text-slate-400 hover:text-white">ออกจากระบบ</button>
+  </div>;
 
-      {/* ── MOBILE: Bottom navigation bar ────────────────────────────── */}
-      <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex border-t border-slate-200 bg-white"
-        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-      >
-        {BOTTOM_NAV.map((n) => {
-          const active = path === n.href || path.startsWith(n.href + "/");
-          return (
-            <Link
-              key={n.href}
-              href={n.href}
-              className={`flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-xs transition-colors ${
-                active ? "text-blue-600" : "text-slate-500"
-              }`}
-            >
-              <span className="text-xl leading-none">{n.icon}</span>
-              <span className="font-medium">{n.label}</span>
-            </Link>
-          );
-        })}
-        <button
-          onClick={() => setMenuOpen(true)}
-          className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-xs text-slate-500"
-        >
-          <span className="text-xl leading-none">☰</span>
-          <span className="font-medium">เพิ่มเติม</span>
-        </button>
-      </nav>
-    </>
-  );
+  return <>
+    <aside className="fixed left-0 top-0 hidden h-screen w-[252px] flex-col bg-slate-950 md:flex">
+      <div className="px-5 pb-4 pt-6"><div className="text-lg font-bold tracking-tight text-white">MPD FloorNow</div><div className="mt-0.5 text-xs text-slate-400">ศูนย์กลางงานติดตั้งพื้น</div></div>
+      <div className="flex-1 overflow-y-auto px-2 pb-4">{navigation}</div>{profile}
+    </aside>
+    <header className="fixed left-0 right-0 top-0 z-40 flex h-14 items-center justify-between bg-slate-950 px-4 md:hidden">
+      <div><div className="font-bold text-white">MPD FloorNow</div><div className="text-[10px] text-slate-400">{ROLE_LABELS[staff.role]}</div></div>
+      <button onClick={() => setMenuOpen(true)} aria-label="เมนู" className="rounded-lg p-2 text-white hover:bg-white/10">☰</button>
+    </header>
+    {menuOpen ? <div className="fixed inset-0 z-50 flex md:hidden" onClick={() => setMenuOpen(false)}>
+      <div className="absolute inset-0 bg-black/60" />
+      <div className="relative z-10 flex h-full w-80 max-w-[88vw] flex-col bg-slate-950 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 pb-4 pt-5"><div><div className="text-lg font-bold text-white">MPD FloorNow</div><div className="text-xs text-slate-400">เมนูสำหรับ{ROLE_LABELS[staff.role]}</div></div><button onClick={() => setMenuOpen(false)} className="p-2 text-slate-300">×</button></div>
+        <div className="flex-1 overflow-y-auto px-2 pb-4">{navigation}</div>{profile}
+      </div>
+    </div> : null}
+    <nav className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-slate-200 bg-white md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+      {core.slice(0, 4).map((item) => <Link key={item.href} href={item.href} className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] ${active(item) ? "text-blue-600" : "text-slate-500"}`}><span className="text-lg leading-none">{item.icon}</span><span className="max-w-20 truncate font-medium">{item.label}</span></Link>)}
+      <button onClick={() => setMenuOpen(true)} className="flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] text-slate-500"><span className="text-lg leading-none">☰</span><span className="font-medium">เพิ่มเติม</span></button>
+    </nav>
+  </>;
 }

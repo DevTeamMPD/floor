@@ -172,6 +172,11 @@ export default function ShareQueuePage() {
   const [detailTechniciansLoading, setDetailTechniciansLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [showSurvey, setShowSurvey] = useState(false);
+
+  useEffect(() => {
+    if (window.matchMedia("(max-width: 640px)").matches) setView("week");
+  }, []);
 
   const week = useMemo(() => getWeekDays(offset), [offset]);
   const monthDays = useMemo(() => getMonthDays(mYear, mMonth), [mYear, mMonth]);
@@ -254,12 +259,14 @@ export default function ShareQueuePage() {
 
   function openAdd(date: Date) {
     setDetail(null);
+    setShowSurvey(false);
     setForm({ ...emptyForm(), date: ymd(date), endDate: ymd(date), tech_id: teams[0]?.id ?? "", jobNo: ipGenOrderNo() });
   }
   async function openEdit(a: Appt) {
     const s = new Date(a.slot_start), e = new Date(a.slot_end);
     const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
     setDetail(null);
+    setShowSurvey(false);
     const base: FormState = { ...emptyForm(), id: a.id, tech_id: a.tech_id ?? "", date: ymd(s), endDate: ymd(s),
       start: hhmm(s), end: hhmm(e), notes: a.notes ?? "", requirement: a.requirement ?? "", jobNo: a.job_id || ipGenOrderNo() };
     if (a.job_id) {
@@ -713,9 +720,9 @@ export default function ShareQueuePage() {
 
       {/* Add / edit form */}
       {form && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setForm(null)}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4" onClick={() => setForm(null)}>
           <div className="absolute inset-0 bg-black/40" />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg z-10 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <div className="relative z-10 flex max-h-[96vh] w-full max-w-lg flex-col rounded-t-3xl bg-white shadow-2xl sm:max-h-[90vh] sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b flex items-center justify-between">
               <h2 className="text-base font-semibold">{form.id ? "แก้ไขคิว/บิล" : "ลงคิว / เปิดบิลใหม่"}</h2>
               <button onClick={() => setForm(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
@@ -807,12 +814,14 @@ export default function ShareQueuePage() {
                 )}
               </div>
 
+              {!isHol && <button type="button" onClick={() => setShowSurvey((value) => !value)} className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-left text-sm font-medium text-slate-700"><span>ข้อมูลสำรวจหน้างาน <span className="font-normal text-slate-400">(กรอกภายหลังได้)</span></span><span>{showSurvey ? "−" : "+"}</span></button>}
+
               {/* สำรวจหน้างาน */}
-              {!isHol && (
+              {!isHol && showSurvey && (
                 <div className="border-t pt-3 space-y-3">
-                  <p className="text-xs font-semibold text-slate-700">🔎 ข้อมูลสำรวจหน้างาน <span className="text-slate-400 font-normal">(ไม่บังคับ — กรอกเท่าที่มี)</span></p>
+                  <p className="text-xs font-semibold text-slate-700">🔎 ข้อมูลสำรวจหน้างาน</p>
                   <div>
-                    <label className="text-xs text-slate-500 block mb-1">พื้นที่ติดตั้ง (ตร.ม.) *</label>
+                    <label className="text-xs text-slate-500 block mb-1">พื้นที่ติดตั้ง (ตร.ม.)</label>
                     <input value={form.survey.areaSqm} onChange={(e) => setSurvey({ areaSqm: e.target.value })} placeholder="เช่น 24.5" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                   </div>
                   <div>

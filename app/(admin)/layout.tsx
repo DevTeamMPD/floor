@@ -1,10 +1,14 @@
 import { Toaster } from "sonner";
 import Sidebar from "@/components/layout/sidebar";
+import { redirect } from "next/navigation";
+import { getCurrentStaff } from "@/lib/staff-server";
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  const staff = await getCurrentStaff();
+  if (!staff) redirect("/login");
   return (
     <div className="flex min-h-screen">
-      <Sidebar />
+      <Sidebar staff={staff} />
       {/*
         Desktop: ml-[252px] to clear the fixed sidebar
         Mobile:  no left margin; pt-14 to clear the fixed top bar;
