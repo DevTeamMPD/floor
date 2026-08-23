@@ -6,7 +6,7 @@ export type WorkOrderStatus = typeof WORK_ORDER_STATUSES[number];
 
 export const WORK_ORDER_STATUS_LABELS: Record<WorkOrderStatus, string> = {
   head_review: "รอหัวหน้าช่างตรวจ",
-  returned_sales: "ส่งกลับฝ่ายขาย",
+  returned_sales: "ส่งกลับต้นทาง",
   warehouse_waiting: "รอคลังรับงาน",
   warehouse_preparing: "กำลังเตรียมสินค้า",
   ready_to_install: "รอติดตั้ง",
