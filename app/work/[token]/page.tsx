@@ -25,6 +25,7 @@ interface WorkProgressEvent {
   customerSignedName: string | null; customerSignaturePath: string | null; occurredAt: string;
 }
 interface WorkProgress { plannedSheetCount: number | null; pickedSheetCount: number | null; events: WorkProgressEvent[] }
+interface StatusFilePreview { id: string; file: File; url: string }
 interface CentralWorkItem { id: string; category: string; itemName: string; sku: string | null; specification: string | null; plannedQty: number; actualQty: number | null; unit: string; sourceType: string; note: string | null }
 interface CentralWorkOrder { id: string; status: string; revision: number; note: string | null; warehouseAssignee: string | null; warehouseAcceptedAt: string | null; warehouseCompletedAt: string | null; isLead: boolean; items: CentralWorkItem[]; events: { id: number; eventType: string; actorName: string; note: string | null; photoPaths: string[]; occurredAt: string }[] }
 interface Workspace {
@@ -151,13 +152,17 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   const [detailJob, setDetailJob] = useState<DetailJob | null>(null);
   const [workProgress, setWorkProgress] = useState<WorkProgress | null>(null);
   const [centralWorkOrder, setCentralWorkOrder] = useState<CentralWorkOrder | null>(null);
-  const [statusFiles, setStatusFiles] = useState<File[]>([]);
+  const [statusFiles, setStatusFiles] = useState<StatusFilePreview[]>([]);
+  const statusFilesRef = useRef<StatusFilePreview[]>([]);
   const [statusNote, setStatusNote] = useState("");
   const [pickedSheetCount, setPickedSheetCount] = useState("");
   const [progressError, setProgressError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [requestedJob, setRequestedJob] = useState<string | null>(null);
   const pinStorageKey = `floor-work-pin:${token}`;
+
+  useEffect(() => { statusFilesRef.current = statusFiles; }, [statusFiles]);
+  useEffect(() => () => { statusFilesRef.current.forEach((item) => URL.revokeObjectURL(item.url)); }, []);
 
   useEffect(() => {
     setRequestedJob(new URLSearchParams(window.location.search).get("job"));
@@ -173,51 +178,8 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     const { data, error } = await supabase.rpc("get_technician_workspace", { p_token: token, p_pin: normalized });
     if (!error && data) {
       const nextWorkspace = data as Workspace;
-      // A team appointment is visible to the team's technicians until the
-      // head technician distributes it to specific people.  This prevents a
-      // confusing empty personal queue after a slot was placed on the team
-      // calendar, while keeping acknowledgement evidence per-person.
-      if (nextWorkspace.technician.teamId) {
-        const { data: teamAppointments } = await supabase
-          .from("appointments")
-          .select("id,job_id,tech_id,slot_start,slot_end,status,notes,requirement,job:install_jobs(job_no,source,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,pick_plan)")
-          .eq("tech_id", nextWorkspace.technician.teamId)
-          .neq("status", "cancelled")
-          .order("slot_start");
-        const personalIds = new Set(nextWorkspace.assignments.map((item) => item.appointmentId));
-        const teamQueue = (teamAppointments ?? [])
-          .filter((appointment) => !personalIds.has(appointment.id))
-          .map((appointment) => {
-            const rawJob = Array.isArray(appointment.job) ? appointment.job[0] : appointment.job;
-            return {
-              assignmentId: null,
-              isLead: false,
-              isTeamQueue: true,
-              firstOpenedAt: null,
-              lastOpenedAt: null,
-              openCount: 0,
-              acknowledgedAt: null,
-              appointmentId: appointment.id,
-              slotStart: appointment.slot_start,
-              slotEnd: appointment.slot_end,
-              appointmentStatus: appointment.status,
-              teamName: nextWorkspace.technician.teamName,
-              notes: appointment.notes,
-              requirement: appointment.requirement,
-              jobNo: rawJob?.job_no ?? appointment.job_id,
-              source: rawJob?.source ?? null,
-              billNo: rawJob?.bill_no ?? null,
-              customerName: rawJob?.customer_name ?? null,
-              customerPhone: rawJob?.customer_phone ?? null,
-              address: rawJob?.address ?? null,
-              locationUrl: rawJob?.location_url ?? null,
-              productName: rawJob?.product_name ?? null,
-              surveyData: rawJob?.survey_data ?? null,
-              pickPlan: rawJob?.pick_plan ?? null,
-            } satisfies WorkAssignment;
-          });
-        nextWorkspace.assignments = [...nextWorkspace.assignments, ...teamQueue];
-      }
+      // Personal links expose only explicitly assigned appointments. Team queues
+      // belong on the head-technician screens and must not leak customer data.
       setWorkspace(nextWorkspace);
       setAuthError(null);
       setLoading(false);
@@ -256,7 +218,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     setDetailJob(null);
     setWorkProgress(null);
     setCentralWorkOrder(null);
-    setStatusFiles([]);
+    clearStatusFiles();
     setStatusNote("");
     setPickedSheetCount("");
     setProgressError(null);
@@ -336,6 +298,21 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     setWorkProgress((data ?? null) as WorkProgress | null);
   }
 
+  function addStatusFiles(files: FileList | null) {
+    const added = Array.from(files ?? []).filter((file) => file.type.startsWith("image/")).map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) }));
+    if (!added.length) { setProgressError("เลือกได้เฉพาะไฟล์รูปภาพ"); return; }
+    setStatusFiles((current) => [...current, ...added]);
+  }
+
+  function removeStatusFile(id: string) {
+    setStatusFiles((current) => { const target = current.find((item) => item.id === id); if (target) URL.revokeObjectURL(target.url); return current.filter((item) => item.id !== id); });
+  }
+
+  function clearStatusFiles() {
+    statusFilesRef.current.forEach((item) => URL.revokeObjectURL(item.url));
+    setStatusFiles([]);
+  }
+
   async function updateWorkStatus() {
     if (!selected?.assignmentId) return;
     const coreEvents = (workProgress?.events ?? []).filter((event) => event.status !== "customer_signed");
@@ -349,7 +326,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     const paths: string[] = [];
     try {
       for (let index = 0; index < statusFiles.length; index++) {
-        const file = statusFiles[index];
+        const file = statusFiles[index].file;
         const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
         const path = `work/${selected.appointmentId}/${next.status}/${Date.now()}-${index}-${safe}`;
         const { error } = await supabase.storage.from("job-photos").upload(path, file, { upsert: false, contentType: file.type || "image/jpeg" });
@@ -363,7 +340,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
         p_note: statusNote.trim() || null,
       });
       if (error) throw error;
-      setStatusFiles([]); setStatusNote("");
+      clearStatusFiles(); setStatusNote("");
       await reloadProgress(selected.assignmentId);
     } catch (error) {
       setProgressError(error instanceof Error ? error.message : "บันทึกสถานะไม่สำเร็จ");
@@ -572,8 +549,8 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
                     <div className="text-sm font-semibold text-blue-950">ขั้นต่อไป: {next.status === "travelling" && centralWorkOrder ? "รับงานติดตั้งและเริ่มเดินทาง" : next.label}</div>
                     {next.status === "travelling" ? <div className="mt-3"><label className="text-xs font-medium text-blue-800">จำนวนแผ่นที่หยิบจริง *</label><div className="mt-1 flex items-center gap-2"><input type="number" min={0} step={1} value={pickedSheetCount} onChange={(event) => setPickedSheetCount(event.target.value)} placeholder="จำนวนแผ่น" className="min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm" /><span className="text-xs text-blue-700">แผน {workProgress?.plannedSheetCount ?? "—"} แผ่น</span></div></div> : null}
                     <textarea value={statusNote} onChange={(event) => setStatusNote(event.target.value)} rows={2} placeholder="หมายเหตุ (ถ้ามี)" className="mt-3 w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm" />
-                    <label className="mt-3 block cursor-pointer rounded-xl border border-dashed border-blue-300 bg-white px-3 py-3 text-center text-sm font-medium text-blue-700">📷 ถ่ายรูป / เลือกรูป<input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(event) => setStatusFiles(Array.from(event.target.files ?? []))} /></label>
-                    {statusFiles.length ? <div className="mt-2 text-xs text-blue-700">เลือกรูปแล้ว {statusFiles.length} รูป</div> : null}
+                    <label className="mt-3 block cursor-pointer rounded-xl border border-dashed border-blue-300 bg-white px-3 py-3 text-center text-sm font-medium text-blue-700">📷 ถ่ายรูป / เพิ่มรูป<input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(event) => { addStatusFiles(event.target.files); event.currentTarget.value = ""; }} /></label>
+                    {statusFiles.length ? <div className="mt-3"><div className="mb-2 flex items-center justify-between"><div className="text-xs font-semibold text-blue-800">ภาพที่เลือก ({statusFiles.length})</div><button type="button" onClick={clearStatusFiles} className="text-xs font-medium text-red-500">ล้างทั้งหมด</button></div><div className="grid grid-cols-3 gap-2">{statusFiles.map((item, index) => <div key={item.id} className="relative aspect-square overflow-hidden rounded-xl border border-blue-200 bg-white"><img src={item.url} alt={`ภาพสถานะ ${index + 1}`} className="h-full w-full object-cover" /><button type="button" onClick={() => removeStatusFile(item.id)} aria-label={`ลบภาพ ${index + 1}`} className="absolute right-1.5 top-1.5 rounded-full bg-black/70 px-2 py-1 text-[10px] font-semibold text-white">ลบ</button><span className="absolute bottom-1.5 left-1.5 rounded-full bg-black/65 px-2 py-1 text-[10px] text-white">{index + 1}</span></div>)}</div></div> : <div className="mt-2 text-xs text-blue-600">ยังไม่ได้เลือกรูป</div>}
                     <button onClick={() => void updateWorkStatus()} disabled={saving} className="mt-3 w-full rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving ? "กำลังบันทึก…" : next.status === "travelling" && centralWorkOrder ? "รับงานติดตั้ง" : next.button}</button>
                   </div> : null}
                   {next && selected.acknowledgedAt && !workReady ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">ยังเริ่มงานไม่ได้: ใบสั่งงานอยู่สถานะ {{ head_review: "รอหัวหน้าช่างตรวจ", warehouse_waiting: "รอคลังรับงาน", warehouse_preparing: "กำลังเตรียมสินค้า" }[centralWorkOrder?.status ?? ""] ?? centralWorkOrder?.status}</div> : null}

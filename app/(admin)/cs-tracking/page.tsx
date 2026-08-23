@@ -39,6 +39,10 @@ interface JobRow extends Job {
   work_order_status: string | null;
 }
 
+function bangkokToday() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+
 function StageBadge({ stage }: { stage: number }) {
   const s = IP_STAGES.find((x) => x.id === stage);
   if (!s) return null;
@@ -67,7 +71,7 @@ function EvalModal({ row, questions, onClose, onSaved }: {
   const ev = row.evaluation;
   const [score, setScore]       = useState(ev?.score ?? 0);
   const [csName, setCsName]     = useState(ev?.cs_name ?? "");
-  const [callDate, setCallDate] = useState(ev?.call_date ?? "");
+  const [callDate, setCallDate] = useState(ev?.call_date ?? bangkokToday());
   const [issues, setIssues]     = useState(ev?.issues_text ?? "");
   const [followup, setFollowup] = useState(ev?.needs_followup ?? false);
   const [answers, setAnswers]   = useState<Record<string, string>>(ev?.answers ?? {});
@@ -75,6 +79,8 @@ function EvalModal({ row, questions, onClose, onSaved }: {
 
   async function save() {
     if (!score) { toast.error("กรุณาให้คะแนนความพึงพอใจ"); return; }
+    if (!csName.trim()) { toast.error("กรุณาระบุชื่อ CS ที่โทร"); return; }
+    if (!callDate) { toast.error("กรุณาระบุวันที่โทร"); return; }
     setSaving(true);
     try {
       const payload = {
