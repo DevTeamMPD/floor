@@ -66,9 +66,9 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     const decodedJobNo = decodeURIComponent(jobNo);
-    const [jobResult, latestApptResult, orderResult, profileResult, techResult, teamResult, materialResult] = await Promise.all([
+    const [jobResult, apptResult, orderResult, profileResult, techResult, teamResult, materialResult] = await Promise.all([
       supabase.from("install_jobs").select("job_no,source,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,raw_payload,site_photos,pick_plan,status,sku,product_skus,flag_note").eq("job_no", decodedJobNo).maybeSingle(),
-      supabase.from("appointments").select("id,job_id,tech_id,slot_start,slot_end,status,notes,requirement").eq("job_id", decodedJobNo).neq("status", "cancelled").order("slot_start", { ascending: false }).limit(1).maybeSingle(),
+      supabase.from("appointments").select("id,job_id,tech_id,slot_start,slot_end,status,notes,requirement").eq("job_id", decodedJobNo).neq("status", "cancelled").order("slot_start", { ascending: false }),
       supabase.from("floor_work_orders").select("*").eq("job_no", decodedJobNo).order("created_at", { ascending: false }).limit(1).maybeSingle(),
       user ? supabase.from("floor_staff_profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
       // Load inactive rows too so old assignments retain the technician name and evidence.
@@ -77,8 +77,16 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
       supabase.from("tech_teams").select("id,name").eq("is_active", true).order("name"),
       supabase.from("materials").select("id,sku,name,unit,qty_on_hand").order("sku"),
     ]);
-    const wo = orderResult.data as WorkOrder | null; let appt = latestApptResult.data as Appointment | null;
-    if (wo && appt?.id !== wo.appointment_id) {
+    const appointments = (apptResult.data ?? []) as Appointment[];
+    let wo = orderResult.data as WorkOrder | null;
+    // Older synchronized records may carry a legacy work-order job_no. In that case,
+    // resolve through every appointment belonging to the current install job.
+    if (!wo && appointments.length) {
+      const { data: linkedOrder } = await supabase.from("floor_work_orders").select("*").in("appointment_id", appointments.map((row) => row.id)).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      wo = linkedOrder as WorkOrder | null;
+    }
+    let appt = wo ? appointments.find((row) => row.id === wo.appointment_id) ?? null : appointments[0] ?? null;
+    if (wo && !appt) {
       const { data: linkedAppointment } = await supabase.from("appointments").select("id,job_id,tech_id,slot_start,slot_end,status,notes,requirement").eq("id", wo.appointment_id).maybeSingle();
       appt = linkedAppointment as Appointment | null;
     }
