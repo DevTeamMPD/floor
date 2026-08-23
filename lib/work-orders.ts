@@ -33,6 +33,8 @@ export interface WorkOrder {
   warehouse_accepted_at: string | null; warehouse_completed_at: string | null;
   installation_lead_assignment_id: string | null; installation_accepted_at: string | null;
   waiting_cs_at: string | null; closed_at: string | null; note: string | null; created_at: string; updated_at: string;
+  external_share_token: string; external_share_enabled: boolean;
+  returned_reason: string | null; returned_by: string | null; returned_at: string | null; resubmitted_at: string | null;
 }
 
 export interface WorkOrderItem {

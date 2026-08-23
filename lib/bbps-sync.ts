@@ -80,7 +80,7 @@ async function upsertTicket(supabase: SupabaseClient, j: BbpsJob, dates: string[
   const fallbackJobNo = jobNoFor(j.id);
   const { data: existing, error: findError } = await supabase
     .from("install_jobs")
-    .select("job_no, status, appt_date")
+    .select("job_no, status, appt_date, raw_payload")
     .eq("source", "bbps")
     .eq("external_id", j.id)
     .maybeSingle();
@@ -117,9 +117,11 @@ async function upsertTicket(supabase: SupabaseClient, j: BbpsJob, dates: string[
   if (existing) {
     const reactivated = existing.status === "BBPS ออกจากคิว" || existing.status === "ยกเลิกคิว";
     const keepApproved = existing.status === "ยืนยันคิวแล้ว" || existing.status === "ติดตั้งสำเร็จ";
+    const payloadChanged = JSON.stringify(existing.raw_payload ?? null) !== JSON.stringify(j);
+    const keepReturned = existing.status === "ส่งกลับ BBPS แก้ไข" && !payloadChanged;
     const { error } = await supabase.from("install_jobs").update({
       ...shared,
-      ...(!keepApproved || reactivated ? {
+      ...((!keepApproved && !keepReturned) || reactivated ? {
         status: needsInfo ? "รอฝ่ายขายเติมข้อมูล" : "รอหัวหน้าช่างยืนยัน",
         waiting_on: needsInfo ? "ฝ่ายขาย" : "หัวหน้าช่าง",
         waiting_since: new Date().toISOString(),

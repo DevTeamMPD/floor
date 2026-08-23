@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PREFIXES = ["/login", "/auth", "/work", "/dispatch", "/track", "/eval", "/api"];
+const PUBLIC_PREFIXES = ["/login", "/auth", "/work", "/dispatch", "/track", "/status", "/eval", "/api"];
 const ROLE_ACCESS: Record<string, string[]> = {
   sales: ["/", "/sales-queue", "/share/queue", "/tech-queue", "/orders"],
   head_technician: ["/", "/operations", "/orders", "/appointments", "/pipeline", "/technicians", "/ncr"],
