@@ -27,7 +27,9 @@ export default function OperationsPage() {
     const [appointmentResult, teamResult, technicianResult, assignmentResult, orderResult] = await Promise.all([
       supabase.from("appointments").select("id,job_id,tech_id,slot_start,slot_end,status,notes,requirement,job:install_jobs(job_no,source,bill_no,customer_name,customer_phone,address,location_url,product_name,status,flag_note,survey_data,site_photos)").neq("status", "cancelled").gte("slot_end", since).order("slot_start"),
       supabase.from("tech_teams").select("id,name").eq("is_active", true).order("name"),
-      supabase.from("floor_technicians").select("id,team_id,name,phone,is_team_lead,is_active,created_at,updated_at,personal_token").eq("is_active", true).order("name"),
+      // Keep inactive technicians in the lookup so historical assignments still show the real name.
+      // The assignment dialog itself only offers technicians whose is_active flag is true.
+      supabase.from("floor_technicians").select("id,team_id,name,phone,is_team_lead,is_active,created_at,updated_at,personal_token").order("name"),
       supabase.from("appointment_technicians").select("*").eq("is_active", true).order("assigned_at"),
       supabase.from("floor_work_orders").select("*").neq("status", "cancelled").order("updated_at", { ascending: false }),
     ]);
