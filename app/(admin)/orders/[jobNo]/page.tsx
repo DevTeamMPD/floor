@@ -69,7 +69,9 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
       supabase.from("install_jobs").select("job_no,source,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,raw_payload,site_photos,pick_plan,status,sku,product_skus,flag_note").eq("job_no", decodeURIComponent(jobNo)).maybeSingle(),
       supabase.from("appointments").select("id,job_id,tech_id,slot_start,slot_end,status,notes,requirement").eq("job_id", decodeURIComponent(jobNo)).neq("status", "cancelled").order("slot_start", { ascending: false }).limit(1).maybeSingle(),
       user ? supabase.from("floor_staff_profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
-      supabase.from("floor_technicians").select("id,team_id,personal_token,name,phone,is_team_lead,is_active,created_at,updated_at,pin_updated_at").eq("is_active", true),
+      // Load inactive rows too so old assignments retain the technician name and evidence.
+      // TechnicianAssignmentButton filters the selectable list to active technicians.
+      supabase.from("floor_technicians").select("id,team_id,personal_token,name,phone,is_team_lead,is_active,created_at,updated_at,pin_updated_at"),
       supabase.from("tech_teams").select("id,name").eq("is_active", true).order("name"),
       supabase.from("materials").select("id,sku,name,unit,qty_on_hand").order("sku"),
     ]);
