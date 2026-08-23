@@ -142,7 +142,7 @@ export default function AppointmentsPage() {
         .order('slot_start'),
       supabase.from('tech_teams').select('*').order('name'),
       supabase.from('install_jobs').select('job_no,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,stage,status,source,waiting_on,flag_note').order('job_no', { ascending: false }).limit(200),
-      supabase.from('floor_technicians').select('id,team_id,name,phone,is_team_lead,is_active,created_at,updated_at').order('name'),
+      supabase.from('floor_technicians').select('id,team_id,personal_token,name,phone,is_team_lead,is_active,created_at,updated_at,pin_updated_at').order('name'),
       supabase.from('appointment_technicians').select('*').order('assigned_at'),
     ]);
     setAppointments((apptData ?? []) as Appointment[]);
@@ -338,7 +338,7 @@ export default function AppointmentsPage() {
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => setShowIndividuals(true)}
             className="px-3 py-1.5 text-sm border border-violet-200 rounded-lg text-violet-700 hover:bg-violet-50">
-            👤 รายชื่อช่าง
+            👤 ช่าง / PIN
           </button>
           <button onClick={() => setShowTechs(true)}
             className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
