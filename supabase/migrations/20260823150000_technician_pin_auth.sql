@@ -42,7 +42,7 @@ begin
   end if;
 
   update public.floor_technicians
-  set pin_hash = crypt(v_pin, gen_salt('bf')),
+  set pin_hash = extensions.crypt(v_pin, extensions.gen_salt('bf')),
       pin_updated_at = now(),
       updated_at = now()
   where id = v_technician.id;
@@ -88,7 +88,7 @@ begin
   if v_technician.pin_hash is null then
     raise exception 'pin not configured';
   end if;
-  if crypt(v_pin, v_technician.pin_hash) <> v_technician.pin_hash then
+  if extensions.crypt(v_pin, v_technician.pin_hash) <> v_technician.pin_hash then
     raise exception 'invalid pin';
   end if;
 
@@ -129,7 +129,7 @@ as $$
     where t.personal_token = p_token
       and t.is_active = true
       and t.pin_hash is not null
-      and crypt(regexp_replace(coalesce(p_pin, ''), '\s+', '', 'g'), t.pin_hash) = t.pin_hash
+      and extensions.crypt(regexp_replace(coalesce(p_pin, ''), '\s+', '', 'g'), t.pin_hash) = t.pin_hash
   )
   select jsonb_build_object(
     'technician', jsonb_build_object(
@@ -208,7 +208,7 @@ begin
     and t.is_active = true
     and t.personal_token = p_token
     and t.pin_hash is not null
-    and crypt(regexp_replace(coalesce(p_pin, ''), '\s+', '', 'g'), t.pin_hash) = t.pin_hash;
+    and extensions.crypt(regexp_replace(coalesce(p_pin, ''), '\s+', '', 'g'), t.pin_hash) = t.pin_hash;
 
   if v_assignment_id is null then
     return false;

@@ -5,7 +5,8 @@
 -- 1) เพิ่ม pin_hash ใน floor_technician_devices
 ALTER TABLE public.floor_technician_devices
   ADD COLUMN IF NOT EXISTS pin_hash text,
-  ADD COLUMN IF NOT EXISTS pin_set_at timestamptz;
+  ADD COLUMN IF NOT EXISTS pin_set_at timestamptz,
+  ADD COLUMN IF NOT EXISTS device_secret text;
 
 -- 2) RPC: register_floor_technician_device_pin
 --    แทน register_floor_technician_device (ยังคงอันเดิมไว้ compatibility)
@@ -36,12 +37,10 @@ BEGIN
     RAISE EXCEPTION 'ไม่พบพนักงาน — ลิงก์ไม่ถูกต้องหรือหมดอายุ';
   END IF;
 
-  -- upsert device (1 เครื่อง ต่อ personal_token ต่อ platform ต่อ device_name)
-  -- ถ้า enroll ใหม่บนเครื่องเดิม → อัปเดต token + pin
   INSERT INTO public.floor_technician_devices (
     technician_id, device_token, device_secret,
     platform, device_name, app_version,
-    background_permission, registered_at,
+    background_permission, enrolled_at,
     pin_hash, pin_set_at
   )
   VALUES (
@@ -49,15 +48,7 @@ BEGIN
     p_platform, p_device_name, p_app_version,
     'unknown', now(),
     p_pin_hash, now()
-  )
-  ON CONFLICT (technician_id, platform, device_name)
-  DO UPDATE SET
-    device_token   = EXCLUDED.device_token,
-    device_secret  = EXCLUDED.device_secret,
-    app_version    = EXCLUDED.app_version,
-    registered_at  = now(),
-    pin_hash       = EXCLUDED.pin_hash,
-    pin_set_at     = now();
+  );
 
   RETURN jsonb_build_object(
     'deviceToken',  v_device_token,
