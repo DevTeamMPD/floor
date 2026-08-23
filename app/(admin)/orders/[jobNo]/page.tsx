@@ -65,9 +65,11 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
   const load = useCallback(async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
-    const [jobResult, apptResult, profileResult, techResult, teamResult, materialResult] = await Promise.all([
-      supabase.from("install_jobs").select("job_no,source,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,raw_payload,site_photos,pick_plan,status,sku,product_skus,flag_note").eq("job_no", decodeURIComponent(jobNo)).maybeSingle(),
-      supabase.from("appointments").select("id,job_id,tech_id,slot_start,slot_end,status,notes,requirement").eq("job_id", decodeURIComponent(jobNo)).neq("status", "cancelled").order("slot_start", { ascending: false }).limit(1).maybeSingle(),
+    const decodedJobNo = decodeURIComponent(jobNo);
+    const [jobResult, latestApptResult, orderResult, profileResult, techResult, teamResult, materialResult] = await Promise.all([
+      supabase.from("install_jobs").select("job_no,source,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,raw_payload,site_photos,pick_plan,status,sku,product_skus,flag_note").eq("job_no", decodedJobNo).maybeSingle(),
+      supabase.from("appointments").select("id,job_id,tech_id,slot_start,slot_end,status,notes,requirement").eq("job_id", decodedJobNo).neq("status", "cancelled").order("slot_start", { ascending: false }).limit(1).maybeSingle(),
+      supabase.from("floor_work_orders").select("*").eq("job_no", decodedJobNo).order("created_at", { ascending: false }).limit(1).maybeSingle(),
       user ? supabase.from("floor_staff_profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
       // Load inactive rows too so old assignments retain the technician name and evidence.
       // TechnicianAssignmentButton filters the selectable list to active technicians.
@@ -75,22 +77,23 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
       supabase.from("tech_teams").select("id,name").eq("is_active", true).order("name"),
       supabase.from("materials").select("id,sku,name,unit,qty_on_hand").order("sku"),
     ]);
-    const appt = apptResult.data as Appointment | null; const loadedJob = jobResult.data as Job | null; const loadedMaterials = (materialResult.data ?? []) as Material[];
-    setJob(loadedJob); setAppointment(appt); setRole((profileResult.data?.role as StaffRole | undefined) ?? null); setTechnicians((techResult.data ?? []) as Technician[]); setTeams((teamResult.data ?? []) as Team[]); setMaterials(loadedMaterials);
-    if (appt) {
-      const [orderResult, assignmentResult] = await Promise.all([
-        supabase.from("floor_work_orders").select("*").eq("appointment_id", appt.id).maybeSingle(),
-        supabase.from("appointment_technicians").select("*").eq("appointment_id", appt.id).eq("is_active", true),
-      ]);
-      const wo = orderResult.data as WorkOrder | null; setOrder(wo); setAssignments((assignmentResult.data ?? []) as Assignment[]); setNote(wo?.note ?? "");
-      if (wo) {
-        const [itemResult, eventResult] = await Promise.all([
-          supabase.from("floor_work_order_items").select("*").eq("work_order_id", wo.id).order("sort_order"),
-          supabase.from("floor_work_order_events").select("*").eq("work_order_id", wo.id).order("occurred_at", { ascending: false }),
-        ]);
-        const saved = (itemResult.data ?? []) as WorkOrderItem[]; const legacy = legacyItems(loadedJob?.pick_plan); setItems(saved.length ? saved.map(fromSaved) : legacy.length ? legacy : skuItems(loadedJob, loadedMaterials)); setEvents((eventResult.data ?? []) as WorkOrderEvent[]);
-      }
+    const wo = orderResult.data as WorkOrder | null; let appt = latestApptResult.data as Appointment | null;
+    if (wo && appt?.id !== wo.appointment_id) {
+      const { data: linkedAppointment } = await supabase.from("appointments").select("id,job_id,tech_id,slot_start,slot_end,status,notes,requirement").eq("id", wo.appointment_id).maybeSingle();
+      appt = linkedAppointment as Appointment | null;
     }
+    const loadedJob = jobResult.data as Job | null; const loadedMaterials = (materialResult.data ?? []) as Material[];
+    setJob(loadedJob); setAppointment(appt); setRole((profileResult.data?.role as StaffRole | undefined) ?? null); setTechnicians((techResult.data ?? []) as Technician[]); setTeams((teamResult.data ?? []) as Team[]); setMaterials(loadedMaterials);
+    setOrder(wo); setNote(wo?.note ?? "");
+    if (appt && wo) {
+      const [assignmentResult, itemResult, eventResult] = await Promise.all([
+        supabase.from("appointment_technicians").select("*").eq("appointment_id", appt.id).eq("is_active", true),
+        supabase.from("floor_work_order_items").select("*").eq("work_order_id", wo.id).order("sort_order"),
+        supabase.from("floor_work_order_events").select("*").eq("work_order_id", wo.id).order("occurred_at", { ascending: false }),
+      ]);
+      setAssignments((assignmentResult.data ?? []) as Assignment[]);
+      const saved = (itemResult.data ?? []) as WorkOrderItem[]; const legacy = legacyItems(loadedJob?.pick_plan); setItems(saved.length ? saved.map(fromSaved) : legacy.length ? legacy : skuItems(loadedJob, loadedMaterials)); setEvents((eventResult.data ?? []) as WorkOrderEvent[]);
+    } else { setAssignments([]); setItems([]); setEvents([]); }
     setLoading(false);
   }, [jobNo, supabase]);
   useEffect(() => { void load(); }, [load]);
