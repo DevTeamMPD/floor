@@ -58,11 +58,42 @@ interface WorkOrder {
   design_images?: string[] | null;
   site_photos?: string[] | null;
 }
+interface PickNewItem {
+  width?: string | null;
+  length_cm?: string | null;
+  qty?: string | null;
+  note?: string | null;
+}
+interface PickRemnant {
+  mat_type?: string | null;
+  width_bin?: string | null;
+  length_cm?: string | null;
+  note?: string | null;
+}
+interface PickPlan {
+  newItems?: PickNewItem[];
+  remnants?: PickRemnant[];
+  note?: string | null;
+}
 
 function workOrdersOf(payload: unknown): WorkOrder[] {
   if (!payload || typeof payload !== "object") return [];
   const rows = (payload as { workOrders?: unknown }).workOrders;
   return Array.isArray(rows) ? rows.filter((row): row is WorkOrder => Boolean(row && typeof row === "object")) : [];
+}
+
+function pickPlanOf(payload: unknown): PickPlan | null {
+  if (!payload) return null;
+  try {
+    const parsed = typeof payload === "string" ? JSON.parse(payload) : payload;
+    return parsed && typeof parsed === "object" ? parsed as PickPlan : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasPickPlan(plan: PickPlan | null) {
+  return Boolean(plan && ((plan.newItems?.length ?? 0) > 0 || (plan.remnants?.length ?? 0) > 0 || (typeof plan.note === "string" && plan.note.trim())));
 }
 
 function thaiDate(value: string) {
@@ -257,6 +288,39 @@ function WorkOrderDetails({ payload }: { payload: unknown }) {
           </View>
         );
       })}
+    </View>
+  );
+}
+
+function PickPlanDetails({ payload }: { payload: unknown }) {
+  const plan = pickPlanOf(payload);
+  if (!hasPickPlan(plan)) return null;
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>ใบสั่งงาน — ของที่ต้องหยิบ</Text>
+      {plan?.newItems?.length ? (
+        <View style={styles.pickBlock}>
+          <Text style={styles.pickBlockTitle}>ของใหม่ที่ต้องเบิก</Text>
+          {plan.newItems.map((item, index) => (
+            <View key={`new-${index}`} style={styles.pickItem}>
+              <Text style={styles.factValue}>หน้ากว้าง {item.width || "—"} ซม. · ยาว {item.length_cm || "—"} ซม. · จำนวน {item.qty || "—"}</Text>
+              {item.note ? <Text style={styles.factLabel}>{item.note}</Text> : null}
+            </View>
+          ))}
+        </View>
+      ) : null}
+      {plan?.remnants?.length ? (
+        <View style={styles.pickBlock}>
+          <Text style={styles.pickBlockTitle}>เศษที่ให้หยิบไปใช้</Text>
+          {plan.remnants.map((item, index) => (
+            <View key={`remnant-${index}`} style={styles.pickItem}>
+              <Text style={styles.factValue}>{item.mat_type || "เศษวัสดุ"} · กว้าง {item.width_bin || "—"} · ยาว {item.length_cm || "—"} ซม.</Text>
+              {item.note ? <Text style={styles.factLabel}>{item.note}</Text> : null}
+            </View>
+          ))}
+        </View>
+      ) : null}
+      {plan?.note ? <View style={styles.pickItem}><Text style={styles.factValue}>{plan.note}</Text></View> : null}
     </View>
   );
 }
@@ -539,6 +603,7 @@ export default function App() {
             </View>
 
             <WorkOrderDetails payload={selected.rawPayload} />
+            <PickPlanDetails payload={selected.pickPlan} />
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>วัสดุที่นำไปหน้างาน</Text>
@@ -631,6 +696,9 @@ const styles = StyleSheet.create({
   factValue: { color: "#263248", lineHeight: 20 },
   workOrder: { backgroundColor: "#f6f8fc", borderRadius: 11, padding: 12, gap: 9 },
   workOrderTitle: { color: "#3f3b87", fontWeight: "700" },
+  pickBlock: { gap: 7 },
+  pickBlockTitle: { color: "#9a5a08", fontSize: 13, fontWeight: "700" },
+  pickItem: { backgroundColor: "#fff8e8", borderRadius: 10, padding: 10, gap: 3 },
   photoStrip: { marginTop: 2 },
   photo: { width: 130, height: 92, borderRadius: 9, marginRight: 8, backgroundColor: "#e9eef5" },
   materialRow: { flexDirection: "row", justifyContent: "space-between", backgroundColor: "#f6f8fc", borderRadius: 10, padding: 12 },

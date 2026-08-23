@@ -9,12 +9,15 @@ interface WorkAssignment {
   appointmentStatus: string; teamName: string | null; notes: string | null; requirement: string | null;
   jobNo: string | null; source: string | null; billNo: string | null; customerName: string | null;
   customerPhone: string | null; address: string | null; locationUrl: string | null; productName: string | null;
-  surveyData: string | null;
+  surveyData: string | null; pickPlan: unknown;
 }
 interface Workspace {
   technician: { id: string; name: string; phone: string | null; teamId: string | null; teamName: string | null; isTeamLead: boolean };
   assignments: WorkAssignment[];
 }
+interface PickNewItem { width?: string | null; length_cm?: string | null; qty?: string | null; note?: string | null }
+interface PickRemnant { mat_type?: string | null; width_bin?: string | null; length_cm?: string | null; note?: string | null }
+interface PickPlan { newItems?: PickNewItem[]; remnants?: PickRemnant[]; note?: string | null }
 
 function thaiDate(iso: string) {
   return new Date(iso).toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Bangkok" });
@@ -24,6 +27,38 @@ function time(iso: string) {
 }
 function dateKey(iso: string) {
   return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
+}
+function parsePickPlan(value: unknown): PickPlan | null {
+  if (!value) return null;
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    return parsed && typeof parsed === "object" ? parsed as PickPlan : null;
+  } catch {
+    return null;
+  }
+}
+function hasPickPlan(plan: PickPlan | null) {
+  return Boolean(plan && ((plan.newItems?.length ?? 0) > 0 || (plan.remnants?.length ?? 0) > 0 || (typeof plan.note === "string" && plan.note.trim())));
+}
+function PickPlanDetails({ value }: { value: unknown }) {
+  const plan = parsePickPlan(value);
+  if (!hasPickPlan(plan)) return null;
+  return <section className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+    <div className="font-semibold text-amber-950">ใบสั่งงาน — ของที่ต้องหยิบ</div>
+    {plan?.newItems?.length ? <div className="mt-3">
+      <div className="text-xs font-medium text-amber-700">ของใหม่ที่ต้องเบิก</div>
+      <div className="mt-1 space-y-1.5">{plan.newItems.map((item, index) => <div key={index} className="rounded-lg bg-white px-3 py-2 text-xs text-slate-700">
+        หน้ากว้าง {item.width || "—"} ซม. · ยาว {item.length_cm || "—"} ซม. · จำนวน {item.qty || "—"}{item.note ? ` · ${item.note}` : ""}
+      </div>)}</div>
+    </div> : null}
+    {plan?.remnants?.length ? <div className="mt-3">
+      <div className="text-xs font-medium text-amber-700">เศษที่ให้หยิบไปใช้</div>
+      <div className="mt-1 space-y-1.5">{plan.remnants.map((item, index) => <div key={index} className="rounded-lg bg-white px-3 py-2 text-xs text-slate-700">
+        {item.mat_type || "เศษวัสดุ"} · กว้าง {item.width_bin || "—"} · ยาว {item.length_cm || "—"} ซม.{item.note ? ` · ${item.note}` : ""}
+      </div>)}</div>
+    </div> : null}
+    {plan?.note ? <div className="mt-3 whitespace-pre-wrap rounded-lg bg-white px-3 py-2 text-xs text-slate-700">{plan.note}</div> : null}
+  </section>;
 }
 
 export default function TechnicianWorkspacePage({ params }: { params: Promise<{ token: string }> }) {
@@ -175,6 +210,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
           {selected.locationUrl ? <a href={selected.locationUrl} target="_blank" rel="noopener noreferrer" className="block text-center border border-blue-200 text-blue-700 rounded-lg py-2">📍 เปิด Google Maps</a> : null}
           <div><div className="text-xs text-slate-400">สเปก / Requirement</div><div className="whitespace-pre-wrap">{selected.productName ?? selected.requirement ?? "—"}</div></div>
           {selected.notes ? <div><div className="text-xs text-slate-400">หมายเหตุ</div><div className="whitespace-pre-wrap">{selected.notes}</div></div> : null}
+          <PickPlanDetails value={selected.pickPlan} />
         </div>
         <div className="p-4 border-t"><button onClick={acknowledge} disabled={saving || Boolean(selected.acknowledgedAt)} className="w-full rounded-xl py-3 bg-emerald-600 text-white font-medium disabled:bg-emerald-100 disabled:text-emerald-700">{selected.acknowledgedAt ? "✓ รับทราบงานแล้ว" : saving ? "กำลังบันทึก…" : "รับทราบงาน"}</button></div>
       </div>
