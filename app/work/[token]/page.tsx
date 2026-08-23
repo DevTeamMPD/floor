@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 
@@ -20,6 +20,11 @@ interface ResponsibleTechnician {
   technician: { name: string | null; phone: string | null; is_team_lead: boolean | null } | null;
 }
 interface DetailJob { raw_payload: unknown; site_photos: string[] | null; survey_data: string | null }
+interface WorkProgressEvent {
+  id: number; status: string; note: string | null; photoPaths: string[]; pickedSheetCount: number | null;
+  customerSignedName: string | null; customerSignaturePath: string | null; occurredAt: string;
+}
+interface WorkProgress { plannedSheetCount: number | null; pickedSheetCount: number | null; events: WorkProgressEvent[] }
 interface Workspace {
   technician: { id: string; name: string; phone: string | null; teamId: string | null; teamName: string | null; isTeamLead: boolean };
   assignments: WorkAssignment[];
@@ -93,6 +98,45 @@ function WorkSection({ title, subtitle, children }: { title: string; subtitle?: 
   </section>;
 }
 
+const WORK_STEPS = [
+  { status: "travelling", label: "กำลังเดินทาง", button: "เริ่มเดินทาง" },
+  { status: "arrived", label: "ถึงบ้านลูกค้าแล้ว", button: "ยืนยันถึงหน้างาน" },
+  { status: "installing", label: "กำลังติดตั้ง", button: "เริ่มติดตั้ง" },
+  { status: "completed", label: "ติดตั้งงานเสร็จสมบูรณ์", button: "ยืนยันติดตั้งเสร็จ" },
+] as const;
+
+function CustomerSignature({ busy, onSubmit }: { busy: boolean; onSubmit: (name: string, blob: Blob) => Promise<void> }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawing = useRef(false);
+  const [name, setName] = useState("");
+  const [hasInk, setHasInk] = useState(false);
+
+  function point(event: React.PointerEvent<HTMLCanvasElement>) {
+    const canvas = canvasRef.current!; const rect = canvas.getBoundingClientRect();
+    return { x: (event.clientX - rect.left) * (canvas.width / rect.width), y: (event.clientY - rect.top) * (canvas.height / rect.height) };
+  }
+  function start(event: React.PointerEvent<HTMLCanvasElement>) {
+    const canvas = canvasRef.current!; const ctx = canvas.getContext("2d")!; const p = point(event);
+    drawing.current = true; canvas.setPointerCapture(event.pointerId); ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineWidth = 4; ctx.lineCap = "round"; ctx.strokeStyle = "#0f172a";
+  }
+  function move(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (!drawing.current) return; const ctx = canvasRef.current!.getContext("2d")!; const p = point(event); ctx.lineTo(p.x, p.y); ctx.stroke(); setHasInk(true);
+  }
+  function stop() { drawing.current = false; }
+  function clear() { canvasRef.current?.getContext("2d")?.clearRect(0, 0, 700, 240); setHasInk(false); }
+  async function submit() {
+    if (!name.trim() || !hasInk || !canvasRef.current) return;
+    const blob = await new Promise<Blob | null>((resolve) => canvasRef.current!.toBlob(resolve, "image/png"));
+    if (blob) await onSubmit(name.trim(), blob);
+  }
+
+  return <div className="space-y-3">
+    <input value={name} onChange={(event) => setName(event.target.value)} placeholder="ชื่อผู้รับงาน" className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+    <div className="overflow-hidden rounded-xl border border-dashed border-slate-300 bg-white"><canvas ref={canvasRef} width={700} height={240} onPointerDown={start} onPointerMove={move} onPointerUp={stop} onPointerCancel={stop} className="h-40 w-full touch-none" /></div>
+    <div className="flex gap-2"><button type="button" onClick={clear} className="flex-1 rounded-xl border border-slate-300 py-2 text-sm">ล้างลายเซ็น</button><button type="button" onClick={() => void submit()} disabled={busy || !name.trim() || !hasInk} className="flex-1 rounded-xl bg-blue-600 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? "กำลังบันทึก…" : "ลูกค้าเซ็นรับงาน"}</button></div>
+  </div>;
+}
+
 export default function TechnicianWorkspacePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
   const supabase = useMemo(() => createClient(), []);
@@ -103,8 +147,18 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   const [selected, setSelected] = useState<WorkAssignment | null>(null);
   const [responsibles, setResponsibles] = useState<ResponsibleTechnician[]>([]);
   const [detailJob, setDetailJob] = useState<DetailJob | null>(null);
+  const [workProgress, setWorkProgress] = useState<WorkProgress | null>(null);
+  const [statusFiles, setStatusFiles] = useState<File[]>([]);
+  const [statusNote, setStatusNote] = useState("");
+  const [pickedSheetCount, setPickedSheetCount] = useState("");
+  const [progressError, setProgressError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [requestedJob, setRequestedJob] = useState<string | null>(null);
   const pinStorageKey = `floor-work-pin:${token}`;
+
+  useEffect(() => {
+    setRequestedJob(new URLSearchParams(window.location.search).get("job"));
+  }, []);
 
   const load = useCallback(async (pinValue: string) => {
     const normalized = pinValue.trim();
@@ -197,6 +251,11 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     setSelected(a);
     setResponsibles([]);
     setDetailJob(null);
+    setWorkProgress(null);
+    setStatusFiles([]);
+    setStatusNote("");
+    setPickedSheetCount("");
+    setProgressError(null);
     if (a.assignmentId) {
       await supabase.rpc("record_technician_work_event", {
         p_token: token,
@@ -214,6 +273,16 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
         .eq("is_active", true)
         .then(({ data }) => setResponsibles((data ?? []) as unknown as ResponsibleTechnician[])),
     ];
+    if (a.assignmentId) {
+      detailTasks.push(
+        supabase.rpc("get_technician_work_progress", { p_token: token, p_pin: pin.trim(), p_assignment_id: a.assignmentId })
+          .then(({ data }) => {
+            const progress = (data ?? null) as WorkProgress | null;
+            setWorkProgress(progress);
+            if (progress?.pickedSheetCount != null) setPickedSheetCount(String(progress.pickedSheetCount));
+          })
+      );
+    }
     if (a.jobNo) {
       detailTasks.push(
         supabase
@@ -241,6 +310,71 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     if (!error && data) {
       setSelected({ ...selected, acknowledgedAt: new Date().toISOString() });
       await load(pin);
+    }
+    setSaving(false);
+  }
+
+  useEffect(() => {
+    if (!workspace || !requestedJob || selected) return;
+    const assignment = workspace.assignments.find((item) => item.jobNo === requestedJob);
+    if (assignment) {
+      void openWork(assignment);
+      setRequestedJob(null);
+    }
+  }, [workspace, requestedJob, selected]);
+
+  async function reloadProgress(assignmentId: string) {
+    const { data } = await supabase.rpc("get_technician_work_progress", { p_token: token, p_pin: pin.trim(), p_assignment_id: assignmentId });
+    setWorkProgress((data ?? null) as WorkProgress | null);
+  }
+
+  async function updateWorkStatus() {
+    if (!selected?.assignmentId) return;
+    const coreEvents = (workProgress?.events ?? []).filter((event) => event.status !== "customer_signed");
+    const current = coreEvents.at(-1)?.status;
+    const currentIndex = WORK_STEPS.findIndex((step) => step.status === current);
+    const next = WORK_STEPS[currentIndex + 1];
+    if (!next) return;
+    if (!statusFiles.length) { setProgressError("กรุณาถ่ายหรือเลือกรูปสถานะอย่างน้อย 1 รูป"); return; }
+    if (next.status === "travelling" && (!pickedSheetCount.trim() || Number(pickedSheetCount) < 0)) { setProgressError("กรุณาระบุจำนวนแผ่นที่หยิบจริง"); return; }
+    setSaving(true); setProgressError(null);
+    const paths: string[] = [];
+    try {
+      for (let index = 0; index < statusFiles.length; index++) {
+        const file = statusFiles[index];
+        const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = `work/${selected.appointmentId}/${next.status}/${Date.now()}-${index}-${safe}`;
+        const { error } = await supabase.storage.from("job-photos").upload(path, file, { upsert: false, contentType: file.type || "image/jpeg" });
+        if (error) throw error;
+        paths.push(path);
+      }
+      const { error } = await supabase.rpc("record_technician_work_status", {
+        p_token: token, p_pin: pin.trim(), p_assignment_id: selected.assignmentId,
+        p_status: next.status, p_photo_paths: paths,
+        p_picked_sheet_count: next.status === "travelling" ? Number(pickedSheetCount) : null,
+        p_note: statusNote.trim() || null,
+      });
+      if (error) throw error;
+      setStatusFiles([]); setStatusNote("");
+      await reloadProgress(selected.assignmentId);
+    } catch (error) {
+      setProgressError(error instanceof Error ? error.message : "บันทึกสถานะไม่สำเร็จ");
+    }
+    setSaving(false);
+  }
+
+  async function saveCustomerSignature(customerName: string, blob: Blob) {
+    if (!selected?.assignmentId) return;
+    setSaving(true); setProgressError(null);
+    try {
+      const path = `work/${selected.appointmentId}/signature/${Date.now()}-customer.png`;
+      const { error: uploadError } = await supabase.storage.from("job-photos").upload(path, blob, { upsert: false, contentType: "image/png" });
+      if (uploadError) throw uploadError;
+      const { error } = await supabase.rpc("record_technician_customer_signature", { p_token: token, p_pin: pin.trim(), p_assignment_id: selected.assignmentId, p_customer_name: customerName, p_signature_path: path });
+      if (error) throw error;
+      await reloadProgress(selected.assignmentId);
+    } catch (error) {
+      setProgressError(error instanceof Error ? error.message : "บันทึกลายเซ็นไม่สำเร็จ");
     }
     setSaving(false);
   }
@@ -398,12 +532,41 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
               </div>
             </WorkSection>
 
-            <WorkSection title="📸 อัปเดตหน้างานวันนี้" subtitle="สถานะเต็มจะไปต่อในแอปพนักงาน background GPS">
-              <div className="space-y-2 text-sm text-slate-700">
-                {["กำลังเดินทาง", "ถึงบ้านลูกค้าแล้ว", "กำลังติดตั้ง", "ติดตั้งงานเสร็จสมบูรณ์", "ลูกค้าเซ็นรับงาน"].map((label) => (
-                  <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-500">{label}</div>
-                ))}
-              </div>
+            <WorkSection title="📸 อัปเดตหน้างานวันนี้" subtitle="ทุกสถานะต้องมีรูปและบันทึกเวลาอัตโนมัติ">
+              {selected.isTeamQueue ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">หัวหน้าช่างต้องจ่ายงานให้คุณก่อน จึงจะอัปเดตสถานะได้</div> : (() => {
+                const events = workProgress?.events ?? [];
+                const coreEvents = events.filter((event) => event.status !== "customer_signed");
+                const currentStatus = coreEvents.at(-1)?.status;
+                const currentIndex = WORK_STEPS.findIndex((step) => step.status === currentStatus);
+                const next = WORK_STEPS[currentIndex + 1];
+                const signed = events.find((event) => event.status === "customer_signed");
+                return <div className="space-y-4">
+                  <div className="space-y-2">{WORK_STEPS.map((step, index) => {
+                    const event = events.find((item) => item.status === step.status);
+                    return <div key={step.status} className={`rounded-xl border px-3 py-3 ${event ? "border-emerald-200 bg-emerald-50" : index === currentIndex + 1 ? "border-blue-200 bg-blue-50" : "border-slate-200 bg-slate-50"}`}>
+                      <div className="flex items-center justify-between gap-3"><div className="text-sm font-medium text-slate-800">{index + 1}. {step.label}</div><div className={`text-xs ${event ? "text-emerald-700" : "text-slate-400"}`}>{event ? new Date(event.occurredAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" }) : "รอดำเนินการ"}</div></div>
+                      {event?.note ? <div className="mt-2 text-xs text-slate-600">{event.note}</div> : null}
+                      {event?.photoPaths?.length ? <div className="mt-2 grid grid-cols-3 gap-2">{event.photoPaths.map((path) => {
+                        const url = path.startsWith("http") ? path : supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl;
+                        return <a key={path} href={url} target="_blank" rel="noreferrer" className="aspect-square overflow-hidden rounded-lg border bg-white"><img src={url} alt={step.label} className="h-full w-full object-cover" /></a>;
+                      })}</div> : null}
+                    </div>;
+                  })}</div>
+
+                  {next && selected.acknowledgedAt ? <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+                    <div className="text-sm font-semibold text-blue-950">ขั้นต่อไป: {next.label}</div>
+                    {next.status === "travelling" ? <div className="mt-3"><label className="text-xs font-medium text-blue-800">จำนวนแผ่นที่หยิบจริง *</label><div className="mt-1 flex items-center gap-2"><input type="number" min={0} step={1} value={pickedSheetCount} onChange={(event) => setPickedSheetCount(event.target.value)} placeholder="จำนวนแผ่น" className="min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm" /><span className="text-xs text-blue-700">แผน {workProgress?.plannedSheetCount ?? "—"} แผ่น</span></div></div> : null}
+                    <textarea value={statusNote} onChange={(event) => setStatusNote(event.target.value)} rows={2} placeholder="หมายเหตุ (ถ้ามี)" className="mt-3 w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm" />
+                    <label className="mt-3 block cursor-pointer rounded-xl border border-dashed border-blue-300 bg-white px-3 py-3 text-center text-sm font-medium text-blue-700">📷 ถ่ายรูป / เลือกรูป<input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(event) => setStatusFiles(Array.from(event.target.files ?? []))} /></label>
+                    {statusFiles.length ? <div className="mt-2 text-xs text-blue-700">เลือกรูปแล้ว {statusFiles.length} รูป</div> : null}
+                    <button onClick={() => void updateWorkStatus()} disabled={saving} className="mt-3 w-full rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving ? "กำลังบันทึก…" : next.button}</button>
+                  </div> : null}
+                  {next && !selected.acknowledgedAt ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">กดรับทราบงานก่อนเริ่มอัปเดตสถานะ</div> : null}
+                  {currentStatus === "completed" && !signed ? <div className="rounded-xl border border-violet-200 bg-violet-50 p-3"><div className="mb-3 text-sm font-semibold text-violet-950">ลูกค้าเซ็นรับงาน</div><CustomerSignature busy={saving} onSubmit={saveCustomerSignature} /></div> : null}
+                  {signed ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-700">✓ ลูกค้า {signed.customerSignedName} เซ็นรับงานแล้ว เวลา {new Date(signed.occurredAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })}</div> : null}
+                  {progressError ? <div className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{progressError}</div> : null}
+                </div>;
+              })()}
             </WorkSection>
           </div>
         </div>

@@ -175,8 +175,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   // เฟส 3: เศษคงเหลือ (S4)
   const [matUsage, setMatUsage] = useState<MatUsage>({ noRemnant: false, pieces: [], note: "" });
 
-  // เฟส 2: ใบส่งงาน
-  const [dispatchToken, setDispatchToken] = useState<string | null>(null);
 
   // เฟส 4: ใบสั่งงาน (S2) — pick plan + zones
   const [pickPlan, setPickPlan] = useState<PickPlan>({ newItems: [], remnants: [], note: "" });
@@ -252,13 +250,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       .then(({ data }) => setTechs((data as { id: string; name: string }[]) ?? []));
   }, []);
 
-  // เฟส 2: โหลด token ใบส่งงานที่มีอยู่แล้ว
-  useEffect(() => {
-    if (!job.jobNo) return;
-    supabase.from("dispatch_notes").select("share_token").eq("job_no", job.jobNo)
-      .order("created_at", { ascending: false }).limit(1)
-      .then(({ data }) => { if (data && data[0]) setDispatchToken(data[0].share_token as string); });
-  }, [job.jobNo]);
 
   // เฟส 4: โหลดโซนของงาน (คำนวณความยาวแผ่นที่ต้องใช้)
   useEffect(() => {
@@ -473,28 +464,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       onRefresh();
     } catch (e: unknown) {
       toast.error("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
-    }
-    setSaving(false);
-  }
-
-  // เฟส 2: สร้าง/เปิดใบส่งงาน (dispatch note) + ลิงก์แชร์
-  async function createDispatch() {
-    setSaving(true);
-    try {
-      let token = dispatchToken;
-      if (!token) {
-        token = ipGenToken();
-        const { error } = await supabase.from("dispatch_notes")
-          .insert({ job_no: job.jobNo, share_token: token, created_by: "admin" });
-        if (error) throw error;
-        setDispatchToken(token);
-      }
-      const link = `${window.location.origin}/dispatch/${token}`;
-      await navigator.clipboard.writeText(link).catch(() => {});
-      window.open(link, "_blank");
-      toast.success("เปิดใบส่งงาน + คัดลอกลิงก์แชร์แล้ว");
-    } catch (e: unknown) {
-      toast.error("สร้างใบส่งงานไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
     }
     setSaving(false);
   }
@@ -885,21 +854,12 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 </div>
               )}
 
-              {/* S2: ใบส่งงาน (dispatch note) */}
+              {/* S2: ส่งต่อไป Operations เพื่อจ่ายงานรายบุคคล */}
               {job.stage === 2 && (
                 <div className="border rounded-xl p-4 bg-violet-50 space-y-2">
-                  <p className="text-sm font-semibold text-violet-800">📋 ใบส่งงาน (กระจายให้ทีมช่าง)</p>
-                  <p className="text-xs text-violet-600">รวมข้อมูลลูกค้า/ที่อยู่/สินค้า/นัดหมาย/ผลสำรวจ + รูป — เปิดหน้าเพื่อพิมพ์/บันทึก PDF และได้ลิงก์แชร์ให้ช่าง</p>
-                  <button
-                    onClick={createDispatch}
-                    disabled={saving}
-                    className="w-full bg-violet-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors"
-                  >
-                    {saving ? "กำลังทำ..." : dispatchToken ? "📋 เปิดใบส่งงาน + คัดลอกลิงก์" : "📋 สร้างใบส่งงาน + ลิงก์แชร์"}
-                  </button>
-                  {dispatchToken && (
-                    <p className="text-[11px] text-violet-500 break-all">ลิงก์: /dispatch/{dispatchToken}</p>
-                  )}
+                  <p className="text-sm font-semibold text-violet-800">📋 ปล่อยใบงานให้ทีมช่าง</p>
+                  <p className="text-xs text-violet-600">ใช้หน้า “ต้องตัดสินใจ” เพื่อจ่ายช่างรายบุคคล ระบุจำนวนแผ่น และปล่อยงานเข้าลิงก์พนักงานเพียงจุดเดียว</p>
+                  <a href="/operations" className="block w-full rounded-lg bg-violet-600 py-2 text-center text-sm font-semibold text-white hover:bg-violet-700">ไปหน้าต้องตัดสินใจ</a>
                 </div>
               )}
 
