@@ -29,6 +29,7 @@ export interface MobileAssignment {
   productName: string | null;
   sitePhotos: unknown;
   rawPayload: unknown;
+  pickPlan: unknown;
   plannedSheetCount: number | null;
   pickedSheetCount: number | null;
   trackingSession: TrackingSessionSummary | null;
