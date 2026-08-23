@@ -35,6 +35,8 @@ interface Question {
 
 interface JobRow extends Job {
   evaluation: Evaluation | null;
+  work_order_id: string | null;
+  work_order_status: string | null;
 }
 
 function StageBadge({ stage }: { stage: number }) {
@@ -185,21 +187,27 @@ function CsTrackingInner() {
   const [selected, setSelected]   = useState<JobRow | null>(null);
 
   async function load() {
-    const [{ data: jobs, error: jobErr }, { data: evals }, { data: qs }] = await Promise.all([
+    const { data: orderRows, error: orderError } = await supabase.from("floor_work_orders").select("id,job_no,status,waiting_cs_at,closed_at").in("status", ["waiting_cs", "closed"]);
+    const workOrders = (orderRows ?? []) as { id: string; job_no: string; status: string; waiting_cs_at: string | null; closed_at: string | null }[];
+    const [stageJobsResult, flowJobsResult, evalResult, questionResult] = await Promise.all([
       supabase
         .from("install_jobs")
         .select("job_no, customer_name, product_name, external_id, product_skus, closed_at, appt_date, customer_phone, stage")
         .eq("stage", 6)
         .order("closed_at", { ascending: false, nullsFirst: false }),
+      workOrders.length ? supabase.from("install_jobs").select("job_no, customer_name, product_name, external_id, product_skus, closed_at, appt_date, customer_phone, stage").in("job_no", workOrders.map((row) => row.job_no)) : Promise.resolve({ data: [], error: null }),
       supabase.from("job_evaluations").select("*, score:satisfaction_score"),
       supabase.from("evaluation_questions").select("id, question_text, order_index").eq("is_active", true).order("order_index"),
     ]);
-    if (jobErr) toast.error(jobErr.message);
-    if (jobs) {
+    const jobErr = stageJobsResult.error ?? flowJobsResult.error ?? orderError; if (jobErr) toast.error(jobErr.message);
+    const jobs = Array.from(new Map([...(stageJobsResult.data ?? []), ...(flowJobsResult.data ?? [])].map((row) => [row.job_no, row])).values()) as Job[];
+    const evals = evalResult.data; const qs = questionResult.data;
+    if (jobs.length) {
       const evalMap = new Map<string, Evaluation>();
       (evals ?? []).forEach((e: Evaluation) => evalMap.set(e.job_no, e));
-      setRows(jobs.map((j: Job) => ({ ...j, evaluation: evalMap.get(j.job_no) ?? null })));
-    }
+      const orderMap = new Map(workOrders.map((row) => [row.job_no, row]));
+      setRows(jobs.map((j: Job) => { const order = orderMap.get(j.job_no); return { ...j, closed_at: j.closed_at ?? order?.waiting_cs_at ?? null, evaluation: evalMap.get(j.job_no) ?? null, work_order_id: order?.id ?? null, work_order_status: order?.status ?? null }; }));
+    } else setRows([]);
     if (qs) setQuestions(qs);
     setLoading(false);
   }
@@ -357,7 +365,7 @@ function CsTrackingInner() {
       )}
 
       {selected && (
-        <EvalModal row={selected} questions={questions} onClose={() => setSelected(null)} onSaved={load} />
+        <EvalModal row={selected} questions={questions} onClose={() => setSelected(null)} onSaved={() => { void (async () => { if (selected.work_order_id && selected.work_order_status === "waiting_cs") { const { error } = await supabase.rpc("close_floor_work_order_cs_v3", { p_work_order_id: selected.work_order_id }); if (error) toast.error(`บันทึกผลแล้ว แต่ปิดงานไม่สำเร็จ: ${error.message}`); else toast.success("ประเมินและปิดงานเรียบร้อย"); } await load(); })(); }} />
       )}
     </div>
   );
