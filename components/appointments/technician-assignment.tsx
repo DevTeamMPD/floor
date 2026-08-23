@@ -65,8 +65,8 @@ export default function TechnicianAssignmentButton({ appointmentId, appointmentT
 
   return (
     <>
-      <button onClick={show} className="px-2.5 py-1 text-xs rounded-lg border border-violet-200 text-violet-700 bg-violet-50 hover:bg-violet-100">
-        👤 {active.length ? `ช่าง ${active.length} คน` : "จ่ายช่าง"}
+      <button onClick={show} className="shrink-0 rounded-xl border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-100">
+        👤 {active.length ? `แก้ไขช่าง (${active.length} คน)` : "มอบหมายช่าง"}
       </button>
       {active.length ? <div className="mt-1 flex flex-wrap gap-1">
         {active.map((a) => {
