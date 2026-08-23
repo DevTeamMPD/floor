@@ -1,6 +1,7 @@
 "use client";
 export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback, useMemo } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import TechnicianManager from "@/components/appointments/technician-manager";
@@ -163,7 +164,8 @@ export default function AppointmentsPage() {
 
   // Stats
   const todayAppts = appointments.filter((a) => isToday(new Date(a.slot_start)) && a.status !== 'cancelled');
-  const pendingAppts = appointments.filter((a) => a.status === 'proposed');
+  const pendingAppts = appointments.filter((a) => a.status === 'proposed'
+    && !['ส่งกลับฝ่ายขายแก้ไข', 'ส่งกลับ BBPS แก้ไข'].includes(a.job?.status ?? ''));
   const weekAppts = appointments.filter((a) => {
     const d = new Date(a.slot_start);
     return d >= weekStart && d <= weekEnd && a.status !== 'cancelled';
@@ -243,27 +245,6 @@ export default function AppointmentsPage() {
       }
     }
     toast.success('ยกเลิกคิวและเก็บประวัติไว้แล้ว');
-    loadData();
-  }
-
-  async function returnToSales(appt: Appointment) {
-    if (!appt.job_id) return;
-    const reason = window.prompt('ระบุข้อมูลที่ต้องให้ฝ่ายขายแก้ไข');
-    if (!reason?.trim()) return;
-    const [{ error: apptError }, { error: jobError }] = await Promise.all([
-      supabase.from('appointments').update({ status: 'proposed', confirmed_at: null })
-        .eq('job_id', appt.job_id).neq('status', 'cancelled'),
-      supabase.from('install_jobs').update({
-        status: 'ส่งกลับฝ่ายขายแก้ไข', waiting_on: 'ฝ่ายขาย', waiting_since: new Date().toISOString(),
-        flag_note: reason.trim(), updated_at: new Date().toISOString(),
-      }).eq('job_no', appt.job_id),
-    ]);
-    if (apptError || jobError) { toast.error(apptError?.message ?? jobError?.message ?? 'ส่งกลับไม่สำเร็จ'); return; }
-    await supabase.from('job_activity').insert({
-      job_no: appt.job_id, actor: 'หัวหน้าช่าง', action: 'return', field: 'status',
-      old_value: appt.job?.status ?? null, new_value: `ส่งกลับฝ่ายขายแก้ไข: ${reason.trim()}`,
-    });
-    toast.success('ส่งกลับให้ฝ่ายขายแก้ไขแล้ว');
     loadData();
   }
 
@@ -354,6 +335,11 @@ export default function AppointmentsPage() {
       </div>
 
       {/* Stats */}
+      <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+        <div className="font-semibold">การยืนยันงานใช้ใบสั่งงานกลาง</div>
+        <p className="mt-1 text-blue-700">หน้านี้ใช้จัดวันและทีมเท่านั้น หัวหน้าช่างตรวจ/ส่งกลับที่หน้า “ต้องตัดสินใจ” ส่วนปุ่ม “รับทราบงาน” อยู่ในลิงก์ส่วนตัวของช่างแต่ละคน</p>
+        <Link href="/operations" className="mt-3 inline-flex rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">ไปหน้าต้องตัดสินใจ →</Link>
+      </div>
       <div className="grid grid-cols-3 gap-4 mb-6">
         {[
           { label: 'วันนี้', value: todayAppts.length, icon: '📅', color: 'text-blue-600' },
@@ -395,13 +381,12 @@ export default function AppointmentsPage() {
                   <option value="">เลือกทีม</option>
                   {techs.filter((t) => t.is_active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
-                <button onClick={() => updateStatus(appt, 'confirmed')}
+                {appt.job_id ? <Link href={`/orders/${encodeURIComponent(appt.job_id)}`}
                   className="px-3 py-1 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shrink-0">
-                  ✓ ยืนยัน
-                </button>
-                {appt.job_id && <button onClick={() => returnToSales(appt)}
-                  className="px-3 py-1 text-xs bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 shrink-0">
-                  ส่งกลับแก้ไข
+                  เปิดใบสั่งงาน
+                </Link> : <button onClick={() => updateStatus(appt, 'confirmed')}
+                  className="px-3 py-1 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shrink-0">
+                  ✓ ยืนยันคิว
                 </button>}
                 <button onClick={() => cancelAppointment(appt)}
                   className="px-3 py-1 text-xs bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 shrink-0">
@@ -535,19 +520,12 @@ export default function AppointmentsPage() {
                             <option value="">ทีม</option>
                             {techs.filter((t) => t.is_active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                           </select>
-                          {appt.status === 'proposed' && (
-                            <button onClick={() => updateStatus(appt, 'confirmed')}
-                              className="px-2 py-0.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100">
-                              ✓
-                            </button>
-                          )}
-                          {appt.status === 'proposed' && appt.job_id && (
-                            <button onClick={() => returnToSales(appt)}
-                              aria-label="ส่งกลับให้ฝ่ายขายแก้ไข"
-                              className="px-2 py-0.5 text-xs bg-amber-50 text-amber-700 rounded hover:bg-amber-100">
-                              ↩
-                            </button>
-                          )}
+                          {appt.status === 'proposed' && (appt.job_id ?
+                            <Link href={`/orders/${encodeURIComponent(appt.job_id)}`}
+                              aria-label="เปิดใบสั่งงานกลาง"
+                              className="px-2 py-0.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100">📋</Link>
+                            : <button onClick={() => updateStatus(appt, 'confirmed')}
+                              className="px-2 py-0.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100">✓</button>)}
                           {appt.status === 'confirmed' && (
                             <button onClick={() => updateStatus(appt, 'completed')}
                               className="px-2 py-0.5 text-xs bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100">
