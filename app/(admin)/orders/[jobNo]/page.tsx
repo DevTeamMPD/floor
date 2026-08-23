@@ -130,11 +130,14 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
     const material = materials.find((row) => row.sku === sku);
     patchItem(index, { sku, ...(material ? { itemName: material.name, unit: material.unit || "ชิ้น" } : {}) });
   }
-  function rpcItems() { return items.map((item) => ({ category: item.category, itemName: item.itemName.trim(), sku: item.sku.trim(), specification: item.specification.trim(), plannedQty: Number(item.plannedQty), unit: item.unit.trim(), sourceType: item.sourceType, note: item.note.trim() })); }
+  function rpcItems(unknownSkus: Set<string>) { return items.map((item) => { const isException = item.category === "floor_material" && unknownSkus.has(item.sku.trim()); return { category: item.category, itemName: item.itemName.trim(), sku: item.sku.trim(), specification: item.specification.trim(), plannedQty: Number(item.plannedQty), unit: item.unit.trim(), sourceType: isException ? "other" : item.sourceType, note: isException ? `[อนุมัติ SKU นอกคลัง]${item.note.trim() ? ` ${item.note.trim()}` : ""}` : item.note.trim() }; }); }
 
   async function confirmOrder() {
     if (!order) return; if (!items.length || items.some((item) => !item.itemName.trim() || !item.unit.trim() || item.plannedQty === "" || Number(item.plannedQty) < 0 || (item.category === "floor_material" && !item.sku.trim()))) { toast.error("กรอก SKU ชื่อรายการ จำนวน และหน่วยให้ครบทุกบรรทัด"); return; }
-    setSaving(true); const { error } = await supabase.rpc("confirm_floor_work_order_v2", { p_work_order_id: order.id, p_items: rpcItems(), p_note: note.trim() || null }); setSaving(false);
+    const unknownSkus = new Set(items.filter((item) => item.category === "floor_material" && item.sku.trim() && !materials.some((material) => material.sku === item.sku.trim())).map((item) => item.sku.trim()));
+    if (unknownSkus.size && !window.confirm(`พบ SKU ที่ไม่มีในคลัง:\n• ${Array.from(unknownSkus).join("\n• ")}\n\nยืนยันใช้เป็นข้อยกเว้นหรือไม่? ระบบจะบันทึกว่าเป็น SKU นอกคลัง`)) return;
+    const exceptionNote = unknownSkus.size ? `อนุมัติข้อยกเว้น SKU นอกคลัง: ${Array.from(unknownSkus).join(", ")}` : null;
+    setSaving(true); const { error } = await supabase.rpc("confirm_floor_work_order_v2", { p_work_order_id: order.id, p_items: rpcItems(unknownSkus), p_note: [note.trim(), exceptionNote].filter(Boolean).join("\n") || null }); setSaving(false);
     if (error) toast.error(error.message); else { toast.success("ยืนยันใบสั่งงานและส่งให้คลังแล้ว"); void load(); }
   }
   async function returnOrder() {

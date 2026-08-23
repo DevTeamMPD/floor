@@ -330,7 +330,7 @@ export default function ShareQueuePage() {
       if (!form.address.trim() && !form.location_url.trim()) missing.push("ที่อยู่หรือ Google Maps");
       if (!form.requirement.trim()) missing.push("Requirement/สเปก");
       if (!form.survey.areaSqm.trim()) missing.push("พื้นที่ติดตั้ง");
-      if (missing.length) { alert(`กรุณากรอกข้อมูลสำคัญให้ครบ:\n• ${missing.join("\n• ")}`); return; }
+      if (missing.length) { if (missing.includes("พื้นที่ติดตั้ง")) setShowSurvey(true); alert(`กรุณากรอกข้อมูลสำคัญให้ครบ:\n• ${missing.join("\n• ")}`); return; }
     }
     const endDate = form.endDate && form.endDate >= form.date ? form.endDate : form.date;
     const dates = eachDay(form.date, endDate);
@@ -369,7 +369,7 @@ export default function ShareQueuePage() {
           address: form.address || null,
           location_url: form.location_url || null,
           appt_date: dates[0],
-          appt_shift: (form.start < "12:00") ? "ช่วงเช้า" : "ช่วงบ่าย",
+          appt_shift: (form.start < "12:00") ? "morning" : "afternoon",
           due_date: dates[0],
           stage: 2,
           status: "รอหัวหน้าช่างยืนยัน",
@@ -815,7 +815,7 @@ export default function ShareQueuePage() {
                 )}
               </div>
 
-              {!isHol && <button type="button" onClick={() => setShowSurvey((value) => !value)} className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-left text-sm font-medium text-slate-700"><span>ข้อมูลสำรวจหน้างาน <span className="font-normal text-slate-400">(กรอกภายหลังได้)</span></span><span>{showSurvey ? "−" : "+"}</span></button>}
+              {!isHol && <button type="button" onClick={() => setShowSurvey((value) => !value)} className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-left text-sm font-medium text-slate-700"><span>ข้อมูลสำรวจหน้างาน <span className="font-normal text-red-500">(ต้องกรอกพื้นที่ก่อนเปิดบิล)</span></span><span>{showSurvey ? "−" : "+"}</span></button>}
 
               {/* สำรวจหน้างาน */}
               {!isHol && showSurvey && (
