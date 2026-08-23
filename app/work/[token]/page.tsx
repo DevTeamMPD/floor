@@ -89,6 +89,19 @@ function parseJsonObject(value: unknown): Record<string, unknown> | null {
 function textOf(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
+function workErrorMessage(error: unknown) {
+  const message = error && typeof error === "object" && "message" in error && typeof error.message === "string"
+    ? error.message
+    : error instanceof Error ? error.message : "";
+  if (message.includes("installation can be accepted on the scheduled date")) return "ยังเริ่มงานไม่ได้: งานจริงเริ่มได้เฉพาะวันนัดติดตั้ง หากวันนัดไม่ถูกต้อง กรุณาแจ้งหัวหน้าช่าง";
+  if (message.includes("lead technician must accept installation first")) return "ยังเริ่มงานไม่ได้: หัวหน้าช่างที่ได้รับมอบหมายต้องกดรับงานติดตั้งก่อน";
+  if (message.includes("assignment not found")) return "ไม่พบงานที่มอบหมายให้บัญชีนี้ กรุณาปิดหน้าแล้วเปิดลิงก์งานใหม่ หรือติดต่อหัวหน้าช่าง";
+  if (message.includes("acknowledge assignment first")) return "กรุณากด “รับทราบงาน” ก่อนเริ่มอัปเดตสถานะ";
+  if (message.includes("invalid work status transition")) return "ลำดับสถานะไม่ถูกต้อง กรุณารีเฟรชหน้าแล้วทำขั้นตอนล่าสุดอีกครั้ง";
+  if (message.includes("head technician material plan is required")) return "ยังเริ่มงานไม่ได้: หัวหน้าช่างต้องระบุรายการวัสดุและจำนวนแผ่นก่อน";
+  if (message.includes("status photo is required")) return "กรุณาถ่ายหรือเลือกรูปหลักฐานอย่างน้อย 1 รูป";
+  return message ? `บันทึกสถานะไม่สำเร็จ: ${message}` : "บันทึกสถานะไม่สำเร็จ กรุณารีเฟรชหน้าแล้วลองอีกครั้ง หากยังไม่ได้ให้แจ้งหัวหน้าช่าง";
+}
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><div className="text-xs font-medium text-slate-400">{label}</div><div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{children || "—"}</div></div>;
 }
@@ -372,7 +385,8 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       clearStatusFiles(); setStatusNote("");
       await reloadProgress(selected.assignmentId);
     } catch (error) {
-      setProgressError(error instanceof Error ? error.message : "บันทึกสถานะไม่สำเร็จ");
+      if (paths.length) await supabase.storage.from("job-photos").remove(paths);
+      setProgressError(workErrorMessage(error));
     }
     setSaving(false);
   }
@@ -471,6 +485,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
             <span className={`ml-auto rounded-full px-3 py-1.5 text-xs font-medium ${selected.isTeamQueue ? "bg-amber-100 text-amber-700" : selected.acknowledgedAt ? "bg-emerald-100 text-emerald-700" : selected.firstOpenedAt ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
               {selected.isTeamQueue ? "คิวทีม · รอหัวหน้าจ่ายรายบุคคล" : selected.acknowledgedAt ? "รับทราบแล้ว" : selected.firstOpenedAt ? "เปิดใบงานแล้ว" : "ยังไม่รับทราบ"}
             </span>
+            {selected.jobNo?.toUpperCase().startsWith("TEST-") ? <span className="rounded-full bg-fuchsia-100 px-3 py-1.5 text-xs font-semibold text-fuchsia-700">โหมดทดสอบ · เริ่มก่อนวันนัดได้</span> : null}
           </div>
         </div>
 
