@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -22,6 +22,7 @@ interface Material { id: string; sku: string; name: string; unit: string | null;
 type Technician = FloorTechnician & { personal_token: string };
 type Assignment = TechnicianAssignment;
 interface DraftItem { id?: string; category: WorkItemCategory; itemName: string; sku: string; specification: string; plannedQty: string; actualQty: string; unit: string; sourceType: string; note: string }
+interface WarehouseFilePreview { id: string; file: File; url: string }
 
 function thaiDate(iso: string) { return new Date(iso).toLocaleString("th-TH", { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" }); }
 function jsonObject(value: unknown): Record<string, unknown> {
@@ -59,8 +60,12 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
   const [order, setOrder] = useState<WorkOrder | null>(null); const [items, setItems] = useState<DraftItem[]>([]); const [events, setEvents] = useState<WorkOrderEvent[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]); const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [teams, setTeams] = useState<Team[]>([]); const [materials, setMaterials] = useState<Material[]>([]);
-  const [role, setRole] = useState<StaffRole | null>(null); const [note, setNote] = useState(""); const [warehouseFiles, setWarehouseFiles] = useState<File[]>([]);
+  const [role, setRole] = useState<StaffRole | null>(null); const [note, setNote] = useState(""); const [warehouseFiles, setWarehouseFiles] = useState<WarehouseFilePreview[]>([]);
+  const warehouseFilesRef = useRef<WarehouseFilePreview[]>([]);
   const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false);
+
+  useEffect(() => { warehouseFilesRef.current = warehouseFiles; }, [warehouseFiles]);
+  useEffect(() => () => { warehouseFilesRef.current.forEach((item) => URL.revokeObjectURL(item.url)); }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -109,6 +114,18 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
   function patchItem(index: number, patch: Partial<DraftItem>) { setItems((current) => current.map((item, i) => i === index ? { ...item, ...patch } : item)); }
   function addItem(category: WorkItemCategory = "floor_material") { setItems((current) => [...current, emptyItem(category)]); }
   function removeItem(index: number) { setItems((current) => current.filter((_, i) => i !== index)); }
+  function addWarehouseFiles(files: FileList | null) {
+    const added = Array.from(files ?? []).filter((file) => file.type.startsWith("image/")).map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) }));
+    if (!added.length) { toast.error("เลือกได้เฉพาะไฟล์รูปภาพ"); return; }
+    setWarehouseFiles((current) => [...current, ...added]);
+  }
+  function removeWarehouseFile(id: string) {
+    setWarehouseFiles((current) => { const target = current.find((item) => item.id === id); if (target) URL.revokeObjectURL(target.url); return current.filter((item) => item.id !== id); });
+  }
+  function clearWarehouseFiles() {
+    warehouseFilesRef.current.forEach((item) => URL.revokeObjectURL(item.url));
+    setWarehouseFiles([]);
+  }
   function selectMaterial(index: number, sku: string) {
     const material = materials.find((row) => row.sku === sku);
     patchItem(index, { sku, ...(material ? { itemName: material.name, unit: material.unit || "ชิ้น" } : {}) });
@@ -132,10 +149,10 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
   async function completeWarehouse() {
     if (!order) return; if (items.some((item) => item.actualQty === "" || Number(item.actualQty) < 0)) { toast.error("กรอกจำนวนหยิบจริงให้ครบทุกบรรทัด"); return; } if (!warehouseFiles.length) { toast.error("ต้องแนบรูปสินค้าที่เตรียมเสร็จอย่างน้อย 1 รูป"); return; }
     setSaving(true); const paths: string[] = [];
-    for (let index = 0; index < warehouseFiles.length; index++) { const file = warehouseFiles[index]; const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-"); const path = `work-orders/${order.id}/warehouse/${Date.now()}-${index}-${safe}`; const { error } = await supabase.storage.from("job-photos").upload(path, file); if (error) { toast.error(error.message); setSaving(false); return; } paths.push(path); }
+    for (let index = 0; index < warehouseFiles.length; index++) { const file = warehouseFiles[index].file; const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-"); const path = `work-orders/${order.id}/warehouse/${Date.now()}-${index}-${safe}`; const { error } = await supabase.storage.from("job-photos").upload(path, file); if (error) { toast.error(error.message); setSaving(false); return; } paths.push(path); }
     const actual = items.map((item) => ({ id: item.id, actualQty: Number(item.actualQty) }));
     const { error } = await supabase.rpc("complete_floor_warehouse_order_v2", { p_work_order_id: order.id, p_actual_items: actual, p_photo_paths: paths, p_note: note.trim() || null }); setSaving(false);
-    if (error) toast.error(error.message); else { toast.success("เตรียมสินค้าเสร็จและย้ายไปรอติดตั้งแล้ว"); setWarehouseFiles([]); void load(); }
+    if (error) toast.error(error.message); else { toast.success("เตรียมสินค้าเสร็จและย้ายไปรอติดตั้งแล้ว"); clearWarehouseFiles(); void load(); }
   }
   async function copyLink(token: string) { await navigator.clipboard.writeText(`${window.location.origin}/work/${token}`); toast.success("คัดลอกลิงก์ช่างแล้ว"); }
   async function copyExternalLink() { if (!order?.external_share_token) return; await navigator.clipboard.writeText(`${window.location.origin}/status/${order.external_share_token}`); toast.success("คัดลอกลิงก์ภายนอกแล้ว"); }
@@ -199,7 +216,7 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
           <textarea value={note} onChange={(e) => setNote(e.target.value)} disabled={!canEdit && order.status !== "warehouse_preparing"} rows={3} placeholder="หมายเหตุถึงผู้รับช่วงงานถัดไป" className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
           {canEdit ? <button onClick={() => void confirmOrder()} disabled={saving || missing.length > 0} className="mt-3 w-full rounded-xl bg-blue-600 py-3 font-semibold text-white disabled:bg-slate-200 disabled:text-slate-500">{saving ? "กำลังบันทึก…" : missing.length ? `ยังอนุมัติไม่ได้ · ขาด ${missing.length} รายการ` : "ยืนยันใบสั่งงาน → ส่งให้คลัง"}</button> : null}
           {canWarehouse && order.status === "warehouse_waiting" ? <button onClick={() => void acceptWarehouse()} disabled={saving} className="mt-3 w-full rounded-xl bg-amber-500 py-3 font-semibold text-white disabled:opacity-50">รับงานเตรียมสินค้า</button> : null}
-          {canWarehouse && order.status === "warehouse_preparing" ? <div className="mt-3 space-y-3"><label className="block rounded-xl border border-dashed border-slate-300 p-4 text-sm"><div className="font-medium">รูปสินค้าที่จัดเตรียมเสร็จ *</div><input type="file" accept="image/*" multiple onChange={(e) => setWarehouseFiles(Array.from(e.target.files ?? []))} className="mt-2 w-full text-xs" /></label><button onClick={() => void completeWarehouse()} disabled={saving} className="w-full rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-50">เตรียมเสร็จ → ย้ายไปรอติดตั้ง</button></div> : null}
+          {canWarehouse && order.status === "warehouse_preparing" ? <div className="mt-3 space-y-3"><label className="block cursor-pointer rounded-xl border border-dashed border-slate-300 p-4 text-sm transition hover:border-blue-400 hover:bg-blue-50/40"><div className="font-medium">รูปสินค้าที่จัดเตรียมเสร็จ *</div><div className="mt-1 text-xs text-slate-500">เลือกได้หลายภาพ และกดเพิ่มภาพภายหลังได้โดยภาพเดิมจะไม่หาย</div><input type="file" accept="image/*" multiple onChange={(e) => { addWarehouseFiles(e.target.files); e.currentTarget.value = ""; }} className="mt-3 w-full text-xs" /></label>{warehouseFiles.length ? <div><div className="mb-2 flex items-center justify-between"><div className="text-sm font-semibold text-slate-800">ภาพที่เลือก ({warehouseFiles.length} ภาพ)</div><button type="button" onClick={clearWarehouseFiles} className="text-xs font-medium text-red-500">ล้างทั้งหมด</button></div><div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{warehouseFiles.map((item, index) => <div key={item.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="relative aspect-square bg-slate-100"><img src={item.url} alt={`ภาพตัวอย่าง ${index + 1}`} className="h-full w-full object-cover" /><button type="button" onClick={() => removeWarehouseFile(item.id)} aria-label={`ลบภาพ ${index + 1}`} className="absolute right-2 top-2 rounded-full bg-black/70 px-2 py-1 text-xs font-semibold text-white">ลบ</button><span className="absolute bottom-2 left-2 rounded-full bg-black/65 px-2 py-1 text-[11px] text-white">ภาพที่ {index + 1}</span></div><div className="p-2"><div className="truncate text-xs font-medium text-slate-700" title={item.file.name}>{item.file.name}</div><div className="mt-0.5 text-[11px] text-slate-400">{(item.file.size / 1024 / 1024).toFixed(2)} MB</div></div></div>)}</div></div> : <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">ยังไม่ได้เลือกรูป</div>}<button onClick={() => void completeWarehouse()} disabled={saving} className="w-full rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-50">{saving ? "กำลังอัปโหลด…" : `เตรียมเสร็จ → ย้ายไปรอติดตั้ง${warehouseFiles.length ? ` (${warehouseFiles.length} ภาพ)` : ""}`}</button></div> : null}
           {order.status === "ready_to_install" ? <div className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">สินค้าและอุปกรณ์พร้อมแล้ว รอหัวหน้าทีมกดรับงานติดตั้งจากหน้าของช่าง</div> : null}
         </Card>
         <Card title="7. ประวัติใบสั่งงาน">
