@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 
 interface WorkAssignment {
-  assignmentId: string; isLead: boolean; firstOpenedAt: string | null; lastOpenedAt: string | null;
+  assignmentId: string | null; isLead: boolean; isTeamQueue?: boolean; firstOpenedAt: string | null; lastOpenedAt: string | null;
   openCount: number; acknowledgedAt: string | null; appointmentId: string; slotStart: string; slotEnd: string;
   appointmentStatus: string; teamName: string | null; notes: string | null; requirement: string | null;
   jobNo: string | null; source: string | null; billNo: string | null; customerName: string | null;
@@ -115,7 +115,53 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     }
     const { data, error } = await supabase.rpc("get_technician_workspace", { p_token: token, p_pin: normalized });
     if (!error && data) {
-      setWorkspace(data as Workspace);
+      const nextWorkspace = data as Workspace;
+      // A team appointment is visible to the team's technicians until the
+      // head technician distributes it to specific people.  This prevents a
+      // confusing empty personal queue after a slot was placed on the team
+      // calendar, while keeping acknowledgement evidence per-person.
+      if (nextWorkspace.technician.teamId) {
+        const { data: teamAppointments } = await supabase
+          .from("appointments")
+          .select("id,job_id,tech_id,slot_start,slot_end,status,notes,requirement,job:install_jobs(job_no,source,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,pick_plan)")
+          .eq("tech_id", nextWorkspace.technician.teamId)
+          .neq("status", "cancelled")
+          .order("slot_start");
+        const personalIds = new Set(nextWorkspace.assignments.map((item) => item.appointmentId));
+        const teamQueue = (teamAppointments ?? [])
+          .filter((appointment) => !personalIds.has(appointment.id))
+          .map((appointment) => {
+            const rawJob = Array.isArray(appointment.job) ? appointment.job[0] : appointment.job;
+            return {
+              assignmentId: null,
+              isLead: false,
+              isTeamQueue: true,
+              firstOpenedAt: null,
+              lastOpenedAt: null,
+              openCount: 0,
+              acknowledgedAt: null,
+              appointmentId: appointment.id,
+              slotStart: appointment.slot_start,
+              slotEnd: appointment.slot_end,
+              appointmentStatus: appointment.status,
+              teamName: nextWorkspace.technician.teamName,
+              notes: appointment.notes,
+              requirement: appointment.requirement,
+              jobNo: rawJob?.job_no ?? appointment.job_id,
+              source: rawJob?.source ?? null,
+              billNo: rawJob?.bill_no ?? null,
+              customerName: rawJob?.customer_name ?? null,
+              customerPhone: rawJob?.customer_phone ?? null,
+              address: rawJob?.address ?? null,
+              locationUrl: rawJob?.location_url ?? null,
+              productName: rawJob?.product_name ?? null,
+              surveyData: rawJob?.survey_data ?? null,
+              pickPlan: rawJob?.pick_plan ?? null,
+            } satisfies WorkAssignment;
+          });
+        nextWorkspace.assignments = [...nextWorkspace.assignments, ...teamQueue];
+      }
+      setWorkspace(nextWorkspace);
       setAuthError(null);
       setLoading(false);
       if (typeof window !== "undefined") window.sessionStorage.setItem(pinStorageKey, normalized);
@@ -151,13 +197,15 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     setSelected(a);
     setResponsibles([]);
     setDetailJob(null);
-    await supabase.rpc("record_technician_work_event", {
-      p_token: token,
-      p_pin: pin.trim(),
-      p_assignment_id: a.assignmentId,
-      p_event_type: "opened",
-      p_user_agent: navigator.userAgent,
-    });
+    if (a.assignmentId) {
+      await supabase.rpc("record_technician_work_event", {
+        p_token: token,
+        p_pin: pin.trim(),
+        p_assignment_id: a.assignmentId,
+        p_event_type: "opened",
+        p_user_agent: navigator.userAgent,
+      });
+    }
     const detailTasks: PromiseLike<unknown>[] = [
       supabase
         .from("appointment_technicians")
@@ -181,7 +229,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   }
 
   async function acknowledge() {
-    if (!selected) return;
+    if (!selected?.assignmentId) return;
     setSaving(true);
     const { data, error } = await supabase.rpc("record_technician_work_event", {
       p_token: token,
@@ -246,9 +294,9 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       <div className="space-y-5">
         {grouped.map(([day, jobs]) => <section key={day}>
           <div className="text-sm font-medium text-slate-700 mb-2">{thaiDate(jobs[0].slotStart)}{day === dateKey(new Date().toISOString()) ? <span className="ml-2 text-xs text-blue-600">วันนี้</span> : null}</div>
-          <div className="space-y-2">{jobs.map((a) => <button key={a.assignmentId} onClick={() => openWork(a)} className="w-full text-left bg-white border border-slate-200 rounded-xl p-4 hover:border-blue-300">
+          <div className="space-y-2">{jobs.map((a) => <button key={a.assignmentId ?? `team-${a.appointmentId}`} onClick={() => openWork(a)} className="w-full text-left bg-white border border-slate-200 rounded-xl p-4 hover:border-blue-300">
             <div className="flex gap-3"><div className="font-semibold text-blue-700 shrink-0">{time(a.slotStart)}–{time(a.slotEnd)}</div><div className="flex-1 min-w-0"><div className="font-medium truncate">{a.customerName ?? a.jobNo ?? "งานติดตั้ง"}</div><div className="text-xs text-slate-500 truncate">{a.productName ?? a.requirement ?? "ยังไม่ระบุสเปก"}</div></div></div>
-            <div className="mt-2 flex gap-1.5 flex-wrap"><span className="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600">{a.teamName ?? "ทีมช่าง"}</span>{a.isLead ? <span className="text-[11px] px-2 py-0.5 rounded bg-violet-100 text-violet-700">ผู้รับผิดชอบหลัก</span> : null}<span className={`text-[11px] px-2 py-0.5 rounded ${a.acknowledgedAt ? "bg-emerald-100 text-emerald-700" : a.firstOpenedAt ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>{a.acknowledgedAt ? "รับทราบแล้ว" : a.firstOpenedAt ? "เปิดแล้ว" : "ยังไม่เปิด"}</span></div>
+            <div className="mt-2 flex gap-1.5 flex-wrap"><span className="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600">{a.teamName ?? "ทีมช่าง"}</span>{a.isTeamQueue ? <span className="text-[11px] px-2 py-0.5 rounded bg-amber-100 text-amber-700">คิวทีม · รอหัวหน้าจ่ายรายบุคคล</span> : null}{a.isLead ? <span className="text-[11px] px-2 py-0.5 rounded bg-violet-100 text-violet-700">ผู้รับผิดชอบหลัก</span> : null}<span className={`text-[11px] px-2 py-0.5 rounded ${a.acknowledgedAt ? "bg-emerald-100 text-emerald-700" : a.firstOpenedAt ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>{a.acknowledgedAt ? "รับทราบแล้ว" : a.firstOpenedAt ? "เปิดแล้ว" : a.isTeamQueue ? "รอจ่ายงาน" : "ยังไม่เปิด"}</span></div>
           </button>)}</div>
         </section>)}
         {!grouped.length ? <div className="bg-white border rounded-xl p-8 text-center text-slate-400">ยังไม่มีงานที่ได้รับมอบหมาย</div> : null}
@@ -272,8 +320,8 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
             <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600">ฝ่ายขาย: กรอกข้อมูล</span>
             <span className="rounded-full border border-blue-200 bg-blue-600 px-3 py-1.5 text-xs font-medium text-white">หัวหน้าช่าง: ตรวจ/จ่ายงาน</span>
             <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600">ทีมช่าง: รับทราบ/อัปเดต</span>
-            <span className={`ml-auto rounded-full px-3 py-1.5 text-xs font-medium ${selected.acknowledgedAt ? "bg-emerald-100 text-emerald-700" : selected.firstOpenedAt ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
-              {selected.acknowledgedAt ? "รับทราบแล้ว" : selected.firstOpenedAt ? "เปิดใบงานแล้ว" : "ยังไม่รับทราบ"}
+            <span className={`ml-auto rounded-full px-3 py-1.5 text-xs font-medium ${selected.isTeamQueue ? "bg-amber-100 text-amber-700" : selected.acknowledgedAt ? "bg-emerald-100 text-emerald-700" : selected.firstOpenedAt ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
+              {selected.isTeamQueue ? "คิวทีม · รอหัวหน้าจ่ายรายบุคคล" : selected.acknowledgedAt ? "รับทราบแล้ว" : selected.firstOpenedAt ? "เปิดใบงานแล้ว" : "ยังไม่รับทราบ"}
             </span>
           </div>
         </div>
@@ -293,7 +341,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
 
           <WorkSection title="👥 ผู้รับผิดชอบ" subtitle="หลักฐานเปิดใบงานและรับทราบงาน">
             <div className="space-y-2">
-              {(responsibles.length ? responsibles : [{
+              {(responsibles.length ? responsibles : selected.isTeamQueue ? [] : [{
                 id: selected.assignmentId,
                 is_lead: selected.isLead,
                 first_opened_at: selected.firstOpenedAt,
@@ -361,8 +409,8 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
         </div>
 
         <div className="sticky bottom-0 border-t border-slate-200 bg-white p-4">
-          <button onClick={acknowledge} disabled={saving || Boolean(selected.acknowledgedAt)} className="w-full rounded-xl bg-emerald-600 py-3 font-medium text-white disabled:bg-emerald-100 disabled:text-emerald-700">
-            {selected.acknowledgedAt ? "✓ รับทราบงานแล้ว" : saving ? "กำลังบันทึก…" : "รับทราบงาน"}
+          <button onClick={acknowledge} disabled={saving || Boolean(selected.acknowledgedAt) || Boolean(selected.isTeamQueue)} className="w-full rounded-xl bg-emerald-600 py-3 font-medium text-white disabled:bg-emerald-100 disabled:text-emerald-700">
+            {selected.isTeamQueue ? "รอหัวหน้าช่างจ่ายงานรายบุคคล" : selected.acknowledgedAt ? "✓ รับทราบงานแล้ว" : saving ? "กำลังบันทึก…" : "รับทราบงาน"}
           </button>
         </div>
       </div>
