@@ -101,6 +101,27 @@ function WorkSection({ title, subtitle, children }: { title: string; subtitle?: 
   </section>;
 }
 
+function EvidenceGallery({ paths, label, supabase }: { paths: string[]; label: string; supabase: ReturnType<typeof createClient> }) {
+  if (!paths.length) return <div className="mt-2 rounded-lg border border-dashed border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">ไม่มีรูปหลักฐานในสถานะนี้</div>;
+  return <div className="mt-3">
+    <div className="mb-2 flex items-center justify-between gap-2">
+      <div className="text-xs font-semibold text-slate-700">รูปหลักฐาน</div>
+      <div className="rounded-full bg-white px-2 py-1 text-[11px] font-medium text-slate-500">{paths.length} รูป</div>
+    </div>
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      {paths.map((path, index) => {
+        const url = path.startsWith("http") ? path : supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl;
+        return <a key={`${path}-${index}`} href={url} target="_blank" rel="noreferrer" className="group relative aspect-square overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={url} alt={`${label} รูปที่ ${index + 1}`} loading="lazy" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+          <span className="absolute bottom-1.5 left-1.5 rounded-full bg-black/70 px-2 py-1 text-[10px] font-medium text-white">รูปที่ {index + 1}</span>
+          <span className="absolute right-1.5 top-1.5 rounded-full bg-white/90 px-2 py-1 text-[10px] font-medium text-slate-700">เปิดรูปเต็ม</span>
+        </a>;
+      })}
+    </div>
+  </div>;
+}
+
 const WORK_STEPS = [
   { status: "travelling", label: "กำลังเดินทาง", button: "เริ่มเดินทาง" },
   { status: "arrived", label: "ถึงบ้านลูกค้าแล้ว", button: "ยืนยันถึงหน้างาน" },
@@ -177,7 +198,15 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     }
     const { data, error } = await supabase.rpc("get_technician_workspace", { p_token: token, p_pin: normalized });
     if (!error && data) {
-      const nextWorkspace = data as Workspace;
+      const rawWorkspace = data as Workspace;
+      const nextWorkspace: Workspace = {
+        ...rawWorkspace,
+        // Never trust a team-wide queue on a personal link. Only rows backed by
+        // this technician's active individual assignment are allowed here.
+        assignments: (rawWorkspace.assignments ?? []).filter((assignment) =>
+          Boolean(assignment.assignmentId) && assignment.isTeamQueue !== true
+        ),
+      };
       // Personal links expose only explicitly assigned appointments. Team queues
       // belong on the head-technician screens and must not leak customer data.
       setWorkspace(nextWorkspace);
@@ -534,14 +563,15 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
                 const canStart = currentStatus || !centralWorkOrder || (centralWorkOrder.status === "ready_to_install" && centralWorkOrder.isLead);
                 return <div className="space-y-4">
                   <div className="space-y-2">{WORK_STEPS.map((step, index) => {
-                    const event = events.find((item) => item.status === step.status);
+                    const stepEvents = events.filter((item) => item.status === step.status);
+                    const event = stepEvents.at(-1);
                     return <div key={step.status} className={`rounded-xl border px-3 py-3 ${event ? "border-emerald-200 bg-emerald-50" : index === currentIndex + 1 ? "border-blue-200 bg-blue-50" : "border-slate-200 bg-slate-50"}`}>
                       <div className="flex items-center justify-between gap-3"><div className="text-sm font-medium text-slate-800">{index + 1}. {step.label}</div><div className={`text-xs ${event ? "text-emerald-700" : "text-slate-400"}`}>{event ? new Date(event.occurredAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" }) : "รอดำเนินการ"}</div></div>
-                      {event?.note ? <div className="mt-2 text-xs text-slate-600">{event.note}</div> : null}
-                      {event?.photoPaths?.length ? <div className="mt-2 grid grid-cols-3 gap-2">{event.photoPaths.map((path) => {
-                        const url = path.startsWith("http") ? path : supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl;
-                        return <a key={path} href={url} target="_blank" rel="noreferrer" className="aspect-square overflow-hidden rounded-lg border bg-white"><img src={url} alt={step.label} className="h-full w-full object-cover" /></a>;
-                      })}</div> : null}
+                      {stepEvents.map((history, historyIndex) => <div key={history.id} className={historyIndex ? "mt-3 border-t border-emerald-200 pt-3" : ""}>
+                        {stepEvents.length > 1 ? <div className="text-[11px] font-medium text-emerald-700">อัปเดตครั้งที่ {historyIndex + 1} · {new Date(history.occurredAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })} น.</div> : null}
+                        {history.note ? <div className="mt-2 text-xs text-slate-600">{history.note}</div> : null}
+                        <EvidenceGallery paths={history.photoPaths ?? []} label={step.label} supabase={supabase} />
+                      </div>)}
                     </div>;
                   })}</div>
 
