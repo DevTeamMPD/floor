@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import TechnicianAssignmentButton from "@/components/appointments/technician-assignment";
-import { WORK_ITEM_CATEGORIES, WORK_ITEM_CATEGORY_LABELS, WORK_ORDER_STATUS_LABELS, type WorkItemCategory, type WorkOrder, type WorkOrderEvent, type WorkOrderItem, workOrderStatusClass } from "@/lib/work-orders";
+import { WORK_ITEM_CATEGORIES, WORK_ITEM_CATEGORY_LABELS, WORK_ORDER_STATUS_LABELS, type WorkItemCategory, type WorkOrder, type WorkOrderEvent, type WorkOrderItem, workOrderEventLabel, workOrderStatusClass } from "@/lib/work-orders";
 import type { StaffRole } from "@/lib/staff";
 import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
 
@@ -223,7 +223,7 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
           {order.status === "ready_to_install" ? <div className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">สินค้าและอุปกรณ์พร้อมแล้ว รอหัวหน้าทีมกดรับงานติดตั้งจากหน้าของช่าง</div> : null}
         </Card>
         <Card title="7. ประวัติใบสั่งงาน">
-          <div className="space-y-3">{events.map((event) => <div key={event.id} className="border-l-2 border-blue-200 pl-3"><div className="text-sm font-medium text-slate-800">{event.actor_name}</div><div className="text-xs text-slate-500">{event.event_type} · {thaiDate(event.occurred_at)}</div>{event.note ? <p className="mt-1 text-xs text-slate-600">{event.note}</p> : null}{event.photo_paths?.length ? <div className="mt-2 grid grid-cols-3 gap-2">{event.photo_paths.map((path) => { const url = path.startsWith("http") ? path : supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl; return <a key={path} href={url} target="_blank" rel="noreferrer" className="aspect-square overflow-hidden rounded-lg border bg-slate-100"><img src={url} alt="รูปหลักฐาน" className="h-full w-full object-cover" /></a>; })}</div> : null}</div>)}{!events.length ? <p className="text-sm text-slate-400">ยังไม่มีประวัติ</p> : null}</div>
+          <div className="space-y-3">{events.map((event) => <div key={event.id} className="border-l-2 border-blue-200 pl-3"><div className="text-sm font-medium text-slate-800">{workOrderEventLabel(event.event_type)}</div><div className="mt-0.5 text-xs text-slate-500">โดย {event.actor_name} · {thaiDate(event.occurred_at)}</div>{event.note ? <p className="mt-1 whitespace-pre-wrap text-xs text-slate-600">{event.note}</p> : null}{event.photo_paths?.length ? <div className="mt-2 grid grid-cols-3 gap-2">{event.photo_paths.map((path) => { const url = path.startsWith("http") ? path : supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl; return <a key={path} href={url} target="_blank" rel="noreferrer" className="aspect-square overflow-hidden rounded-lg border bg-slate-100"><img src={url} alt="รูปหลักฐาน" className="h-full w-full object-cover" /></a>; })}</div> : null}</div>)}{!events.length ? <p className="text-sm text-slate-400">ยังไม่มีประวัติ</p> : null}</div>
         </Card>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getCurrentStaff } from "@/lib/staff-server";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,10 @@ interface JobRow {
 interface ZoneRow { job_no: string; width_cm: number | null; length_cm: number | null; }
 
 export async function GET() {
+  const staff = await getCurrentStaff();
+  if (!staff || !["admin", "executive"].includes(staff.role)) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) return NextResponse.json({ error: "Supabase env missing" }, { status: 500 });

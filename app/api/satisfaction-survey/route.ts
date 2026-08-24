@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getCurrentStaff } from "@/lib/staff-server";
 
 // Always run fresh; the upstream Google fetch is lightly cached below.
 export const dynamic = "force-dynamic";
@@ -65,6 +66,10 @@ function parseScore(s: string): number | null {
 }
 
 export async function GET() {
+  const staff = await getCurrentStaff();
+  if (!staff || !["admin", "cs", "executive"].includes(staff.role)) {
+    return NextResponse.json({ error: "unauthorized", responses: [] }, { status: 401 });
+  }
   try {
     const res = await fetch(CSV_URL, { redirect: "follow", next: { revalidate: 120 } });
     if (!res.ok) {

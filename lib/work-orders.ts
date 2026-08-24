@@ -48,6 +48,27 @@ export interface WorkOrderEvent {
   actor_name: string; note: string | null; photo_paths: string[]; metadata: Record<string, unknown>; occurred_at: string;
 }
 
+export const WORK_ORDER_EVENT_LABELS: Record<string, string> = {
+  head_confirmed: "หัวหน้าช่างยืนยันและส่งให้คลัง",
+  returned_for_correction: "ส่งกลับให้ต้นทางแก้ไข",
+  sales_resubmitted: "ฝ่ายขายแก้ไขและส่งตรวจใหม่",
+  bbps_resubmitted: "BBPS ส่งข้อมูลฉบับแก้ไขกลับมา",
+  warehouse_accepted: "คลังรับงานเตรียมสินค้า",
+  warehouse_completed: "คลังเตรียมสินค้าเสร็จแล้ว",
+  installation_accepted: "หัวหน้าทีมรับงานติดตั้งและเริ่มเดินทาง",
+  field_travelling: "ทีมช่างกำลังเดินทาง",
+  field_arrived: "ทีมช่างถึงหน้างานแล้ว",
+  field_installing: "เริ่มติดตั้ง",
+  field_completed: "ติดตั้งเสร็จสมบูรณ์",
+  remnants_submitted: "ส่งรายงานเศษให้คลังตรวจรับ",
+  customer_signed: "ลูกค้าเซ็นรับงาน",
+  cs_closed: "CS ประเมินและปิดงาน",
+};
+
+export function workOrderEventLabel(eventType: string) {
+  return WORK_ORDER_EVENT_LABELS[eventType] ?? "อัปเดตใบสั่งงาน";
+}
+
 export function workOrderStatusClass(status: WorkOrderStatus) {
   if (status === "warehouse_preparing" || status === "installing") return "bg-blue-100 text-blue-700";
   if (status === "ready_to_install" || status === "waiting_cs") return "bg-emerald-100 text-emerald-700";

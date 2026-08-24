@@ -500,16 +500,16 @@ export default function ShareQueuePage() {
   return (
     <div className="min-h-screen bg-slate-100">
       <header className="bg-white border-b sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-3 py-3 sm:px-4 flex items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-bold text-slate-900">🗓️ ตารางคิวช่าง — MPD</h1>
-            <p className="text-xs text-slate-500">แชร์สำหรับทีมช่าง · จิ้มวันว่างเพื่อเปิดบิล/ลงคิว · กดที่งานเพื่อดูรายละเอียด</p>
+            <p className="hidden text-xs text-slate-500 sm:block">ฝ่ายขายลงคิวและเปิดบิล · กดงานเพื่อดูรายละเอียดและการส่งต่อ</p>
           </div>
-          <button onClick={() => openAdd(new Date())} className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700">+ ลงคิว</button>
+          <button onClick={() => openAdd(new Date())} className="shrink-0 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700">+ ลงคิว</button>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-4">
+      <main className="max-w-6xl mx-auto px-3 py-4 sm:px-4">
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           <button onClick={goPrev} className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm hover:bg-slate-50">←</button>
           <span className="text-sm font-semibold text-slate-700 min-w-[120px] text-center">{rangeLabel}</span>
@@ -738,12 +738,12 @@ export default function ShareQueuePage() {
                     {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
                     <label className="text-xs text-slate-500 block mb-1">วันที่เริ่ม</label>
                     <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value, endDate: (!form.endDate || form.endDate < e.target.value) ? e.target.value : form.endDate })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                   </div>
-                  <div className="flex-1">
+                  <div>
                     <label className="text-xs text-slate-500 block mb-1">ถึงวันที่</label>
                     <input type="date" value={form.endDate} min={form.date} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                   </div>
@@ -756,10 +756,10 @@ export default function ShareQueuePage() {
                     <label className="text-xs text-slate-500">เวลาทำงาน</label>
                     <button type="button" onClick={() => setForm({ ...form, start: WORK_START, end: WORK_END })} className="text-[11px] text-blue-600 hover:underline">🕘 เต็มวัน 09:00–17:00</button>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input type="time" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} className="flex-1 border border-slate-200 rounded-lg px-2 py-2 text-sm" />
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                    <input type="time" aria-label="เวลาเริ่ม" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} className="min-w-0 border border-slate-200 rounded-lg px-2 py-2 text-sm" />
                     <span className="text-slate-400 text-sm">ถึง</span>
-                    <input type="time" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} className="flex-1 border border-slate-200 rounded-lg px-2 py-2 text-sm" />
+                    <input type="time" aria-label="เวลาสิ้นสุด" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} className="min-w-0 border border-slate-200 rounded-lg px-2 py-2 text-sm" />
                   </div>
                 </div>
               </div>
@@ -774,12 +774,12 @@ export default function ShareQueuePage() {
                   <p className="text-[11px] text-slate-400">โหมดวันหยุด — จะลงเป็นวันหยุดของทีม ไม่เปิดบิล</p>
                 ) : (
                   <>
-                    <div className="flex gap-2">
-                      <div className="flex-1">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
                         <label className="text-xs text-slate-500 block mb-1">เลขบิล *</label>
                         <input value={form.bill_no} onChange={(e) => setForm({ ...form, bill_no: e.target.value })} placeholder="เช่น 285739" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                       </div>
-                      <div className="flex-1">
+                      <div>
                         <label className="text-xs text-slate-500 block mb-1">ชื่อลูกค้า *</label>
                         <input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} placeholder="ชื่อ-นามสกุล" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                       </div>

@@ -16,8 +16,8 @@ const CORE_NAV: NavItem[] = [
   { href: "/orders", icon: "📋", label: "ใบสั่งงาน", roles: ["admin", "sales", "head_technician", "warehouse"] },
   { href: "/warehouse", icon: "📦", label: "เตรียมสินค้า", roles: ["admin", "warehouse"] },
   { href: "/appointments", icon: "📅", label: "ปฏิทินทีม", roles: ["admin", "head_technician"] },
-  { href: "/pipeline", icon: "📌", label: "งานกำลังดำเนินการ", roles: ["admin", "head_technician"] },
   { href: "/technicians", icon: "🔑", label: "ทีมช่าง / PIN", roles: ["admin", "head_technician"] },
+  { href: "/remnants", icon: "✂️", label: "ตรวจรับเศษ", roles: ["admin", "warehouse"] },
   { href: "/cs-tracking", icon: "📞", label: "CS รอติดตาม", roles: ["admin", "cs"] },
   { href: "/dashboard", icon: "⭐", label: "คุณภาพและความพึงพอใจ", roles: ["admin", "cs", "executive"] },
   { href: "/exec", icon: "📈", label: "ภาพรวมผู้บริหาร", roles: ["admin", "executive"] },
@@ -25,15 +25,24 @@ const CORE_NAV: NavItem[] = [
 ];
 
 const EXPERIMENTAL_NAV: NavItem[] = [
+  { href: "/pipeline", icon: "📌", label: "Pipeline แบบเดิม", roles: ["admin", "head_technician"] },
   { href: "/service", icon: "🛠", label: "บริการ / SKU", roles: ["admin"] },
   { href: "/inventory", icon: "📦", label: "คลังวัสดุ", roles: ["admin", "warehouse"] },
   { href: "/waste-cost", icon: "♻️", label: "ต้นทุนเศษ", roles: ["admin", "warehouse"] },
-  { href: "/remnants", icon: "✂️", label: "เศษวัสดุ", roles: ["admin", "warehouse"] },
   { href: "/bom", icon: "📐", label: "BOQ / BOM", roles: ["admin", "warehouse"] },
   { href: "/purchase-orders", icon: "🛒", label: "ใบสั่งซื้อ", roles: ["admin", "warehouse"] },
   { href: "/documents", icon: "📄", label: "เอกสารแบบเดิม", roles: ["admin"] },
   { href: "/ncr", icon: "🔴", label: "NCR", roles: ["admin", "head_technician"] },
 ];
+
+const MOBILE_NAV_BY_ROLE: Record<StaffRole, string[]> = {
+  admin: ["/home", "/operations", "/orders", "/warehouse"],
+  sales: ["/sales-queue", "/tech-queue", "/orders"],
+  head_technician: ["/operations", "/orders", "/appointments", "/technicians"],
+  warehouse: ["/warehouse", "/orders", "/remnants", "/inventory"],
+  cs: ["/cs-tracking", "/dashboard"],
+  executive: ["/exec", "/dashboard"],
+};
 
 function NavLink({ item, active, onClick }: { item: NavItem; active: boolean; onClick?: () => void }) {
   return <Link href={item.href} onClick={onClick} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${active ? "bg-blue-600 font-medium text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}>
@@ -48,6 +57,10 @@ export default function Sidebar({ staff }: { staff: StaffProfile }) {
   const [toolsOpen, setToolsOpen] = useState(false);
   const core = useMemo(() => CORE_NAV.filter((item) => item.roles.includes(staff.role)), [staff.role]);
   const experimental = useMemo(() => EXPERIMENTAL_NAV.filter((item) => item.roles.includes(staff.role)), [staff.role]);
+  const mobile = useMemo(() => {
+    const preferred = MOBILE_NAV_BY_ROLE[staff.role];
+    return preferred.map((href) => [...core, ...experimental].find((item) => item.href === href)).filter((item): item is NavItem => Boolean(item));
+  }, [core, experimental, staff.role]);
 
   function active(item: NavItem) { return path === item.href || path.startsWith(item.href + "/"); }
   async function signOut() {
@@ -59,7 +72,7 @@ export default function Sidebar({ staff }: { staff: StaffProfile }) {
   const navigation = <>
     <nav className="space-y-1">{core.map((item) => <NavLink key={item.href} item={item} active={active(item)} onClick={() => setMenuOpen(false)} />)}</nav>
     {experimental.length ? <div className="mt-5 border-t border-white/10 pt-4">
-      <button onClick={() => setToolsOpen((value) => !value)} className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-slate-400 hover:bg-white/5 hover:text-white"><span>เครื่องมือทดลอง</span><span>{toolsOpen ? "−" : "+"}</span></button>
+      <button onClick={() => setToolsOpen((value) => !value)} className="flex min-h-11 w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-slate-400 hover:bg-white/5 hover:text-white"><span>เครื่องมือเสริม / ระบบเดิม</span><span>{toolsOpen ? "−" : "+"}</span></button>
       {toolsOpen ? <nav className="mt-1 space-y-1">{experimental.map((item) => <NavLink key={item.href} item={item} active={active(item)} onClick={() => setMenuOpen(false)} />)}</nav> : null}
     </div> : null}
   </>;
@@ -86,8 +99,8 @@ export default function Sidebar({ staff }: { staff: StaffProfile }) {
         <div className="flex-1 overflow-y-auto px-2 pb-4">{navigation}</div>{profile}
       </div>
     </div> : null}
-    <nav className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-slate-200 bg-white md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
-      {core.slice(0, 4).map((item) => <Link key={item.href} href={item.href} className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] ${active(item) ? "text-blue-600" : "text-slate-500"}`}><span className="text-lg leading-none">{item.icon}</span><span className="max-w-20 truncate font-medium">{item.label}</span></Link>)}
+    <nav aria-label="เมนูด่วนสำหรับมือถือ" className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-slate-200 bg-white shadow-[0_-4px_18px_rgba(15,23,42,0.08)] md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+      {mobile.map((item) => <Link key={item.href} href={item.href} className={`flex min-h-[56px] flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2 text-[11px] ${active(item) ? "bg-blue-50 text-blue-700" : "text-slate-500"}`}><span className="text-lg leading-none">{item.icon}</span><span className="max-w-20 truncate font-medium">{item.label}</span></Link>)}
       <button onClick={() => setMenuOpen(true)} className="flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] text-slate-500"><span className="text-lg leading-none">☰</span><span className="font-medium">เพิ่มเติม</span></button>
     </nav>
   </>;
