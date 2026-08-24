@@ -127,7 +127,7 @@ as $$
 declare v_upserted integer := 0; v_deactivated integer := 0;
 begin
   if (select auth.uid()) is null then
-    if coalesce(current_setting('request.jwt.claim.role', true),'') <> 'service_role'
+    if coalesce((select auth.jwt()->>'role'),'') <> 'service_role'
        and session_user not in ('postgres','supabase_admin') then
       raise exception 'service role required';
     end if;
