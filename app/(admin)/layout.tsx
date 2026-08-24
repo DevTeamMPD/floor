@@ -2,6 +2,7 @@ import { Toaster } from "sonner";
 import Sidebar from "@/components/layout/sidebar";
 import { redirect } from "next/navigation";
 import { getCurrentStaff } from "@/lib/staff-server";
+import NotificationCenter from "@/components/notifications/notification-center";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const staff = await getCurrentStaff();
@@ -9,6 +10,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   return (
     <div className="flex min-h-screen">
       <Sidebar staff={staff} />
+      <NotificationCenter />
       {/*
         Desktop: ml-[252px] to clear the fixed sidebar
         Mobile:  no left margin; pt-14 to clear the fixed top bar;

@@ -4,6 +4,8 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "MPD Workspace — เอกสาร & งานบริการ",
   description: "ระบบติดตามงานติดตั้งและประเมินผล",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "FloorNow", statusBarStyle: "default" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

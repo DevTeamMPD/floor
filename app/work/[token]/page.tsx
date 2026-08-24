@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import RemnantReportForm, { MaterialMovement, RemnantReportData } from "@/components/technician/remnant-report-form";
+import TechnicianPushButton from "@/components/notifications/technician-push-button";
 
 interface WorkAssignment {
   assignmentId: string | null; isLead: boolean; isTeamQueue?: boolean; firstOpenedAt: string | null; lastOpenedAt: string | null;
@@ -289,15 +290,16 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
         p_user_agent: navigator.userAgent,
       });
     }
-    const detailTasks: PromiseLike<unknown>[] = [
-      supabase
-        .from("appointment_technicians")
-        .select("id,is_lead,first_opened_at,acknowledged_at,technician:floor_technicians(name,phone,is_team_lead)")
-        .eq("appointment_id", a.appointmentId)
-        .eq("is_active", true)
-        .then(({ data }) => setResponsibles((data ?? []) as unknown as ResponsibleTechnician[])),
-    ];
+    const detailTasks: PromiseLike<unknown>[] = [];
     if (a.assignmentId) {
+      detailTasks.push(
+        supabase.rpc("get_technician_assignment_detail", { p_token: token, p_pin: pin.trim(), p_assignment_id: a.assignmentId })
+          .then(({ data }) => {
+            const detail = (data ?? null) as { responsibles?: ResponsibleTechnician[]; job?: DetailJob | null } | null;
+            setResponsibles(detail?.responsibles ?? []);
+            setDetailJob(detail?.job ?? null);
+          })
+      );
       detailTasks.push(
         supabase.rpc("get_technician_work_progress", { p_token: token, p_pin: pin.trim(), p_assignment_id: a.assignmentId })
           .then(({ data }) => {
@@ -313,16 +315,6 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       detailTasks.push(
         supabase.rpc("get_technician_remnant_report", { p_token: token, p_pin: pin.trim(), p_assignment_id: a.assignmentId })
           .then(({ data }) => setRemnantReport((data ?? null) as RemnantReportData | null))
-      );
-    }
-    if (a.jobNo) {
-      detailTasks.push(
-        supabase
-          .from("install_jobs")
-          .select("raw_payload,site_photos,survey_data")
-          .eq("job_no", a.jobNo)
-          .maybeSingle()
-          .then(({ data }) => setDetailJob((data ?? null) as DetailJob | null))
       );
     }
     await Promise.all(detailTasks.map((task) => Promise.resolve(task)));
@@ -469,7 +461,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
 
   return <main className="min-h-screen bg-slate-50 pb-12">
     <header className="bg-slate-950 text-white px-4 py-5">
-      <div className="max-w-2xl mx-auto"><div className="text-xs text-slate-400">MPD FloorNow · หน้างานของฉัน</div><h1 className="text-xl font-semibold mt-1">{workspace.technician.name}</h1><div className="text-sm text-slate-300">{workspace.technician.teamName ?? "ไม่ระบุทีม"}{workspace.technician.isTeamLead ? " · หัวหน้าทีม" : ""}</div></div>
+      <div className="max-w-2xl mx-auto"><div className="text-xs text-slate-400">MPD FloorNow · หน้างานของฉัน</div><h1 className="text-xl font-semibold mt-1">{workspace.technician.name}</h1><div className="text-sm text-slate-300">{workspace.technician.teamName ?? "ไม่ระบุทีม"}{workspace.technician.isTeamLead ? " · หัวหน้าทีม" : ""}</div><TechnicianPushButton token={token} pin={pin} /></div>
     </header>
     <div className="max-w-2xl mx-auto px-4 py-5">
       <div className="flex items-end justify-between mb-4"><div><h2 className="font-semibold text-slate-900">ตารางงานของฉัน</h2><p className="text-xs text-slate-500">กดงานเพื่อเปิดรายละเอียดและบันทึกการเปิดใบงาน</p></div><span className="text-xs text-slate-500">{upcoming.length} งาน</span></div>
