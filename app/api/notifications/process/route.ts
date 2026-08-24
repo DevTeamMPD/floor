@@ -26,6 +26,8 @@ export async function GET(request: Request) {
 
   webpush.setVapidDetails(subject, publicKey, privateKey);
   const supabase = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data: staffSync, error: staffSyncError } = await supabase.rpc("sync_floor_staff_from_employee_master");
+  if (staffSyncError) return Response.json({ error: `staff sync failed: ${staffSyncError.message}` }, { status: 500 });
   const { data, error } = await supabase.from("floor_push_deliveries")
     .select("id,attempts,notification:floor_notifications!inner(id,title,body,target_url,event_type,job_no),subscription:floor_push_subscriptions!inner(id,endpoint,p256dh,auth_secret)")
     .in("status", ["pending", "failed"]).lte("next_attempt_at", new Date().toISOString())
@@ -58,7 +60,7 @@ export async function GET(request: Request) {
       }
     }
   }
-  return Response.json({ processed: (data ?? []).length, sent, failed, expired });
+  return Response.json({ staffSync, processed: (data ?? []).length, sent, failed, expired });
 }
 
 export const POST = GET;
