@@ -62,12 +62,10 @@ async function runSync() {
 }
 
 export async function GET(req: Request) {
-  // optional protection: if CRON_SECRET is set, require it
   const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  if (!secret) return NextResponse.json({ error: "server_not_configured" }, { status: 503 });
+  const auth = req.headers.get("authorization");
+  if (auth !== `Bearer ${secret}`) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   try {
     const out = await runSync();
     return NextResponse.json({ ...out, at: new Date().toISOString() });

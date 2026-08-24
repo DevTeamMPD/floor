@@ -14,10 +14,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         Mobile:  no left margin; pt-14 to clear the fixed top bar;
                  pb-20 to clear the fixed bottom nav
       */}
-      <main className="flex-1 md:ml-[252px] pt-14 md:pt-0 pb-20 md:pb-0 p-4 md:p-6 min-w-0">
+      <main className="min-w-0 flex-1 px-3 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-[4.25rem] sm:px-4 md:ml-[252px] md:p-6">
         {children}
       </main>
-      <Toaster richColors position="top-right" />
+      <Toaster richColors position="top-center" />
     </div>
   );
 }

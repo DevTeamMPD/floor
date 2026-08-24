@@ -28,6 +28,20 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Mobile forms: prevent iOS zoom and keep controls usable on a job site. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    min-height: 44px;
+    font-size: 16px !important;
+  }
+
+  button {
+    min-height: 44px;
+  }
+}
+
 .tag {
   display: inline-flex;
   align-items: center;
