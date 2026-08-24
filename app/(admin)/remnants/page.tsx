@@ -14,6 +14,8 @@ interface Remnant {
   note: string | null;
   created_at: string;
 }
+interface PendingRemnantPiece { id: string; widthCm: number; lengthCm: number; qty: number; matType: string; note: string | null; photoPaths: string[] }
+interface RemnantReport { id: string; jobNo: string; status: "pending_review" | "accepted" | "rejected"; noRemnant: boolean; notes: string | null; technicianName: string; submittedAt: string; reviewNote: string | null; pieces: PendingRemnantPiece[] }
 
 const WIDTH_BINS = [30, 40, 50, 60, 70, 80, 90, 110, 140];
 const MAT_TYPES = ["16B", "16W", "6B", "6W"];
@@ -40,15 +42,17 @@ export default function RemnantsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
+  const [reports, setReports] = useState<RemnantReport[]>([]);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
 
   const fetch = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("remnant_stock")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (error) toast.error(error.message);
-    else setItems(data ?? []);
+    const [stockResult, reportResult] = await Promise.all([
+      supabase.from("remnant_stock").select("*").order("created_at", { ascending: false }),
+      supabase.rpc("list_remnant_reports_staff"),
+    ]);
+    if (stockResult.error) toast.error(stockResult.error.message); else setItems(stockResult.data ?? []);
+    if (reportResult.error) toast.error(`โหลดคิวตรวจรับเศษไม่สำเร็จ: ${reportResult.error.message}`); else setReports((reportResult.data ?? []) as RemnantReport[]);
     setLoading(false);
   }, []);
 
@@ -119,6 +123,21 @@ export default function RemnantsPage() {
     else { toast.success("ลบแล้ว"); fetch(); }
   }
 
+  async function reviewReport(id: string, decision: "accept" | "reject") {
+    let note: string | null = null;
+    if (decision === "reject") {
+      note = window.prompt("ระบุสิ่งที่ช่างต้องแก้ไข");
+      if (!note?.trim()) return;
+    } else if (!window.confirm("ยืนยันตรวจรับเศษรายการนี้เข้าสต็อกพร้อมใช้?")) return;
+    setReviewingId(id);
+    const { error } = await supabase.rpc("review_remnant_report_staff", { p_report_id: id, p_decision: decision, p_note: note });
+    if (error) toast.error(error.message);
+    else { toast.success(decision === "accept" ? "ตรวจรับและเพิ่มเศษเข้าสต็อกแล้ว" : "ส่งกลับให้ช่างแก้ไขแล้ว"); await fetch(); }
+    setReviewingId(null);
+  }
+
+  const pendingReports = reports.filter((report) => report.status === "pending_review");
+
   return (
     <div className="p-4 md:p-6 max-w-6xl mx-auto">
       {/* Header */}
@@ -134,6 +153,19 @@ export default function RemnantsPage() {
           + รับเศษใหม่
         </button>
       </div>
+
+      <section className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div><h2 className="font-semibold text-amber-950">คิวเศษรอคลังตรวจรับ</h2><p className="mt-0.5 text-xs text-amber-700">ตรวจขนาดและรูปก่อนเพิ่มเข้าสิ่งของพร้อมใช้</p></div>
+          <span className="rounded-full bg-amber-600 px-3 py-1 text-xs font-bold text-white">{pendingReports.length} งาน</span>
+        </div>
+        {pendingReports.length ? <div className="mt-4 space-y-3">{pendingReports.map((report) => <article key={report.id} className="rounded-xl border border-amber-200 bg-white p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="font-semibold text-slate-900">งาน {report.jobNo}</div><div className="mt-1 text-xs text-slate-500">ผู้ส่ง: {report.technicianName} · {new Date(report.submittedAt).toLocaleString("th-TH")}</div></div><span className="rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-700">รอตรวจรับ</span></div>
+          {report.noRemnant ? <div className="mt-3 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">ช่างยืนยันว่าไม่มีเศษเหลือ</div> : <div className="mt-3 grid gap-3 md:grid-cols-2">{report.pieces.map((piece,index)=><div key={piece.id} className="rounded-xl border border-slate-200 p-3"><div className="text-sm font-semibold text-slate-900">ชิ้นที่ {index+1} · {piece.matType} · RS-{piece.widthCm}</div><div className="mt-1 text-xs text-slate-600">ยาว {piece.lengthCm} ซม. · {piece.qty} ชิ้น{piece.note?` · ${piece.note}`:""}</div><div className="mt-2 grid grid-cols-4 gap-2">{piece.photoPaths.map((path,photoIndex)=>{const url=path.startsWith("http")?path:supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl;return <a key={path} href={url} target="_blank" rel="noreferrer" className="aspect-square overflow-hidden rounded-lg border"><img src={url} alt={`เศษชิ้นที่ ${index+1} รูป ${photoIndex+1}`} className="h-full w-full object-cover" /></a>;})}</div></div>)}</div>}
+          {report.notes?<div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">หมายเหตุ: {report.notes}</div>:null}
+          <div className="mt-3 flex gap-2"><button disabled={reviewingId===report.id} onClick={()=>void reviewReport(report.id,"accept")} className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">ตรวจรับเข้าสต็อก</button><button disabled={reviewingId===report.id} onClick={()=>void reviewReport(report.id,"reject")} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-600 disabled:opacity-50">ส่งกลับแก้ไข</button></div>
+        </article>)}</div>:<div className="mt-4 rounded-xl border border-dashed border-amber-200 bg-white/70 px-4 py-6 text-center text-sm text-amber-700">ไม่มีเศษรอตรวจรับ</div>}
+      </section>
 
       {/* Summary chips */}
       <div className="flex gap-3 mb-5 flex-wrap">

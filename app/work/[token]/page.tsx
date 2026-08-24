@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
+import RemnantReportForm, { MaterialMovement, RemnantReportData } from "@/components/technician/remnant-report-form";
 
 interface WorkAssignment {
   assignmentId: string | null; isLead: boolean; isTeamQueue?: boolean; firstOpenedAt: string | null; lastOpenedAt: string | null;
@@ -100,7 +101,19 @@ function workErrorMessage(error: unknown) {
   if (message.includes("invalid work status transition")) return "ลำดับสถานะไม่ถูกต้อง กรุณารีเฟรชหน้าแล้วทำขั้นตอนล่าสุดอีกครั้ง";
   if (message.includes("head technician material plan is required")) return "ยังเริ่มงานไม่ได้: หัวหน้าช่างต้องระบุรายการวัสดุและจำนวนแผ่นก่อน";
   if (message.includes("status photo is required")) return "กรุณาถ่ายหรือเลือกรูปหลักฐานอย่างน้อย 1 รูป";
+  if (message.includes("remnant report is required")) return "กรุณาบันทึกเศษที่เหลือ หรือยืนยันว่าไม่มีเศษเหลือ ก่อนให้ลูกค้าเซ็นรับงาน";
   return message ? `บันทึกสถานะไม่สำเร็จ: ${message}` : "บันทึกสถานะไม่สำเร็จ กรุณารีเฟรชหน้าแล้วลองอีกครั้ง หากยังไม่ได้ให้แจ้งหัวหน้าช่าง";
+}
+
+function suggestedMaterialMovements(order: CentralWorkOrder | null): MaterialMovement[] {
+  return (order?.items ?? []).filter((item) => item.category === "floor_material").map((item) => {
+    const text = `${item.itemName} ${item.sku ?? ""} ${item.specification ?? ""}`;
+    const width = /140/.test(text) ? "140" : "110";
+    const thickness = /(^|\D)6\s*(มม|mm|B|W|$)/i.test(text) ? "6" : "16";
+    const color = /white|ขาว|(^|[^a-z])W([^a-z]|$)/i.test(text) ? "W" : "B";
+    const lengthMatch = text.match(/(?:ยาว|length)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+    return { thickness, color, widthCm: width, lengthCm: lengthMatch?.[1] ?? "", qty: String(item.actualQty ?? item.plannedQty ?? 1), note: [item.sku, item.itemName].filter(Boolean).join(" · ") };
+  });
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><div className="text-xs font-medium text-slate-400">{label}</div><div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{children || "—"}</div></div>;
@@ -186,6 +199,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   const [detailJob, setDetailJob] = useState<DetailJob | null>(null);
   const [workProgress, setWorkProgress] = useState<WorkProgress | null>(null);
   const [centralWorkOrder, setCentralWorkOrder] = useState<CentralWorkOrder | null>(null);
+  const [remnantReport, setRemnantReport] = useState<RemnantReportData | null>(null);
   const [statusFiles, setStatusFiles] = useState<StatusFilePreview[]>([]);
   const statusFilesRef = useRef<StatusFilePreview[]>([]);
   const [statusNote, setStatusNote] = useState("");
@@ -194,6 +208,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   const [saving, setSaving] = useState(false);
   const [requestedJob, setRequestedJob] = useState<string | null>(null);
   const pinStorageKey = `floor-work-pin:${token}`;
+  const suggestedRemnantMaterials = useMemo(() => suggestedMaterialMovements(centralWorkOrder), [centralWorkOrder]);
 
   useEffect(() => { statusFilesRef.current = statusFiles; }, [statusFiles]);
   useEffect(() => () => { statusFilesRef.current.forEach((item) => URL.revokeObjectURL(item.url)); }, []);
@@ -260,6 +275,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     setDetailJob(null);
     setWorkProgress(null);
     setCentralWorkOrder(null);
+    setRemnantReport(null);
     clearStatusFiles();
     setStatusNote("");
     setPickedSheetCount("");
@@ -293,6 +309,10 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       detailTasks.push(
         supabase.rpc("get_technician_work_order_v2", { p_token: token, p_pin: pin.trim(), p_assignment_id: a.assignmentId })
           .then(({ data }) => setCentralWorkOrder((data ?? null) as CentralWorkOrder | null))
+      );
+      detailTasks.push(
+        supabase.rpc("get_technician_remnant_report", { p_token: token, p_pin: pin.trim(), p_assignment_id: a.assignmentId })
+          .then(({ data }) => setRemnantReport((data ?? null) as RemnantReportData | null))
       );
     }
     if (a.jobNo) {
@@ -574,6 +594,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
                 const currentIndex = WORK_STEPS.findIndex((step) => step.status === currentStatus);
                 const next = WORK_STEPS[currentIndex + 1];
                 const signed = events.find((event) => event.status === "customer_signed");
+                const remnantReady = remnantReport?.status === "pending_review" || remnantReport?.status === "accepted";
                 const workReady = !centralWorkOrder || centralWorkOrder.status === "ready_to_install" || centralWorkOrder.status === "installing";
                 const canStart = currentStatus || !centralWorkOrder || (centralWorkOrder.status === "ready_to_install" && centralWorkOrder.isLead);
                 return <div className="space-y-4">
@@ -601,7 +622,9 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
                   {next && selected.acknowledgedAt && !workReady ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">ยังเริ่มงานไม่ได้: ใบสั่งงานอยู่สถานะ {{ head_review: "รอหัวหน้าช่างตรวจ", warehouse_waiting: "รอคลังรับงาน", warehouse_preparing: "กำลังเตรียมสินค้า" }[centralWorkOrder?.status ?? ""] ?? centralWorkOrder?.status}</div> : null}
                   {next && selected.acknowledgedAt && workReady && !canStart ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">หัวหน้าทีมที่ได้รับมอบหมายต้องกด “รับงานติดตั้ง” ก่อน</div> : null}
                   {next && !selected.acknowledgedAt ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">กดรับทราบงานก่อนเริ่มอัปเดตสถานะ</div> : null}
-                  {currentStatus === "completed" && !signed ? <div className="rounded-xl border border-violet-200 bg-violet-50 p-3"><div className="mb-3 text-sm font-semibold text-violet-950">ลูกค้าเซ็นรับงาน</div><CustomerSignature busy={saving} onSubmit={saveCustomerSignature} /></div> : null}
+                  {currentStatus === "completed" && selected.isLead ? <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3"><div className="mb-3"><div className="text-sm font-semibold text-amber-950">✂️ สรุปวัสดุและเศษหลังติดตั้ง</div><div className="mt-0.5 text-xs text-amber-700">ต้องบันทึกส่วนนี้ก่อนให้ลูกค้าเซ็นรับงาน</div></div><RemnantReportForm token={token} pin={pin.trim()} assignmentId={selected.assignmentId!} appointmentId={selected.appointmentId} initial={remnantReport} suggestedMaterials={suggestedRemnantMaterials} onSaved={setRemnantReport} /></div> : null}
+                  {currentStatus === "completed" && !signed && !selected.isLead ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">รอหัวหน้าทีมบันทึกสรุปวัสดุและเศษก่อนส่งมอบงาน</div> : null}
+                  {currentStatus === "completed" && !signed && remnantReady ? <div className="rounded-xl border border-violet-200 bg-violet-50 p-3"><div className="mb-3 text-sm font-semibold text-violet-950">ขั้นตอนสุดท้าย: ให้ลูกค้าเซ็นรับงาน</div><CustomerSignature busy={saving} onSubmit={saveCustomerSignature} /></div> : null}
                   {signed ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-700">✓ ลูกค้า {signed.customerSignedName} เซ็นรับงานแล้ว เวลา {new Date(signed.occurredAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })}</div> : null}
                   {progressError ? <div className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{progressError}</div> : null}
                 </div>;
