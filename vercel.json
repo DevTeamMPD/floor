@@ -1,7 +1,6 @@
 {
   "framework": "nextjs",
   "crons": [
-    { "path": "/api/sync-evaluations", "schedule": "0 1 * * *" },
-    { "path": "/api/notifications/process", "schedule": "* * * * *" }
+    { "path": "/api/sync-evaluations", "schedule": "0 1 * * *" }
   ]
 }
