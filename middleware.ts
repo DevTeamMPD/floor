@@ -2,14 +2,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_PREFIXES = ["/login", "/auth", "/work", "/dispatch", "/track", "/status", "/eval", "/api"];
-const ROLE_ACCESS: Record<string, string[]> = {
-  sales: ["/", "/sales-queue", "/share/queue", "/tech-queue", "/orders"],
-  head_technician: ["/", "/operations", "/orders", "/appointments", "/pipeline", "/technicians", "/ncr"],
-  cs: ["/", "/cs-tracking", "/dashboard"],
-  executive: ["/", "/exec", "/dashboard"],
-  warehouse: ["/", "/warehouse", "/orders", "/inventory", "/remnants", "/waste-cost", "/bom", "/purchase-orders"],
-};
-const ROLE_HOME: Record<string, string> = { sales: "/sales-queue", head_technician: "/operations", cs: "/cs-tracking", executive: "/exec", warehouse: "/warehouse" };
+const ADMIN_ONLY_PREFIXES = ["/staff", "/service", "/documents"];
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -43,7 +36,7 @@ export async function middleware(request: NextRequest) {
   }
   if (user && path === "/login" && profile?.is_active) {
     const home = request.nextUrl.clone();
-    home.pathname = ROLE_HOME[profile.role] ?? "/";
+    home.pathname = "/home";
     home.search = "";
     return NextResponse.redirect(home);
   }
@@ -52,13 +45,10 @@ export async function middleware(request: NextRequest) {
       const login = request.nextUrl.clone(); login.pathname = "/login"; login.search = "";
       return NextResponse.redirect(login);
     }
-    if (profile.role !== "admin") {
-      const allowed = ROLE_ACCESS[profile.role] ?? ["/"];
-      const canAccess = allowed.some((prefix) => path === prefix || (prefix !== "/" && path.startsWith(prefix + "/")));
-      if (!canAccess) {
-        const home = request.nextUrl.clone(); home.pathname = ROLE_HOME[profile.role] ?? "/"; home.search = "";
-        return NextResponse.redirect(home);
-      }
+    const isAdminOnly = ADMIN_ONLY_PREFIXES.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
+    if (profile.role !== "admin" && isAdminOnly) {
+      const home = request.nextUrl.clone(); home.pathname = "/home"; home.search = "";
+      return NextResponse.redirect(home);
     }
   }
   return response;

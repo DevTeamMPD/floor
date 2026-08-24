@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
@@ -18,12 +18,22 @@ interface Props {
 }
 
 export default function TechnicianAssignmentButton({ appointmentId, appointmentTeamId, jobNo, teams, technicians, assignments, onChanged }: Props) {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const active = useMemo(() => assignments.filter((a) => a.appointment_id === appointmentId && a.is_active), [assignments, appointmentId]);
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [leadId, setLeadId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [canManage, setCanManage] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.from("floor_staff_profiles").select("role").eq("id", user.id).maybeSingle();
+      setCanManage(["admin", "head_technician"].includes(String(data?.role ?? "")));
+    })();
+  }, [supabase]);
 
   function show() {
     setSelected(active.map((a) => a.technician_id));
@@ -37,6 +47,7 @@ export default function TechnicianAssignmentButton({ appointmentId, appointmentT
   }
 
   async function save() {
+    if (!canManage) { toast.error("เฉพาะหัวหน้าช่างที่จ่ายงานรายบุคคลได้"); return; }
     if (!selected.length) { toast.error("กรุณาเลือกช่างอย่างน้อย 1 คน"); return; }
     const actualLead = selected.includes(leadId) ? leadId : selected[0];
     setSaving(true);
@@ -65,9 +76,9 @@ export default function TechnicianAssignmentButton({ appointmentId, appointmentT
 
   return (
     <>
-      <button onClick={show} className="shrink-0 rounded-xl border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-100">
+      {canManage ? <button onClick={show} className="shrink-0 rounded-xl border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-100">
         👤 {active.length ? `แก้ไขช่าง (${active.length} คน)` : "มอบหมายช่าง"}
-      </button>
+      </button> : <span className="shrink-0 rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-500">ดูข้อมูลเท่านั้น</span>}
       {active.length ? <div className="mt-1 flex flex-wrap gap-1">
         {active.map((a) => {
           const t = technicians.find((x) => x.id === a.technician_id);

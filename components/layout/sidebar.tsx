@@ -37,11 +37,12 @@ const EXPERIMENTAL_NAV: NavItem[] = [
 
 const MOBILE_NAV_BY_ROLE: Record<StaffRole, string[]> = {
   admin: ["/home", "/operations", "/orders", "/warehouse"],
-  sales: ["/sales-queue", "/tech-queue", "/orders"],
-  head_technician: ["/operations", "/orders", "/appointments", "/technicians"],
-  warehouse: ["/warehouse", "/orders", "/remnants", "/inventory"],
-  cs: ["/cs-tracking", "/dashboard"],
-  executive: ["/exec", "/dashboard"],
+  staff: ["/home", "/operations", "/orders", "/appointments"],
+  sales: ["/home", "/sales-queue", "/orders", "/appointments"],
+  head_technician: ["/home", "/operations", "/orders", "/appointments"],
+  warehouse: ["/home", "/warehouse", "/orders", "/remnants"],
+  cs: ["/home", "/cs-tracking", "/orders", "/dashboard"],
+  executive: ["/home", "/exec", "/orders", "/dashboard"],
 };
 
 function NavLink({ item, active, onClick }: { item: NavItem; active: boolean; onClick?: () => void }) {
@@ -55,8 +56,8 @@ export default function Sidebar({ staff }: { staff: StaffProfile }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
-  const core = useMemo(() => CORE_NAV.filter((item) => item.roles.includes(staff.role)), [staff.role]);
-  const experimental = useMemo(() => EXPERIMENTAL_NAV.filter((item) => item.roles.includes(staff.role)), [staff.role]);
+  const core = useMemo(() => CORE_NAV.filter((item) => item.href !== "/staff" || staff.role === "admin"), [staff.role]);
+  const experimental = useMemo(() => EXPERIMENTAL_NAV.filter((item) => staff.role === "admin" || !["/service", "/documents"].includes(item.href)), [staff.role]);
   const mobile = useMemo(() => {
     const preferred = MOBILE_NAV_BY_ROLE[staff.role];
     return preferred.map((href) => [...core, ...experimental].find((item) => item.href === href)).filter((item): item is NavItem => Boolean(item));
@@ -95,7 +96,7 @@ export default function Sidebar({ staff }: { staff: StaffProfile }) {
     {menuOpen ? <div className="fixed inset-0 z-50 flex md:hidden" onClick={() => setMenuOpen(false)}>
       <div className="absolute inset-0 bg-black/60" />
       <div className="relative z-10 flex h-full w-80 max-w-[88vw] flex-col bg-slate-950 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 pb-4 pt-5"><div><div className="text-lg font-bold text-white">MPD FloorNow</div><div className="text-xs text-slate-400">เมนูสำหรับ{ROLE_LABELS[staff.role]}</div></div><button onClick={() => setMenuOpen(false)} className="p-2 text-slate-300">×</button></div>
+        <div className="flex items-center justify-between px-5 pb-4 pt-5"><div><div className="text-lg font-bold text-white">MPD FloorNow</div><div className="text-xs text-slate-400">ข้อมูลร่วมกันทุกฝ่าย · สิทธิ์ดำเนินงานตามหน้าที่</div></div><button onClick={() => setMenuOpen(false)} className="p-2 text-slate-300">×</button></div>
         <div className="flex-1 overflow-y-auto px-2 pb-4">{navigation}</div>{profile}
       </div>
     </div> : null}

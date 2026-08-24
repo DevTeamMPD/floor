@@ -155,7 +155,8 @@ function eachDay(a: string, b: string): string[] {
 }
 
 export default function ShareQueuePage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+  const [staffRole, setStaffRole] = useState<string | null>(null);
   const [view, setView] = useState<"month" | "week">("month");
   const [offset, setOffset] = useState(0);
   const now = new Date();
@@ -177,6 +178,17 @@ export default function ShareQueuePage() {
   useEffect(() => {
     if (window.matchMedia("(max-width: 640px)").matches) setView("week");
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    supabase.rpc("get_my_floor_staff_profile").then(({ data }) => {
+      if (active) setStaffRole((data as { role?: string } | null)?.role ?? null);
+    });
+    return () => { active = false; };
+  }, [supabase]);
+
+  const canSell = staffRole === "admin" || staffRole === "sales";
+  const canDecide = staffRole === "admin" || staffRole === "head_technician";
 
   const week = useMemo(() => getWeekDays(offset), [offset]);
   const monthDays = useMemo(() => getMonthDays(mYear, mMonth), [mYear, mMonth]);
@@ -258,11 +270,13 @@ export default function ShareQueuePage() {
   }
 
   function openAdd(date: Date) {
+    if (!canSell) return;
     setDetail(null);
     setShowSurvey(false);
     setForm({ ...emptyForm(), date: ymd(date), endDate: ymd(date), tech_id: teams[0]?.id ?? "", jobNo: ipGenOrderNo() });
   }
   async function openEdit(a: Appt) {
+    if (!canSell) return;
     const s = new Date(a.slot_start), e = new Date(a.slot_end);
     const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
     setDetail(null);
@@ -317,6 +331,7 @@ export default function ShareQueuePage() {
   function setSurvey(patch: Partial<SurveyData>) { setForm((f) => f ? { ...f, survey: { ...f.survey, ...patch } } : f); }
 
   async function save() {
+    if (!canSell) { alert("บัญชีนี้ดูข้อมูลได้ แต่ไม่มีสิทธิ์ลงคิวหรือแก้ไขข้อมูลฝ่ายขาย"); return; }
     if (!form) return;
     if (!form.tech_id) { alert("กรุณาเลือกทีมช่าง"); return; }
     if (!form.date) { alert("กรุณาเลือกวันที่"); return; }
@@ -423,6 +438,7 @@ export default function ShareQueuePage() {
   }
 
   async function setStatus(a: Appt, status: string) {
+    if (!canDecide) { alert("เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่ยืนยันคิวได้"); return; }
     const confirmedAt = status === "confirmed" ? new Date().toISOString() : null;
     const query = supabase.from("appointments").update({ status, confirmed_at: confirmedAt });
     const { error } = a.job_id
@@ -449,6 +465,7 @@ export default function ShareQueuePage() {
   }
 
   async function sendBack(a: Appt) {
+    if (!canDecide) { alert("เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่ส่งงานกลับได้"); return; }
     if (!a.job_id) return;
     const reason = window.prompt("ระบุข้อมูลที่ต้องให้ฝ่ายขายแก้ไข");
     if (!reason?.trim()) return;
@@ -470,6 +487,7 @@ export default function ShareQueuePage() {
   }
 
   async function remove(a: Appt) {
+    if (!canSell) { alert("เฉพาะฝ่ายขายหรือผู้ดูแลระบบเท่านั้นที่ยกเลิกคิวได้"); return; }
     if (!window.confirm("ยกเลิกคิวนี้? ประวัติรายการจะยังถูกเก็บไว้")) return;
     const { error } = await supabase.from("appointments").update({ status: "cancelled" }).eq("id", a.id);
     if (error) { alert("ลบไม่สำเร็จ"); return; }
@@ -505,7 +523,7 @@ export default function ShareQueuePage() {
             <h1 className="text-lg font-bold text-slate-900">🗓️ ตารางคิวช่าง — MPD</h1>
             <p className="hidden text-xs text-slate-500 sm:block">ฝ่ายขายลงคิวและเปิดบิล · กดงานเพื่อดูรายละเอียดและการส่งต่อ</p>
           </div>
-          <button onClick={() => openAdd(new Date())} className="shrink-0 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700">+ ลงคิว</button>
+          {canSell ? <button onClick={() => openAdd(new Date())} className="shrink-0 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700">+ ลงคิว</button> : <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-500">โหมดดูข้อมูล</span>}
         </div>
       </header>
 
@@ -543,10 +561,10 @@ export default function ShareQueuePage() {
                 const inMonth = d.getMonth() === mMonth;
                 const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
                 return (
-                  <div key={d.toISOString()} onClick={() => openAdd(d)} title="จิ้มเพื่อลงคิว" className={`group min-h-[96px] border-b border-r border-slate-100 p-1 flex flex-col cursor-pointer hover:bg-blue-50/40 ${inMonth ? "" : "bg-slate-50/60"}`}>
+                  <div key={d.toISOString()} onClick={() => canSell && openAdd(d)} title={canSell ? "จิ้มเพื่อลงคิว" : "ดูคิวงาน"} className={`group min-h-[96px] border-b border-r border-slate-100 p-1 flex flex-col ${canSell ? "cursor-pointer hover:bg-blue-50/40" : ""} ${inMonth ? "" : "bg-slate-50/60"}`}>
                     <div className="flex items-center justify-between px-0.5">
                       <span className={`text-[11px] ${isToday(d) ? "bg-blue-600 text-white rounded-full w-5 h-5 inline-flex items-center justify-center font-semibold" : inMonth ? "text-slate-700" : "text-slate-300"}`}>{d.getDate()}</span>
-                      <span className="text-[11px] text-slate-300 group-hover:text-blue-600 leading-none px-1">＋</span>
+                      {canSell && <span className="text-[11px] text-slate-300 group-hover:text-blue-600 leading-none px-1">＋</span>}
                     </div>
                     <div className="mt-0.5 space-y-0.5 flex-1">
                       {dayAppts.map((a) => (
@@ -583,7 +601,7 @@ export default function ShareQueuePage() {
                         </button>
                       );
                     })}
-                    <button onClick={() => openAdd(d)} className="w-full text-[11px] text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded py-1">+ ลงคิว</button>
+                    {canSell && <button onClick={() => openAdd(d)} className="w-full text-[11px] text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded py-1">+ ลงคิว</button>}
                   </div>
                 </div>
               );
@@ -708,10 +726,10 @@ export default function ShareQueuePage() {
 
               <footer className="shrink-0 border-t border-slate-200 bg-white px-4 py-3 sm:px-7">
                 <div className="flex flex-wrap justify-end gap-2">
-                  {detail.status === "proposed" && <button onClick={() => setStatus(detail, "confirmed")} className="order-first grow rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 sm:order-none sm:grow-0">ยืนยันนัด</button>}
-                  {detail.status === "proposed" && detail.job_id && <button onClick={() => sendBack(detail)} className="rounded-lg border border-amber-300 px-4 py-2.5 text-sm text-amber-700 hover:bg-amber-50">ส่งกลับแก้ไข</button>}
-                  {!detail.ext_ref?.startsWith("bbps:") && <button onClick={() => openEdit(detail)} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50">แก้ไข</button>}
-                  <button onClick={() => remove(detail)} className="rounded-lg border border-red-200 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50">ยกเลิกคิว</button>
+                  {canDecide && detail.status === "proposed" && <button onClick={() => setStatus(detail, "confirmed")} className="order-first grow rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 sm:order-none sm:grow-0">ยืนยันนัด</button>}
+                  {canDecide && detail.status === "proposed" && detail.job_id && <button onClick={() => sendBack(detail)} className="rounded-lg border border-amber-300 px-4 py-2.5 text-sm text-amber-700 hover:bg-amber-50">ส่งกลับแก้ไข</button>}
+                  {canSell && !detail.ext_ref?.startsWith("bbps:") && <button onClick={() => openEdit(detail)} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50">แก้ไข</button>}
+                  {canSell && <button onClick={() => remove(detail)} className="rounded-lg border border-red-200 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50">ยกเลิกคิว</button>}
                 </div>
               </footer>
             </aside>

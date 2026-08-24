@@ -67,7 +67,7 @@ function parseScore(s: string): number | null {
 
 export async function GET() {
   const staff = await getCurrentStaff();
-  if (!staff || !["admin", "cs", "executive"].includes(staff.role)) {
+  if (!staff) {
     return NextResponse.json({ error: "unauthorized", responses: [] }, { status: 401 });
   }
   try {

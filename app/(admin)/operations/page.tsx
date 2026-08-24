@@ -21,10 +21,11 @@ export default function OperationsPage() {
   const supabase = useMemo(() => createClient(), []);
   const [appointments, setAppointments] = useState<Appointment[]>([]); const [teams, setTeams] = useState<Team[]>([]); const [technicians, setTechnicians] = useState<TechWithToken[]>([]);
   const [assignments, setAssignments] = useState<TechnicianAssignment[]>([]); const [orders, setOrders] = useState<WorkOrder[]>([]); const [items, setItems] = useState<WorkOrderItem[]>([]);
-  const [loading, setLoading] = useState(true); const [tab, setTab] = useState<"decision" | "returned" | "active">("decision");
+  const [loading, setLoading] = useState(true); const [tab, setTab] = useState<"decision" | "returned" | "active">("decision"); const [canAct, setCanAct] = useState(false);
   const load = useCallback(async () => {
     setLoading(true); const since = new Date(Date.now() - 7 * 86400000).toISOString();
-    const [appointmentResult, teamResult, technicianResult, assignmentResult, orderResult] = await Promise.all([
+    const { data: { user } } = await supabase.auth.getUser();
+    const [appointmentResult, teamResult, technicianResult, assignmentResult, orderResult, profileResult] = await Promise.all([
       supabase.from("appointments").select("id,job_id,tech_id,slot_start,slot_end,status,notes,requirement,job:install_jobs(job_no,source,bill_no,customer_name,customer_phone,address,location_url,product_name,status,flag_note,survey_data,site_photos)").neq("status", "cancelled").gte("slot_end", since).order("slot_start"),
       supabase.from("tech_teams").select("id,name").eq("is_active", true).order("name"),
       // Keep inactive technicians in the lookup so historical assignments still show the real name.
@@ -32,14 +33,17 @@ export default function OperationsPage() {
       supabase.from("floor_technicians").select("id,team_id,name,phone,is_team_lead,is_active,created_at,updated_at,personal_token").order("name"),
       supabase.from("appointment_technicians").select("*").eq("is_active", true).order("assigned_at"),
       supabase.from("floor_work_orders").select("*").neq("status", "cancelled").order("updated_at", { ascending: false }),
+      user ? supabase.from("floor_staff_profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
     ]);
+    setCanAct(["admin", "head_technician"].includes(String(profileResult.data?.role ?? "")));
     const error = appointmentResult.error ?? teamResult.error ?? technicianResult.error ?? assignmentResult.error ?? orderResult.error; if (error) toast.error(`โหลดงานไม่ครบ: ${error.message}`);
     const orderRows = (orderResult.data ?? []) as WorkOrder[]; setAppointments((appointmentResult.data ?? []) as unknown as Appointment[]); setTeams((teamResult.data ?? []) as Team[]); setTechnicians((technicianResult.data ?? []) as TechWithToken[]); setAssignments((assignmentResult.data ?? []) as TechnicianAssignment[]); setOrders(orderRows);
     if (orderRows.length) { const { data } = await supabase.from("floor_work_order_items").select("*").in("work_order_id", orderRows.map((row) => row.id)).order("sort_order"); setItems((data ?? []) as WorkOrderItem[]); } else setItems([]); setLoading(false);
   }, [supabase]);
   useEffect(() => { void load(); }, [load]);
-  async function copyLink(token: string) { await navigator.clipboard.writeText(`${window.location.origin}/work/${token}`); toast.success("คัดลอกลิงก์ช่างแล้ว"); }
+  async function copyLink(token: string) { if (!canAct) { toast.error("เฉพาะหัวหน้าช่างที่คัดลอกใบงานช่างได้"); return; } await navigator.clipboard.writeText(`${window.location.origin}/work/${token}`); toast.success("คัดลอกลิงก์ช่างแล้ว"); }
   async function returnToSales(workOrderId: string, source: string | null | undefined) {
+    if (!canAct) { toast.error("เฉพาะหัวหน้าช่างที่ส่งงานกลับต้นทางได้"); return; }
     const reason = window.prompt(source === "bbps" ? "ระบุข้อมูลที่ต้องการให้ BBPS แก้ไข" : "ระบุข้อมูลที่ต้องการให้ฝ่ายขายแก้ไข");
     if (!reason?.trim()) return;
     const { error } = await supabase.rpc("return_floor_work_order_v3", { p_work_order_id: workOrderId, p_reason: reason.trim() });
@@ -55,6 +59,7 @@ export default function OperationsPage() {
   const decisionCount = orders.filter((order) => order.status === "head_review").length; const returnedCount = orders.filter((order) => order.status === "returned_sales").length;
 
   return <div className="mx-auto max-w-7xl"><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><div className="text-xs font-semibold uppercase tracking-wider text-blue-600">หัวหน้าช่าง</div><h1 className="mt-1 text-2xl font-bold text-slate-950">ศูนย์ตัดสินใจและใบสั่งงาน</h1><p className="mt-1 text-sm text-slate-500">ตรวจข้อมูลเต็ม → จ่ายช่าง → สร้างรายการวัสดุ/อุปกรณ์ → ส่งให้คลัง</p></div><button onClick={() => void load()} className="rounded-xl border bg-white px-4 py-2 text-sm">รีเฟรช</button></div>
+    {!canAct && !loading ? <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">โหมดดูข้อมูล · เฉพาะหัวหน้าช่างและผู้ดูแลระบบที่ตัดสินใจ ส่งกลับ หรือจ่ายงานได้</div> : null}
     <div className="mt-6 flex flex-wrap rounded-xl bg-slate-100 p-1 sm:w-fit"><button onClick={() => setTab("decision")} className={`flex-1 rounded-lg px-4 py-2 text-sm ${tab === "decision" ? "bg-white font-medium shadow-sm" : "text-slate-500"}`}>รอตรวจ ({decisionCount})</button><button onClick={() => setTab("returned")} className={`flex-1 rounded-lg px-4 py-2 text-sm ${tab === "returned" ? "bg-white font-medium shadow-sm" : "text-slate-500"}`}>ส่งกลับแล้ว ({returnedCount})</button><button onClick={() => setTab("active")} className={`flex-1 rounded-lg px-4 py-2 text-sm ${tab === "active" ? "bg-white font-medium shadow-sm" : "text-slate-500"}`}>กำลังดำเนินงาน</button></div>
     <div className="mt-5 space-y-4">{loading ? <div className="rounded-2xl border bg-white p-10 text-center text-slate-400">กำลังโหลด…</div> : null}{!loading && !filtered.length ? <div className="rounded-2xl border bg-white p-10 text-center text-slate-400">ไม่มีงานในรายการนี้</div> : null}{filtered.map((appointment) => {
       const job = jobOf(appointment); const order = orders.find((row) => row.appointment_id === appointment.id); const orderItems = items.filter((row) => row.work_order_id === order?.id); const activeAssignments = assignments.filter((row) => row.appointment_id === appointment.id && row.is_active); const survey = surveySummary(job?.survey_data ?? null); const readyData = Boolean(job?.customer_name && job.customer_phone && (job.address || job.location_url) && (job.product_name || appointment.requirement));

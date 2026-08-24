@@ -36,7 +36,7 @@ export default function LoginPage() {
         const { error: activationError } = await supabase.rpc("activate_floor_staff_account");
         if (activationError) {
           await supabase.auth.signOut();
-          setError(activationError.message.includes("mapped or invited") ? "ไม่พบบทบาท FloorNow จากข้อมูลพนักงาน กรุณาติดต่อผู้ดูแลระบบ" : "บัญชีนี้ยังไม่มีสิทธิ์ใช้งาน FloorNow");
+          setError(activationError.message.includes("active HR employee") ? "ไม่พบบัญชีพนักงาน Active/Probation ที่เชื่อมกับอีเมลนี้ กรุณาติดต่อผู้ดูแลระบบ" : "บัญชีนี้ยังไม่พร้อมใช้งาน FloorNow");
           setBusy(false);
           return;
         }
@@ -61,7 +61,7 @@ export default function LoginPage() {
         const { error: activationError } = await supabase.rpc("activate_floor_staff_account");
         if (activationError) {
           await supabase.auth.signOut();
-          setError(activationError.message.includes("mapped or invited") ? "ไม่พบบทบาท FloorNow จากข้อมูลพนักงาน กรุณาติดต่อผู้ดูแลระบบ" : activationError.message);
+          setError(activationError.message.includes("active HR employee") ? "ไม่พบบัญชีพนักงาน Active/Probation ที่เชื่อมกับอีเมลนี้ กรุณาติดต่อผู้ดูแลระบบ" : activationError.message);
           setBusy(false);
           return;
         }
@@ -79,7 +79,7 @@ export default function LoginPage() {
     <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
       <div className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">MPD Group</div>
       <h1 className="mt-2 text-2xl font-bold text-slate-950">FloorNow</h1>
-      <p className="mt-1 text-sm text-slate-500">ระบบจัดการงานติดตั้งตามบทบาทพนักงาน</p>
+      <p className="mt-1 text-sm text-slate-500">ศูนย์กลางข้อมูลงานติดตั้งสำหรับพนักงานทุกฝ่าย</p>
 
       <div className="mt-6 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
         <button onClick={() => setMode("login")} className={`rounded-lg px-3 py-2 text-sm font-medium ${mode === "login" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>เข้าสู่ระบบ</button>
@@ -103,7 +103,7 @@ export default function LoginPage() {
         {message ? <div className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</div> : null}
         <button disabled={busy} className="w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:opacity-50">{busy ? "กำลังดำเนินการ…" : mode === "login" ? "เข้าสู่ FloorNow" : needsBootstrap ? "สร้างบัญชี Admin คนแรก" : "เปิดใช้บัญชีที่ได้รับเชิญ"}</button>
       </form>
-      <p className="mt-5 text-center text-xs leading-relaxed text-slate-400">พนักงานที่มีบทบาทใน Master สามารถเปิดใช้ด้วยอีเมลบริษัทได้ทันที ส่วนบัญชียกเว้นต้องได้รับคำเชิญจาก Admin</p>
+      <p className="mt-5 text-center text-xs leading-relaxed text-slate-400">พนักงาน Active/Probation ที่มีบัญชีเชื่อมกับ HR Master เข้าใช้งานได้ทันที ส่วนปุ่มดำเนินงานจะเปิดตามหน้าที่รับผิดชอบ</p>
     </div>
   </main>;
 }

@@ -118,6 +118,7 @@ export default function AppointmentsPage() {
   const [assignments, setAssignments] = useState<TechnicianAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [weekOffset, setWeekOffset] = useState(0);
+  const [staffRole, setStaffRole] = useState<string | null>(null);
 
   // Modals
   const [showCreate, setShowCreate] = useState(false);
@@ -157,6 +158,14 @@ export default function AppointmentsPage() {
   }, [supabase]);
 
   useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    let active = true;
+    supabase.rpc('get_my_floor_staff_profile').then(({ data }) => {
+      if (active) setStaffRole((data as { role?: string } | null)?.role ?? null);
+    });
+    return () => { active = false; };
+  }, [supabase]);
+  const canManage = staffRole === 'admin' || staffRole === 'head_technician';
 
   const weekDays = getWeekDays(weekOffset);
   const weekStart = weekDays[0];
@@ -173,6 +182,7 @@ export default function AppointmentsPage() {
 
   // --- Create Appointment ---
   async function createAppointment() {
+    if (!canManage) { toast.error('เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่สร้างนัดหมายได้'); return; }
     if (!form.date || !form.start_time || !form.end_time) { toast.error('กรุณาระบุวันและเวลา'); return; }
     setSaving(true);
     const slotStart = new Date(`${form.date}T${form.start_time}:00+07:00`).toISOString();
@@ -195,6 +205,7 @@ export default function AppointmentsPage() {
 
   // --- Update Status ---
   async function updateStatus(appt: Appointment, newStatus: string) {
+    if (!canManage) { toast.error('บัญชีนี้ดูข้อมูลได้ แต่ไม่มีสิทธิ์เปลี่ยนสถานะคิว'); return; }
     if (newStatus === 'confirmed' && appt.job_id) {
       const missing = appt.job ? missingJobFields(appt.job) : ['ข้อมูล Ticket'];
       if (missing.length) {
@@ -229,6 +240,7 @@ export default function AppointmentsPage() {
   }
 
   async function cancelAppointment(appt: Appointment) {
+    if (!canManage) { toast.error('บัญชีนี้ดูข้อมูลได้ แต่ไม่มีสิทธิ์ยกเลิกคิว'); return; }
     const { error } = await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', appt.id);
     if (error) { toast.error(error.message); return; }
     if (appt.job_id) {
@@ -249,6 +261,7 @@ export default function AppointmentsPage() {
   }
 
   async function reassignTeam(appt: Appointment, techId: string) {
+    if (!canManage) { toast.error('เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่ย้ายทีมได้'); return; }
     if (!techId || techId === appt.tech_id) return;
     const { data: clashes, error: clashError } = await supabase.from('appointments')
       .select('id').eq('tech_id', techId).neq('status', 'cancelled').neq('id', appt.id)
@@ -318,7 +331,7 @@ export default function AppointmentsPage() {
           <h1 className="text-2xl font-semibold">นัดหมาย</h1>
           <p className="text-slate-500 text-sm mt-0.5">ตารางนัดหมายทีมช่าง</p>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        {canManage ? <div className="ml-auto flex items-center gap-2">
           <button onClick={() => setShowIndividuals(true)}
             className="px-3 py-1.5 text-sm border border-violet-200 rounded-lg text-violet-700 hover:bg-violet-50">
             👤 ช่าง / PIN
@@ -331,7 +344,7 @@ export default function AppointmentsPage() {
             className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
             + นัดหมายใหม่
           </button>
-        </div>
+        </div> : <span className="ml-auto rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-500">โหมดดูข้อมูล</span>}
       </div>
 
       {/* Stats */}
