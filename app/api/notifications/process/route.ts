@@ -11,7 +11,7 @@ interface DeliveryRow {
 }
 
 function authorized(request: Request) {
-  const secret = process.env.CRON_SECRET;
+  const secret = process.env.PUSH_CRON_SECRET ?? process.env.CRON_SECRET;
   return Boolean(secret && request.headers.get("authorization") === `Bearer ${secret}`);
 }
 
