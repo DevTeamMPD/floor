@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { BellRing } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { canUseWebPush, subscribeBrowserToPush } from "@/lib/push-client";
+import { getPushAvailability, subscribeBrowserToPush } from "@/lib/push-client";
 
 export default function TechnicianPushButton({ token, pin }: { token: string; pin: string }) {
   const [busy, setBusy] = useState(false);
@@ -11,6 +11,10 @@ export default function TechnicianPushButton({ token, pin }: { token: string; pi
   const [message, setMessage] = useState<string | null>(null);
 
   async function enable() {
+    const availability = getPushAvailability();
+    if (availability === "ios-install-required") { setMessage("iPhone: แตะปุ่มแชร์ > เพิ่มไปยังหน้าจอโฮม แล้วเปิด FloorNow จากไอคอนก่อนเปิดแจ้งเตือน"); return; }
+    if (availability === "permission-denied") { setMessage("สิทธิ์ถูกปิด กรุณาเปิดที่ Settings > Notifications > FloorNow"); return; }
+    if (availability === "unsupported") { setMessage("เบราว์เซอร์เครื่องนี้ไม่รองรับ Web Push"); return; }
     setBusy(true); setMessage(null);
     try {
       const subscription = await subscribeBrowserToPush();
@@ -29,7 +33,7 @@ export default function TechnicianPushButton({ token, pin }: { token: string; pi
   }
 
   return <div className="mt-3">
-    <button type="button" onClick={() => void enable()} disabled={busy || ready || !canUseWebPush()} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-3 text-sm font-medium text-white disabled:opacity-60">
+    <button type="button" onClick={() => void enable()} disabled={busy || ready} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-3 text-sm font-medium text-white disabled:opacity-60">
       <BellRing className="h-4 w-4" />{ready ? "เปิดแจ้งเตือนแล้ว" : busy ? "กำลังเปิด…" : "รับแจ้งเตือนงานบนมือถือเครื่องนี้"}
     </button>
     {message ? <div className={`mt-2 text-xs ${ready ? "text-emerald-300" : "text-amber-300"}`}>{message}</div> : null}
