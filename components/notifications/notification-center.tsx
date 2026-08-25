@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Bell, BellRing, CheckCheck, Smartphone } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { canUseWebPush, subscribeBrowserToPush } from "@/lib/push-client";
+import { canUseWebPush, getPushAvailability, subscribeBrowserToPush, type PushAvailability } from "@/lib/push-client";
 import { toast } from "sonner";
 
 interface NotificationRow {
@@ -32,6 +32,8 @@ export default function NotificationCenter() {
   const [open, setOpen] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushReady, setPushReady] = useState(false);
+  const [pushAvailability, setPushAvailability] = useState<PushAvailability | null>(null);
+  const [showInstallHelp, setShowInstallHelp] = useState(false);
   const unread = rows.filter((row) => !row.read_at).length;
 
   const load = useCallback(async () => {
@@ -44,6 +46,8 @@ export default function NotificationCenter() {
   useEffect(() => {
     void load();
     void (async () => {
+      const availability = getPushAvailability();
+      setPushAvailability(availability);
       if (!canUseWebPush() || Notification.permission !== "granted") return;
       const registration = await navigator.serviceWorker.getRegistration("/");
       setPushReady(Boolean(await registration?.pushManager.getSubscription()));
@@ -67,6 +71,11 @@ export default function NotificationCenter() {
   }
 
   async function enablePush() {
+    const availability = getPushAvailability();
+    setPushAvailability(availability);
+    if (availability === "ios-install-required") { setShowInstallHelp(true); return; }
+    if (availability === "permission-denied") { toast.error("สิทธิ์แจ้งเตือนถูกปิด กรุณาเปิดที่ Settings > Notifications > FloorNow"); return; }
+    if (availability === "unsupported") { toast.error("เบราว์เซอร์เครื่องนี้ไม่รองรับ Web Push"); return; }
     setPushBusy(true);
     try {
       const subscription = await subscribeBrowserToPush();
@@ -102,7 +111,18 @@ export default function NotificationCenter() {
         const content = <div className={`border-b px-4 py-3 ${row.read_at ? "bg-white" : "bg-blue-50"}`}><div className="flex items-start gap-3"><span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${row.read_at ? "bg-slate-300" : "bg-blue-600"}`} /><div className="min-w-0"><div className="text-sm font-semibold text-slate-900">{row.title}</div>{row.body ? <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">{row.body}</div> : null}<div className="mt-1 text-[11px] text-slate-400">{relativeTime(row.created_at)}</div></div></div></div>;
         return row.target_url ? <Link key={row.id} href={row.target_url} onClick={() => { void markRead(row.id); setOpen(false); }}>{content}</Link> : <button key={row.id} onClick={() => void markRead(row.id)} className="w-full text-left">{content}</button>;
       })}{!rows.length ? <div className="p-10 text-center text-sm text-slate-400">ยังไม่มีการแจ้งเตือน</div> : null}</div>
-      <div className="border-t bg-slate-50 p-3"><button type="button" onClick={() => void enablePush()} disabled={pushBusy || pushReady || !canUseWebPush()} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 disabled:opacity-60"><Smartphone className="h-4 w-4" />{pushReady ? "เครื่องนี้เปิดแจ้งเตือนแล้ว" : pushBusy ? "กำลังเปิด…" : "เปิดแจ้งเตือนบนมือถือเครื่องนี้"}</button></div>
+      <div className="border-t bg-slate-50 p-3">
+        <button type="button" onClick={() => void enablePush()} disabled={pushBusy || pushReady} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 disabled:opacity-60"><Smartphone className="h-4 w-4" />{pushReady ? "เครื่องนี้เปิดแจ้งเตือนแล้ว" : pushBusy ? "กำลังเปิด…" : pushAvailability === "ios-install-required" ? "ติดตั้ง FloorNow เพื่อเปิดแจ้งเตือน" : pushAvailability === "permission-denied" ? "เปิดสิทธิ์แจ้งเตือนในการตั้งค่า" : pushAvailability === "unsupported" ? "ดูวิธีเปิดแจ้งเตือน" : "เปิดแจ้งเตือนบนมือถือเครื่องนี้"}</button>
+        {showInstallHelp || pushAvailability === "ios-install-required" ? <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-left text-xs leading-5 text-blue-950">
+          <div className="font-semibold">iPhone ต้องเปิด FloorNow จากหน้าจอโฮม</div>
+          <ol className="mt-1 list-decimal space-y-1 pl-5">
+            <li>แตะปุ่มแชร์ <span aria-hidden="true">□↑</span> ด้านล่างของเบราว์เซอร์</li>
+            <li>เลือก “เพิ่มไปยังหน้าจอโฮม” (Add to Home Screen)</li>
+            <li>ปิดหน้านี้ แล้วเปิดจากไอคอน FloorNow บนหน้าจอโฮม</li>
+            <li>เข้าสู่ระบบ กดกระดิ่ง และกด “เปิดแจ้งเตือน” อีกครั้ง</li>
+          </ol>
+        </div> : null}
+      </div>
     </div> : null}
   </div>;
 }
