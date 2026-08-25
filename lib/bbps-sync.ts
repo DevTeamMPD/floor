@@ -37,7 +37,7 @@ export function jobHasYearWarning(j: BbpsJob): boolean {
   return cands.some((d) => { const y = yearOf(d); return y !== null && y > 2100; });
 }
 
-function collectBlockDates(j: BbpsJob): string[] {
+export function collectBlockDates(j: BbpsJob): string[] {
   const set = new Set<string>();
   const addRange = (start?: string | null, end?: string | null) => {
     if (!isCEDate(start)) return;
