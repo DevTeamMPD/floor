@@ -56,8 +56,11 @@ export default function Sidebar({ staff }: { staff: StaffProfile }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
-  const core = useMemo(() => CORE_NAV.filter((item) => item.href !== "/staff" || staff.role === "admin"), [staff.role]);
-  const experimental = useMemo(() => EXPERIMENTAL_NAV.filter((item) => staff.role === "admin" || !["/service", "/documents"].includes(item.href)), [staff.role]);
+  // แสดงเมนูตาม role ที่กำหนดใน NavItem.roles (admin มีอยู่ในทุก item จึงเห็นครบ)
+  // role "staff" (ยังไม่ระบุหน้าที่/ไม่อยู่ใน roles ของ item ใด) คงพฤติกรรมเดิม = เห็นทั้งหมด กันไม่ให้เมนูว่าง
+  const canSee = useMemo(() => (item: NavItem) => staff.role === "staff" || item.roles.includes(staff.role), [staff.role]);
+  const core = useMemo(() => CORE_NAV.filter(canSee), [canSee]);
+  const experimental = useMemo(() => EXPERIMENTAL_NAV.filter(canSee), [canSee]);
   const mobile = useMemo(() => {
     const preferred = MOBILE_NAV_BY_ROLE[staff.role];
     return preferred.map((href) => [...core, ...experimental].find((item) => item.href === href)).filter((item): item is NavItem => Boolean(item));

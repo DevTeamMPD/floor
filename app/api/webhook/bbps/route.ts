@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { applyBbpsJob, closeBbpsJob, jobHasYearWarning, type BbpsJob } from "@/lib/bbps-sync";
+import { verifyBbpsSignature } from "@/lib/webhook/verify-bbps";
 
 export const dynamic = "force-dynamic";
 
 // รับ push จาก BBPS: POST /api/webhook/bbps
-// Auth: header Authorization: Bearer <BBPS_INGEST_TOKEN>
+// Auth: Authorization: Bearer <BBPS_INGEST_TOKEN>
+//   (option) + HMAC-SHA256 signature เมื่อมี BBPS_WEBHOOK_SECRET: header X-Signature, X-Timestamp
 // Body: { event?: "upsert"|"completed"|"deleted", jobs: BbpsJob[] }  หรือ job เดี่ยว { id, ... }
 async function handle(req: Request) {
   const token = process.env.BBPS_INGEST_TOKEN;
@@ -18,8 +20,25 @@ async function handle(req: Request) {
   if (!url || !key) return NextResponse.json({ error: "supabase_env_missing" }, { status: 500 });
   const supabase = createClient(url, key);
 
+  // อ่าน raw body ครั้งเดียว (ต้องใช้ bytes ดิบสำหรับ HMAC)
+  const raw = await req.text();
+
+  // ชั้นความปลอดภัยเสริม (backward-compatible): เปิดใช้เมื่อ set BBPS_WEBHOOK_SECRET เท่านั้น
+  // ถ้าไม่ได้ set -> ข้ามการตรวจลายเซ็น พฤติกรรมเดิมทุกอย่าง (ไม่ทำ integration ที่ใช้อยู่พัง)
+  const secret = process.env.BBPS_WEBHOOK_SECRET;
+  if (secret) {
+    const v = verifyBbpsSignature({
+      rawBody: raw,
+      signature: req.headers.get("x-signature"),
+      timestamp: req.headers.get("x-timestamp"),
+      secret,
+      toleranceSec: parseInt(process.env.BBPS_WEBHOOK_TOLERANCE_SEC ?? "300", 10),
+    });
+    if (!v.ok) { console.warn(`[webhook-bbps] signature rejected: ${v.reason}`); return NextResponse.json({ error: "unauthorized", reason: v.reason }, { status: 401 }); }
+  }
+
   let payload: unknown;
-  try { payload = await req.json(); } catch { return NextResponse.json({ error: "invalid_json" }, { status: 400 }); }
+  try { payload = JSON.parse(raw); } catch { return NextResponse.json({ error: "invalid_json" }, { status: 400 }); }
   const p = payload as { event?: unknown; action?: string; jobs?: BbpsJob[] } & Partial<BbpsJob>;
 
   // BBPS outbox ใส่ metadata object ไว้ที่ event; action คือคำสั่งธุรกิจที่ Floor ใช้จริง
