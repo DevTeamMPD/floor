@@ -1,7 +1,18 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PREFIXES = ["/login", "/auth", "/work", "/dispatch", "/track", "/status", "/eval", "/api"];
+const PUBLIC_PREFIXES = [
+  "/login",
+  "/auth",
+  "/work",
+  "/dispatch",
+  "/track",
+  "/status",
+  "/eval",
+  "/api",
+  "/manifest.webmanifest",
+  "/floor-sw.js",
+];
 const ADMIN_ONLY_PREFIXES = ["/staff", "/service", "/documents"];
 
 export async function middleware(request: NextRequest) {
