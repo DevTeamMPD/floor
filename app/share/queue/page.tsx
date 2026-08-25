@@ -187,7 +187,10 @@ export default function ShareQueuePage() {
     return () => { active = false; };
   }, [supabase]);
 
-  const canSell = staffRole === "admin" || staffRole === "sales";
+  // Active staff may create and amend sales bookings.  Cancellation remains
+  // limited to sales/admin because it removes a committed installation slot.
+  const canSell = staffRole === "admin" || staffRole === "sales" || staffRole === "staff";
+  const canCancel = staffRole === "admin" || staffRole === "sales";
   const canDecide = staffRole === "admin" || staffRole === "head_technician";
 
   const week = useMemo(() => getWeekDays(offset), [offset]);
@@ -729,7 +732,7 @@ export default function ShareQueuePage() {
                   {canDecide && detail.status === "proposed" && <button onClick={() => setStatus(detail, "confirmed")} className="order-first grow rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 sm:order-none sm:grow-0">ยืนยันนัด</button>}
                   {canDecide && detail.status === "proposed" && detail.job_id && <button onClick={() => sendBack(detail)} className="rounded-lg border border-amber-300 px-4 py-2.5 text-sm text-amber-700 hover:bg-amber-50">ส่งกลับแก้ไข</button>}
                   {canSell && !detail.ext_ref?.startsWith("bbps:") && <button onClick={() => openEdit(detail)} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50">แก้ไข</button>}
-                  {canSell && <button onClick={() => remove(detail)} className="rounded-lg border border-red-200 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50">ยกเลิกคิว</button>}
+                  {canCancel && <button onClick={() => remove(detail)} className="rounded-lg border border-red-200 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50">ยกเลิกคิว</button>}
                 </div>
               </footer>
             </aside>
