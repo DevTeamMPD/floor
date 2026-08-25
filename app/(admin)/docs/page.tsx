@@ -3,8 +3,10 @@ import { useState } from "react";
 import Link from "next/link";
 
 const SECTIONS = [
+  { id: "roles",       icon: "🧭", title: "บทบาทและหน้าจอ (V3)" },
+  { id: "workflow",    icon: "🔄", title: "ขั้นตอนงาน V3 (รับงาน → ปิดงาน)" },
   { id: "overview",    icon: "🏛",  title: "ภาพรวมระบบ" },
-  { id: "pipeline",    icon: "📌", title: "Pipeline — ติดตามงาน" },
+  { id: "pipeline",    icon: "📌", title: "Pipeline — ติดตามงาน (ระบบเดิม)" },
   { id: "waste-cost",  icon: "♻️", title: "ต้นทุนเศษ" },
   { id: "remnants",    icon: "✂️", title: "เศษวัสดุ" },
   { id: "inventory",   icon: "📦", title: "คลังวัสดุ" },
@@ -81,6 +83,43 @@ export default function DocsPage() {
             ))}
           </div>
         </div>
+
+        {/* ─── บทบาทและหน้าจอ (V3) ─── */}
+        <SectionCard id="roles" icon="🧭" title="บทบาทและหน้าจอ (V3)">
+          <p className="text-sm text-gray-600 leading-relaxed">
+            FloorNow ใช้ระบบ <b>role-based workspace</b> — แต่ละบทบาทเห็นเมนูและหน้าจอเฉพาะที่เกี่ยวกับงานของตน (ข้อมูลใช้ร่วมกันทุกฝ่าย แต่สิทธิ์ดำเนินงานตามหน้าที่)
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden">
+              <thead className="bg-gray-50 text-gray-600">
+                <tr><th className="text-left px-3 py-2 font-semibold">บทบาท</th><th className="text-left px-3 py-2 font-semibold">หน้าจอหลัก</th></tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 text-gray-700">
+                <tr><td className="px-3 py-2 font-medium">ฝ่ายขาย (Sales)</td><td className="px-3 py-2">จองคิว, คิวทีมช่าง, ใบสั่งงาน</td></tr>
+                <tr><td className="px-3 py-2 font-medium">หัวหน้าช่าง (Head)</td><td className="px-3 py-2">ต้องตัดสินใจ, ปฏิทินทีม, ทีมช่าง/PIN, ใบสั่งงาน</td></tr>
+                <tr><td className="px-3 py-2 font-medium">คลัง (Warehouse)</td><td className="px-3 py-2">เตรียมสินค้า, ตรวจรับเศษ, คลังวัสดุ, ใบสั่งงาน</td></tr>
+                <tr><td className="px-3 py-2 font-medium">ช่าง (Technician)</td><td className="px-3 py-2">หน้าส่วนตัว <code>/work/[token]</code> + PIN (ไม่มีเมนูหลังบ้าน)</td></tr>
+                <tr><td className="px-3 py-2 font-medium">CS</td><td className="px-3 py-2">CS รอติดตาม, คุณภาพและความพึงพอใจ</td></tr>
+                <tr><td className="px-3 py-2 font-medium">ผู้บริหาร (Executive)</td><td className="px-3 py-2">ภาพรวมผู้บริหาร, แดชบอร์ด</td></tr>
+                <tr><td className="px-3 py-2 font-medium">Admin</td><td className="px-3 py-2">เห็นทุกโมดูล + เมนูตั้งค่า/บัญชีพนักงาน</td></tr>
+                <tr><td className="px-3 py-2 font-medium">ลูกค้า/ภายนอก</td><td className="px-3 py-2">ลิงก์สถานะ <code>/status/[token]</code>, <code>/track/[token]</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <Tip>เมนู "เครื่องมือเสริม / ระบบเดิม" (Pipeline, คลังวัสดุ, BOQ, NCR ฯลฯ) เป็นเครื่องมือรอง สำหรับ Admin/หัวหน้าช่าง — ไม่ใช่จุดเริ่มต้นของ Flow</Tip>
+        </SectionCard>
+
+        {/* ─── ขั้นตอนงาน V3 ─── */}
+        <SectionCard id="workflow" icon="🔄" title="ขั้นตอนงาน V3 (รับงาน → ปิดงาน)">
+          <Step n={1}><b>รับงาน</b> — ฝ่ายขายเปิดบิลที่ "จองคิว" หรืองานเข้าจาก BBPS ผ่าน webhook (สร้างใบสั่งงานสถานะ <code>head_review</code>)</Step>
+          <Step n={2}><b>หัวหน้าช่างตรวจ</b> — ที่หน้า "ต้องตัดสินใจ" ตรวจข้อมูลลูกค้า/สเปก, เลือก SKU, มอบหมายช่าง (ต้องมีผู้รับผิดชอบหลัก 1 คน) แล้วกดยืนยัน → <code>warehouse_waiting</code> · ถ้าข้อมูลไม่ครบกด "ตีกลับ" พร้อมเหตุผล → <code>returned_sales</code></Step>
+          <Step n={3}><b>ฝ่ายขายแก้งานตีกลับ</b> — เห็น Inbox งานตีกลับ, แก้แล้วส่งตรวจใหม่ (งาน BBPS ต้องแก้ที่ต้นทางแล้วให้ระบบ sync revision กลับมาเอง)</Step>
+          <Step n={4}><b>คลังเตรียมของ</b> — ที่ "เตรียมสินค้า" กดรับงาน → ใส่จำนวนหยิบจริงครบทุกรายการ + รูปอย่างน้อย 1 → <code>ready_to_install</code></Step>
+          <Step n={5}><b>ช่างหน้างาน</b> — เปิดลิงก์ส่วนตัว + PIN, รับทราบงาน, รายงานสถานะตามลำดับ <code>เดินทาง → ถึงหน้างาน → กำลังติดตั้ง → เสร็จ</code> (แต่ละขั้นแนบรูป)</Step>
+          <Step n={6}><b>บันทึกเศษ + ลูกค้าเซ็นรับ</b> — หัวหน้าทีมรายงานเศษ (หรือ "ไม่มีเศษ") → ลูกค้าเซ็นรับงาน → <code>waiting_cs</code> · คลังตรวจรับเศษเข้าคลัง</Step>
+          <Step n={7}><b>CS ปิดงาน</b> — โทรประเมิน, ให้คะแนน แล้วกดปิดงาน → <code>closed</code> / stage 6</Step>
+          <Note>ลูกค้าติดตามสถานะ/รูป/ETA ได้เองผ่านลิงก์ <code>/status/[token]</code> หรือ <code>/track/[token]</code> ที่แชร์ให้</Note>
+        </SectionCard>
 
         {/* ─── 1. Overview ─── */}
         <SectionCard id="overview" icon="🏛" title="ภาพรวมระบบ">
