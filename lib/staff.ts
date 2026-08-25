@@ -1,4 +1,4 @@
-export const STAFF_ROLES = ["admin", "sales", "head_technician", "cs", "executive", "warehouse"] as const;
+export const STAFF_ROLES = ["admin", "staff", "sales", "head_technician", "cs", "executive", "warehouse"] as const;
 export type StaffRole = typeof STAFF_ROLES[number];
 
 export interface StaffProfile {
@@ -14,6 +14,7 @@ export interface StaffProfile {
 
 export const ROLE_LABELS: Record<StaffRole, string> = {
   admin: "ผู้ดูแลระบบ",
+  staff: "พนักงาน",
   sales: "ฝ่ายขาย",
   head_technician: "หัวหน้าช่าง",
   cs: "CS ติดตามลูกค้า",
@@ -23,9 +24,10 @@ export const ROLE_LABELS: Record<StaffRole, string> = {
 
 export const ROLE_HOME: Record<StaffRole, string> = {
   admin: "/home",
-  sales: "/sales-queue",
-  head_technician: "/operations",
-  cs: "/cs-tracking",
-  executive: "/exec",
-  warehouse: "/warehouse",
+  staff: "/home",
+  sales: "/home",
+  head_technician: "/home",
+  cs: "/home",
+  executive: "/home",
+  warehouse: "/home",
 };

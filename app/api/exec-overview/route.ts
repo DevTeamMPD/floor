@@ -48,7 +48,7 @@ interface ZoneRow { job_no: string; width_cm: number | null; length_cm: number |
 
 export async function GET() {
   const staff = await getCurrentStaff();
-  if (!staff || !["admin", "executive"].includes(staff.role)) {
+  if (!staff) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
