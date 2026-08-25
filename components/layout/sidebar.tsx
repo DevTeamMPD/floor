@@ -35,15 +35,7 @@ const EXPERIMENTAL_NAV: NavItem[] = [
   { href: "/ncr", icon: "🔴", label: "NCR", roles: ["admin", "head_technician"] },
 ];
 
-const MOBILE_NAV_BY_ROLE: Record<StaffRole, string[]> = {
-  admin: ["/home", "/operations", "/orders", "/warehouse"],
-  staff: ["/home", "/operations", "/orders", "/appointments"],
-  sales: ["/home", "/sales-queue", "/orders", "/appointments"],
-  head_technician: ["/home", "/operations", "/orders", "/appointments"],
-  warehouse: ["/home", "/warehouse", "/orders", "/remnants"],
-  cs: ["/home", "/cs-tracking", "/orders", "/dashboard"],
-  executive: ["/home", "/exec", "/orders", "/dashboard"],
-};
+const MOBILE_NAV = ["/home", "/operations", "/orders", "/appointments"];
 
 function NavLink({ item, active, onClick }: { item: NavItem; active: boolean; onClick?: () => void }) {
   return <Link href={item.href} onClick={onClick} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${active ? "bg-blue-600 font-medium text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}>
@@ -56,15 +48,14 @@ export default function Sidebar({ staff }: { staff: StaffProfile }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
-  // แสดงเมนูตาม role ที่กำหนดใน NavItem.roles (admin มีอยู่ในทุก item จึงเห็นครบ)
-  // role "staff" (ยังไม่ระบุหน้าที่/ไม่อยู่ใน roles ของ item ใด) คงพฤติกรรมเดิม = เห็นทั้งหมด กันไม่ให้เมนูว่าง
-  const canSee = useMemo(() => (item: NavItem) => staff.role === "staff" || item.roles.includes(staff.role), [staff.role]);
+  // ทุกฝ่ายเห็นข้อมูลและหน้าปฏิบัติงานชุดเดียวกัน; ยกเว้นการจัดการบัญชีพนักงาน
+  // ซึ่งเป็นการตั้งค่าระบบและยังต้องเป็น Admin-only.
+  const canSee = useMemo(() => (item: NavItem) => item.href !== "/staff" || staff.role === "admin", [staff.role]);
   const core = useMemo(() => CORE_NAV.filter(canSee), [canSee]);
   const experimental = useMemo(() => EXPERIMENTAL_NAV.filter(canSee), [canSee]);
   const mobile = useMemo(() => {
-    const preferred = MOBILE_NAV_BY_ROLE[staff.role];
-    return preferred.map((href) => [...core, ...experimental].find((item) => item.href === href)).filter((item): item is NavItem => Boolean(item));
-  }, [core, experimental, staff.role]);
+    return MOBILE_NAV.map((href) => [...core, ...experimental].find((item) => item.href === href)).filter((item): item is NavItem => Boolean(item));
+  }, [core, experimental]);
 
   function active(item: NavItem) { return path === item.href || path.startsWith(item.href + "/"); }
   async function signOut() {
