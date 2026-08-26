@@ -161,6 +161,18 @@ function emptyForm(): FormState {
     jobNo: "", bill_no: "", customer_name: "", customer_phone: "", address: "", location_url: "", survey: { ...EMPTY_SURVEY, photos: [] } };
 }
 
+function saveErrorMessage(error: unknown): string {
+  if (error && typeof error === "object") {
+    const value = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    const message = typeof value.message === "string" ? value.message.trim() : "";
+    const details = typeof value.details === "string" ? value.details.trim() : "";
+    const hint = typeof value.hint === "string" ? value.hint.trim() : "";
+    const code = typeof value.code === "string" ? value.code.trim() : "";
+    return [message, details, hint, code ? `รหัส ${code}` : ""].filter(Boolean).join(" · ");
+  }
+  return error instanceof Error && error.message ? error.message : "ไม่ทราบสาเหตุ กรุณาลองใหม่ หรือติดต่อผู้ดูแลระบบ";
+}
+
 function eachDay(a: string, b: string): string[] {
   if (!a) return [];
   if (!b || b < a) return [a];
@@ -393,6 +405,11 @@ export default function ShareQueuePage() {
       if (!form.requirement.trim()) missing.push("Requirement/สเปก");
       if (!form.survey.areaSqm.trim()) missing.push("พื้นที่ติดตั้ง");
       if (missing.length) { if (missing.includes("พื้นที่ติดตั้ง")) setShowSurvey(true); alert(`กรุณากรอกข้อมูลสำคัญให้ครบ:\n• ${missing.join("\n• ")}`); return; }
+      if (!/^\d+(?:\.\d+)?$/.test(form.survey.areaSqm.trim())) {
+        setShowSurvey(true);
+        alert("พื้นที่ติดตั้งต้องเป็นตัวเลข เช่น 22 หรือ 22.5 ตร.ม.\nกรณีเป็นงานแก้ไข ให้ใส่รายละเอียดไว้ใน ‘หมายเหตุสำรวจ’");
+        return;
+      }
     }
     const endDate = form.endDate && form.endDate >= form.date ? form.endDate : form.date;
     const dates = eachDay(form.date, endDate);
@@ -481,7 +498,7 @@ export default function ShareQueuePage() {
       setForm(null);
       await load();
     } catch (e: unknown) {
-      alert("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
+      alert("บันทึกไม่สำเร็จ: " + saveErrorMessage(e));
     }
     setSaving(false);
   }
