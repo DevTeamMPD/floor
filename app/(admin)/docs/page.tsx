@@ -1,317 +1,66 @@
-"use client";
-import { useState } from "react";
 import Link from "next/link";
 
-const SECTIONS = [
-  { id: "roles",       icon: "🧭", title: "บทบาทและหน้าจอ (V3)" },
-  { id: "workflow",    icon: "🔄", title: "ขั้นตอนงาน V3 (รับงาน → ปิดงาน)" },
-  { id: "overview",    icon: "🏛",  title: "ภาพรวมระบบ" },
-  { id: "pipeline",    icon: "📌", title: "Pipeline — ติดตามงาน (ระบบเดิม)" },
-  { id: "waste-cost",  icon: "♻️", title: "ต้นทุนเศษ" },
-  { id: "remnants",    icon: "✂️", title: "เศษวัสดุ" },
-  { id: "inventory",   icon: "📦", title: "คลังวัสดุ" },
-  { id: "boq",         icon: "📐", title: "BOQ / BOM" },
-  { id: "tips",        icon: "💡", title: "เคล็ดลับ & FAQ" },
-];
+const FLOW = [
+  { owner: "ฝ่ายขาย / BBPS", action: "เปิดบิลหรือส่งข้อมูลต้นทาง", status: "รอหัวหน้าช่างตรวจ", href: "/sales-queue" },
+  { owner: "หัวหน้าช่าง", action: "ตรวจงาน จ่ายช่าง ระบุ SKU และจำนวน", status: "รอคลังรับงาน", href: "/operations" },
+  { owner: "คลัง", action: "รับงาน หยิบของจริง และแนบรูป", status: "รอติดตั้ง", href: "/warehouse" },
+  { owner: "ทีมช่าง", action: "รับทราบ ติดตั้ง ส่งรูป เศษ และลายเซ็น", status: "รอ CS โทรประเมิน", href: "/appointments" },
+  { owner: "CS", action: "โทรประเมิน บันทึกคะแนน และปิดงาน", status: "ปิดงานแล้ว", href: "/cs-tracking" },
+] as const;
 
-function Step({ n, children }: { n: number; children: React.ReactNode }) {
-  return (
-    <div className="flex gap-3 items-start">
-      <div className="flex-none w-7 h-7 rounded-full bg-blue-600 text-white text-sm font-bold flex items-center justify-center mt-0.5">{n}</div>
-      <div className="text-gray-700 text-sm leading-relaxed">{children}</div>
-    </div>
-  );
-}
+const DEPARTMENTS = [
+  { icon: "🧾", title: "ฝ่ายขาย — เปิดงานให้พร้อม", href: "/sales-queue", label: "ไปหน้าจองคิว", goal: "ทำให้หัวหน้าช่างตัดสินใจได้โดยไม่ต้องตามข้อมูลซ้ำ", steps: ["เลือกวัน เวลา และทีมช่าง", "กรอกลูกค้า เบอร์โทร สถานที่ และลิงก์ Google Maps", "กรอกสินค้า/สเปก พื้นที่ เงื่อนไขหน้างาน และแนบรูปถ้ามี", "กด บันทึก / เปิดบิล เพื่อส่งงานเข้ารอตรวจ"], result: "สถานะ ‘รอหัวหน้าช่างตรวจ’ พร้อมข้อมูลใช้ตัดสินใจ", exception: "งานขายตรง: แก้ใน FloorNow แล้วส่งตรวจใหม่ · งาน BBPS: แก้ใน BBPS CRM ต้นทาง แล้วรอ Sync กลับ" },
+  { icon: "👷", title: "หัวหน้าช่าง — ออกใบสั่งงาน", href: "/operations", label: "ไปหน้าต้องตัดสินใจ", goal: "เปลี่ยนข้อมูลขายเป็นแผนติดตั้งและรายการที่คลังหยิบได้จริง", steps: ["เปิดงานและตรวจลูกค้า สถานที่ รูปสำรวจ และวันนัด", "กำหนดช่างรายบุคคล และเลือกหัวหน้าทีม 1 คน", "เพิ่มรายการวัสดุ: เลือก SKU จำนวนตามแผน หน่วย และหมายเหตุ", "กด ยืนยันใบสั่งงาน เพื่อส่งคลัง"], result: "สถานะ ‘รอคลังรับงาน’ และมีใบสั่งงานกลาง", exception: "ข้อมูลไม่พอ: กด ส่งกลับฝ่ายขาย พร้อมเหตุผลชัดเจน; ห้ามแก้ข้อมูล BBPS แทนระบบต้นทาง" },
+  { icon: "📦", title: "คลัง — ยืนยันของจริง", href: "/warehouse", label: "ไปหน้าเตรียมสินค้า", goal: "ให้ช่างรู้ว่าของใดพร้อมและหยิบจริงจำนวนเท่าไร", steps: ["เปิดงานที่ รอคลังรับงาน แล้วกด รับงาน", "หยิบของตามรายการในใบสั่งงาน", "บันทึกจำนวนที่หยิบจริงให้ครบทุกบรรทัด", "แนบรูปสินค้า แล้วกด เตรียมเสร็จ"], result: "สถานะ ‘รอติดตั้ง’ พร้อมจำนวนจริงและรูปหลักฐาน", exception: "หลังติดตั้ง ตรวจรับเศษจากหน้า ตรวจรับเศษ เพื่อรับเข้า/ตีกลับเศษ" },
+  { icon: "🛠️", title: "ทีมช่าง — ทำงานและเก็บหลักฐาน", href: "/appointments", label: "ไปปฏิทินทีม", goal: "ให้ลูกค้าและทุกฝ่ายเห็นความคืบหน้าที่ตรวจสอบได้", steps: ["เปิดลิงก์งานส่วนตัวและกด รับทราบงาน", "วันทำงาน หัวหน้าทีมกด รับงานติดตั้ง พร้อมจำนวนแผ่นที่หยิบจริง", "อัปเดต เดินทาง → ถึงหน้างาน → กำลังติดตั้ง → ติดตั้งเสร็จ พร้อมรูป", "บันทึกเศษหรือระบุว่าไม่มีเศษ แล้วให้ลูกค้าเซ็นรับงาน"], result: "สถานะ ‘รอ CS โทรประเมิน’ พร้อมรูป รายงานเศษ และลายเซ็น", exception: "ถ้าหน้างานเปลี่ยน ให้บันทึกหมายเหตุและรูปในงานเดิม ไม่สร้างตั๋วซ้ำ" },
+  { icon: "📞", title: "CS — ประเมินและปิดงาน", href: "/cs-tracking", label: "ไปหน้า CS รอติดตาม", goal: "บันทึกเสียงลูกค้าและปิดวงจรงาน", steps: ["เปิดงานสถานะ รอ CS โทรประเมิน", "โทรลูกค้าและบันทึกคะแนน/ข้อเสนอแนะ", "กดบันทึกและปิดงาน"], result: "สถานะ ‘ปิดงานแล้ว’ และข้อมูลไปยังรายงานคุณภาพ", exception: "หากร้องเรียน ให้บันทึกรายละเอียดเพื่อให้ทีมย้อนดูหลักฐานจากใบงานเดียวกัน" },
+  { icon: "📈", title: "ผู้บริหาร — แก้คอขวด", href: "/exec", label: "ไปภาพรวมผู้บริหาร", goal: "ติดตามงานทั้งบริษัทจากสถานะใบสั่งงานจริง", steps: ["ดู Pipeline สถานะงานติดตั้งด้านล่างของหน้า", "กดสถานะเพื่อเข้าไปหน้าฝ่ายที่ต้องทำงานต่อ", "ใช้ Lead time งานค้าง และ CSAT เพื่อกำหนดผู้รับผิดชอบ"], result: "เจ้าของงานรู้ว่าต้องทำอะไร ที่หน้าไหน", exception: "ภาพรวมผู้บริหารใช้ติดตาม ไม่ใช่หน้าสำหรับเปลี่ยนสถานะ" },
+] as const;
 
-function Note({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="bg-amber-50 border-l-4 border-amber-400 px-4 py-3 rounded-r-lg text-sm text-amber-800">
-      <span className="font-semibold">⚠️ หมายเหตุ: </span>{children}
-    </div>
-  );
-}
+const STATUS = [
+  ["รอหัวหน้าช่างตรวจ", "ฝ่ายขาย / BBPS", "หัวหน้าช่าง", "ต้องตัดสินใจ"], ["ส่งกลับต้นทาง", "หัวหน้าช่าง", "ฝ่ายขาย หรือ BBPS", "จองคิว / BBPS CRM"], ["รอคลังรับงาน", "หัวหน้าช่าง", "คลัง", "เตรียมสินค้า"], ["กำลังเตรียมสินค้า", "คลัง", "คลัง", "เตรียมสินค้า"], ["รอติดตั้ง", "คลัง", "ทีมช่าง", "ปฏิทินทีม / ลิงก์ช่าง"], ["กำลังติดตั้ง", "หัวหน้าทีม", "ทีมช่าง", "ลิงก์ช่าง"], ["รอ CS โทรประเมิน", "ทีมช่าง", "CS", "CS รอติดตาม"], ["ปิดงานแล้ว", "CS", "ทุกฝ่ายดูได้", "ใบสั่งงาน / ภาพรวม"],
+] as const;
 
-function Tip({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="bg-green-50 border-l-4 border-green-400 px-4 py-3 rounded-r-lg text-sm text-green-800">
-      <span className="font-semibold">💡 เคล็ดลับ: </span>{children}
-    </div>
-  );
-}
+const RCAI = [
+  ["เปิดบิล / จองคิว", "ฝ่ายขาย", "ฝ่ายขาย", "หัวหน้าช่าง", "คลัง · ทีมช่าง · CS"],
+  ["รับข้อมูล BBPS และส่งเข้าตรวจ", "BBPS CRM", "ฝ่ายขาย / BBPS", "หัวหน้าช่าง", "คลัง · ทีมช่าง"],
+  ["ตรวจความพร้อมและส่งกลับ", "หัวหน้าช่าง", "หัวหน้าช่าง", "ฝ่ายขาย / BBPS", "คลัง · ทีมช่าง"],
+  ["กำหนด SKU รายการ และช่าง", "หัวหน้าช่าง", "หัวหน้าช่าง", "คลัง", "ฝ่ายขาย · ทีมช่าง"],
+  ["หยิบและเตรียมสินค้า", "คลัง", "คลัง", "หัวหน้าช่าง", "ทีมช่าง · ฝ่ายขาย"],
+  ["รับงานและอัปเดตหน้างาน", "หัวหน้าทีมช่าง", "หัวหน้าทีมช่าง", "หัวหน้าช่าง", "ฝ่ายขาย · CS · ลูกค้า"],
+  ["รายงานเศษและลูกค้าเซ็นรับ", "หัวหน้าทีมช่าง", "หัวหน้าทีมช่าง", "หัวหน้าช่าง", "คลัง · CS · ฝ่ายขาย"],
+  ["โทรประเมินและปิดงาน", "CS", "CS", "CS", "ทุกฝ่าย · ผู้บริหาร"],
+] as const;
 
-function SectionCard({ id, icon, title, children }: { id: string; icon: string; title: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(true);
-  return (
-    <div id={id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-      <button
-        className="w-full flex items-center gap-3 px-6 py-4 text-left hover:bg-gray-50 transition-colors"
-        onClick={() => setOpen(o => !o)}
-      >
-        <span className="text-2xl">{icon}</span>
-        <span className="font-bold text-gray-900 text-lg flex-1">{title}</span>
-        <span className="text-gray-400 text-sm">{open ? "▲" : "▼"}</span>
-      </button>
-      {open && <div className="px-6 pb-6 space-y-4 border-t border-gray-100 pt-4">{children}</div>}
-    </div>
-  );
-}
+const PAGE_MAP = [
+  ["ฝ่ายขาย", "/sales-queue — จองคิว / เปิดบิล", "/tech-queue — ดูคิวและโหลดงานช่าง", "/share/queue — ดูสถานะ/แก้ข้อมูลที่จอง"],
+  ["หัวหน้าช่าง", "/operations — ตรวจ ตีกลับ ยืนยันใบสั่งงาน", "/appointments — ดูตารางและโหลดงานรายช่าง", "/technicians — จัดการช่าง/PIN/ลิงก์งาน"],
+  ["คลัง", "/warehouse — รับงาน เตรียมของ จำนวนจริง และรูป", "/remnants — ตรวจรับเศษ", "/orders — เปิดดูใบสั่งงาน"],
+  ["ทีมช่าง", "/work/[ลิงก์งาน] — รับทราบ อัปเดตสถานะ รูป เศษ ลายเซ็น", "ลิงก์มาจากหัวหน้าช่าง", "—"],
+  ["CS", "/cs-tracking — โทรประเมินและปิดงาน", "/dashboard — ดูคุณภาพ/ความพึงพอใจ", "—"],
+  ["ผู้บริหาร", "/exec — KPI และ Pipeline สถานะจริง", "กดการ์ด Pipeline เพื่อเข้าสู่หน้าของฝ่ายที่ต้องทำ", "—"],
+] as const;
+
+function Card({ children }: { children: React.ReactNode }) { return <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">{children}</section>; }
 
 export default function DocsPage() {
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-5 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-3xl mx-auto flex items-center gap-3">
-          <span className="text-2xl">📖</span>
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">คู่มือการใช้งาน</h1>
-            <p className="text-xs text-gray-500">Floor Management System — MPD Group</p>
-          </div>
-        </div>
-      </div>
+  return <main className="mx-auto max-w-6xl space-y-5 pb-10">
+    <header className="rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-blue-900 px-6 py-8 text-white sm:px-9 sm:py-10"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-200">MPD FloorNow · SOP การทำงาน</p><h1 className="mt-2 text-2xl font-bold sm:text-4xl">ใครต้องทำอะไร ที่หน้าไหน และส่งต่องานอย่างไร</h1><p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">คู่มือสำหรับงานขายตรงและ BBPS ที่เข้าสู่ FloorNow ทุกฝ่ายใช้ใบสั่งงานกลางและเห็นข้อมูลชุดเดียวกัน</p></header>
 
-      <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+    <Card><h2 className="text-lg font-bold text-slate-950">ภาพรวมงานหนึ่งใบ</h2><p className="mt-1 text-sm text-slate-500">เมื่อทำขั้นของตนเสร็จ ให้ตรวจผลลัพธ์ก่อนส่งต่อ</p><div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">{FLOW.map((item, index) => <Link key={item.owner} href={item.href} className="rounded-xl border border-slate-200 bg-slate-50 p-4 transition hover:border-blue-300 hover:bg-blue-50"><div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">{index + 1}</span><b className="text-sm text-slate-900">{item.owner}</b></div><p className="mt-3 text-xs leading-5 text-slate-600">{item.action}</p><p className="mt-3 border-t border-slate-200 pt-2 text-xs font-semibold text-emerald-700">→ {item.status}</p></Link>)}</div></Card>
 
-        {/* Table of contents */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-4">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">สารบัญ</p>
-          <div className="grid grid-cols-2 gap-y-2 gap-x-4">
-            {SECTIONS.map(s => (
-              <a key={s.id} href={`#${s.id}`} className="flex items-center gap-2 text-sm text-blue-600 hover:underline">
-                <span>{s.icon}</span><span>{s.title}</span>
-              </a>
-            ))}
-          </div>
-        </div>
+    <Card><h2 className="text-lg font-bold text-slate-950">Flow การส่งต่องาน</h2><p className="mt-1 text-sm text-slate-500">เริ่มจากข้อมูลขาย → ใบสั่งงานกลาง → หลักฐานหน้างาน → ผลประเมิน โดยไม่สร้างตั๋วซ้ำ</p><div className="mt-5 overflow-x-auto"><div className="flex min-w-[950px] items-stretch gap-2">{FLOW.map((item, index) => <div key={item.owner} className="flex items-center gap-2"><Link href={item.href} className="w-40 rounded-xl border border-blue-200 bg-blue-50 p-3 transition hover:bg-blue-100"><div className="text-[11px] font-bold text-blue-700">ขั้น {index + 1} · {item.owner}</div><div className="mt-2 text-xs leading-5 text-slate-700">{item.action}</div><div className="mt-3 rounded-md bg-white px-2 py-1 text-[11px] font-semibold text-emerald-700">ผลลัพธ์: {item.status}</div><div className="mt-2 text-[10px] text-blue-700 underline">เปิด {item.href}</div></Link>{index < FLOW.length - 1 ? <span className="text-xl font-bold text-slate-300">→</span> : null}</div>)}</div></div></Card>
 
-        {/* ─── บทบาทและหน้าจอ (V3) ─── */}
-        <SectionCard id="roles" icon="🧭" title="บทบาทและหน้าจอ (V3)">
-          <p className="text-sm text-gray-600 leading-relaxed">
-            FloorNow ใช้ระบบ <b>role-based workspace</b> — แต่ละบทบาทเห็นเมนูและหน้าจอเฉพาะที่เกี่ยวกับงานของตน (ข้อมูลใช้ร่วมกันทุกฝ่าย แต่สิทธิ์ดำเนินงานตามหน้าที่)
-          </p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden">
-              <thead className="bg-gray-50 text-gray-600">
-                <tr><th className="text-left px-3 py-2 font-semibold">บทบาท</th><th className="text-left px-3 py-2 font-semibold">หน้าจอหลัก</th></tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 text-gray-700">
-                <tr><td className="px-3 py-2 font-medium">ฝ่ายขาย (Sales)</td><td className="px-3 py-2">จองคิว, คิวทีมช่าง, ใบสั่งงาน</td></tr>
-                <tr><td className="px-3 py-2 font-medium">หัวหน้าช่าง (Head)</td><td className="px-3 py-2">ต้องตัดสินใจ, ปฏิทินทีม, ทีมช่าง/PIN, ใบสั่งงาน</td></tr>
-                <tr><td className="px-3 py-2 font-medium">คลัง (Warehouse)</td><td className="px-3 py-2">เตรียมสินค้า, ตรวจรับเศษ, คลังวัสดุ, ใบสั่งงาน</td></tr>
-                <tr><td className="px-3 py-2 font-medium">ช่าง (Technician)</td><td className="px-3 py-2">หน้าส่วนตัว <code>/work/[token]</code> + PIN (ไม่มีเมนูหลังบ้าน)</td></tr>
-                <tr><td className="px-3 py-2 font-medium">CS</td><td className="px-3 py-2">CS รอติดตาม, คุณภาพและความพึงพอใจ</td></tr>
-                <tr><td className="px-3 py-2 font-medium">ผู้บริหาร (Executive)</td><td className="px-3 py-2">ภาพรวมผู้บริหาร, แดชบอร์ด</td></tr>
-                <tr><td className="px-3 py-2 font-medium">Admin</td><td className="px-3 py-2">เห็นทุกโมดูล + เมนูตั้งค่า/บัญชีพนักงาน</td></tr>
-                <tr><td className="px-3 py-2 font-medium">ลูกค้า/ภายนอก</td><td className="px-3 py-2">ลิงก์สถานะ <code>/status/[token]</code>, <code>/track/[token]</code></td></tr>
-              </tbody>
-            </table>
-          </div>
-          <Tip>เมนู "เครื่องมือเสริม / ระบบเดิม" (Pipeline, คลังวัสดุ, BOQ, NCR ฯลฯ) เป็นเครื่องมือรอง สำหรับ Admin/หัวหน้าช่าง — ไม่ใช่จุดเริ่มต้นของ Flow</Tip>
-        </SectionCard>
+    <Card><div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="text-lg font-bold text-slate-950">RCAI: ใครทำ ใครรับผิดชอบ และใครต้องรับรู้</h2><p className="mt-1 text-sm text-slate-500"><b>R</b> ผู้ลงมือทำ · <b>C</b> ผู้ให้ข้อมูล/คำปรึกษา · <b>A</b> ผู้รับผิดชอบผลลัพธ์ · <b>I</b> ผู้ต้องรับทราบ</p></div><span className="text-xs text-slate-400">1 ขั้นมี A เดียว เพื่อไม่ให้เจ้าของงานซ้ำซ้อน</span></div><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-slate-50 text-left text-slate-500"><tr><th className="px-4 py-3">กิจกรรม</th><th className="px-4 py-3">R · Responsible</th><th className="px-4 py-3">C · Consulted</th><th className="px-4 py-3">A · Accountable</th><th className="px-4 py-3">I · Informed</th></tr></thead><tbody className="divide-y divide-slate-100">{RCAI.map((row) => <tr key={row[0]}>{row.map((cell, index) => <td key={cell} className={`px-4 py-3 ${index === 0 ? "font-semibold text-slate-900" : index === 3 ? "font-semibold text-blue-700" : "text-slate-600"}`}>{cell}</td>)}</tr>)}</tbody></table></div></Card>
 
-        {/* ─── ขั้นตอนงาน V3 ─── */}
-        <SectionCard id="workflow" icon="🔄" title="ขั้นตอนงาน V3 (รับงาน → ปิดงาน)">
-          <Step n={1}><b>รับงาน</b> — ฝ่ายขายเปิดบิลที่ "จองคิว" หรืองานเข้าจาก BBPS ผ่าน webhook (สร้างใบสั่งงานสถานะ <code>head_review</code>)</Step>
-          <Step n={2}><b>หัวหน้าช่างตรวจ</b> — ที่หน้า "ต้องตัดสินใจ" ตรวจข้อมูลลูกค้า/สเปก, เลือก SKU, มอบหมายช่าง (ต้องมีผู้รับผิดชอบหลัก 1 คน) แล้วกดยืนยัน → <code>warehouse_waiting</code> · ถ้าข้อมูลไม่ครบกด "ตีกลับ" พร้อมเหตุผล → <code>returned_sales</code></Step>
-          <Step n={3}><b>ฝ่ายขายแก้งานตีกลับ</b> — เห็น Inbox งานตีกลับ, แก้แล้วส่งตรวจใหม่ (งาน BBPS ต้องแก้ที่ต้นทางแล้วให้ระบบ sync revision กลับมาเอง)</Step>
-          <Step n={4}><b>คลังเตรียมของ</b> — ที่ "เตรียมสินค้า" กดรับงาน → ใส่จำนวนหยิบจริงครบทุกรายการ + รูปอย่างน้อย 1 → <code>ready_to_install</code></Step>
-          <Step n={5}><b>ช่างหน้างาน</b> — เปิดลิงก์ส่วนตัว + PIN, รับทราบงาน, รายงานสถานะตามลำดับ <code>เดินทาง → ถึงหน้างาน → กำลังติดตั้ง → เสร็จ</code> (แต่ละขั้นแนบรูป)</Step>
-          <Step n={6}><b>บันทึกเศษ + ลูกค้าเซ็นรับ</b> — หัวหน้าทีมรายงานเศษ (หรือ "ไม่มีเศษ") → ลูกค้าเซ็นรับงาน → <code>waiting_cs</code> · คลังตรวจรับเศษเข้าคลัง</Step>
-          <Step n={7}><b>CS ปิดงาน</b> — โทรประเมิน, ให้คะแนน แล้วกดปิดงาน → <code>closed</code> / stage 6</Step>
-          <Note>ลูกค้าติดตามสถานะ/รูป/ETA ได้เองผ่านลิงก์ <code>/status/[token]</code> หรือ <code>/track/[token]</code> ที่แชร์ให้</Note>
-        </SectionCard>
+    <Card><h2 className="text-lg font-bold text-slate-950">แผนที่หน้าจอ: แต่ละแผนกต้องเข้าไปดูหน้าใด</h2><p className="mt-1 text-sm text-slate-500">ใช้หน้านี้เป็นจุดเริ่มต้นของการอบรมพนักงานใหม่</p><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[800px] text-sm"><thead className="bg-slate-50 text-left text-slate-500"><tr><th className="px-4 py-3">แผนก</th><th className="px-4 py-3">หน้าหลักที่ต้องใช้</th><th className="px-4 py-3">หน้ารอง/ใช้ติดตาม</th><th className="px-4 py-3">เพิ่มเติม</th></tr></thead><tbody className="divide-y divide-slate-100">{PAGE_MAP.map((row) => <tr key={row[0]}>{row.map((cell, index) => <td key={cell} className={`px-4 py-3 ${index === 0 ? "font-semibold text-slate-900" : "text-slate-600"}`}>{cell}</td>)}</tr>)}</tbody></table></div></Card>
 
-        {/* ─── 1. Overview ─── */}
-        <SectionCard id="overview" icon="🏛" title="ภาพรวมระบบ">
-          <p className="text-sm text-gray-600 leading-relaxed">
-            <strong>MPD Floor Management System</strong> คือระบบบริหารจัดการงานติดตั้งพื้น สำหรับทีม Sales, PM, และช่างติดตั้ง
-            ครอบคลุมตั้งแต่รับงาน → จัดคิว → ส่งของ → ติดตั้ง → ปิดงาน
-          </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {[
-              { icon: "📌", label: "Pipeline", desc: "ติดตามสถานะงาน" },
-              { icon: "♻️", label: "ต้นทุนเศษ", desc: "วิเคราะห์วัสดุที่เสีย" },
-              { icon: "✂️", label: "เศษวัสดุ", desc: "จัดการสต็อกเศษ" },
-              { icon: "📦", label: "คลังวัสดุ", desc: "เช็กสต็อก" },
-              { icon: "📐", label: "BOQ/BOM", desc: "คำนวณวัสดุ" },
-              { icon: "📅", label: "นัดหมาย", desc: "จัดตารางเวลา" },
-            ].map(item => (
-              <div key={item.label} className="bg-gray-50 rounded-lg px-3 py-3">
-                <div className="text-lg">{item.icon}</div>
-                <div className="font-semibold text-gray-800 text-sm mt-1">{item.label}</div>
-                <div className="text-xs text-gray-500">{item.desc}</div>
-              </div>
-            ))}
-          </div>
-          <Note>ระบบนี้ออกแบบสำหรับ Chrome / Edge บน Desktop เป็นหลัก หากใช้มือถือบางฟีเจอร์อาจแสดงผลต่างกัน</Note>
-        </SectionCard>
+    <Card><h2 className="text-lg font-bold text-slate-950">กติกากลาง</h2><div className="mt-4 grid gap-3 md:grid-cols-3"><div className="rounded-xl bg-blue-50 p-4 text-sm text-blue-950"><b>ใช้ใบสั่งงานเดียว</b><p className="mt-1 text-blue-800">ข้อมูลเปลี่ยนให้แก้และบันทึกในงานเดิม เพื่อเก็บประวัติและรูปไว้ครบ</p></div><div className="rounded-xl bg-amber-50 p-4 text-sm text-amber-950"><b>ส่งกลับต้องมีเหตุผล</b><p className="mt-1 text-amber-800">ระบุข้อมูลที่ขาดให้ผู้ส่งแก้ได้ทันที</p></div><div className="rounded-xl bg-emerald-50 p-4 text-sm text-emerald-950"><b>ส่งต่อเมื่อหลักฐานครบ</b><p className="mt-1 text-emerald-800">คลัง: จำนวนจริง+รูป · ช่าง: รูป+เศษ+ลายเซ็น · CS: คะแนน+ผลโทร</p></div></div></Card>
 
-        {/* ─── 2. Pipeline ─── */}
-        <SectionCard id="pipeline" icon="📌" title="Pipeline — ติดตามงาน">
-          <p className="text-sm text-gray-600">Board แสดงงานทั้งหมดแยกตาม Stage (ขั้นตอน) — ลาก Card ข้าม Stage ได้เลย</p>
-          <div className="space-y-3">
-            <Step n={1}>เปิดเมนู <strong>Pipeline</strong> ในแถบซ้าย</Step>
-            <Step n={2}>คลิก Card งานเพื่อดูรายละเอียด หรือกด <strong>+ สร้างงาน</strong> ที่มุมขวาบน</Step>
-            <Step n={3}>กรอกข้อมูล: เลขบิล, ชื่อลูกค้า, ประเภทงาน, ที่อยู่</Step>
-            <Step n={4}>ลาก Card ไปยัง Stage ถัดไปเมื่องานคืบหน้า</Step>
-            <Step n={5}>คลิก Card → Tab <strong>ปิดงาน</strong> เพื่อบันทึก Handover Data (จำนวนม้วน, ขนาดพื้นที่ ฯลฯ)</Step>
-          </div>
-          <Tip>การกรอก Handover Data ที่ Tab ปิดงาน จะ sync ข้อมูลให้หน้า ต้นทุนเศษ โดยอัตโนมัติ — ไม่ต้องกรอกซ้ำ</Tip>
-          <div className="bg-gray-50 rounded-lg px-4 py-3 text-sm">
-            <p className="font-semibold text-gray-700 mb-2">Stage ในระบบ</p>
-            <div className="flex flex-wrap gap-2">
-              {["📥 รับงาน", "📋 รอวัสดุ", "🚚 จัดส่ง", "🔨 กำลังติดตั้ง", "✅ เสร็จสิ้น", "❌ ยกเลิก"].map(s => (
-                <span key={s} className="bg-white border border-gray-200 rounded-full px-3 py-1 text-xs">{s}</span>
-              ))}
-            </div>
-          </div>
-        </SectionCard>
+    <div className="grid gap-5 lg:grid-cols-2">{DEPARTMENTS.map((department) => <Card key={department.title}><div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-bold text-slate-950">{department.icon} {department.title}</h2><p className="mt-1 text-sm text-slate-500">เป้าหมาย: {department.goal}</p></div><Link href={department.href} className="shrink-0 rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">{department.label}</Link></div><h3 className="mt-5 text-sm font-bold text-slate-800">ทำตามนี้</h3><ol className="mt-2 space-y-2">{department.steps.map((step, index) => <li key={step} className="flex gap-3 text-sm leading-6 text-slate-700"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">{index + 1}</span><span>{step}</span></li>)}</ol><div className="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900"><b>ส่งต่อเมื่อ:</b> {department.result}</div><div className="mt-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900"><b>กรณีพิเศษ:</b> {department.exception}</div></Card>)}</div>
 
-        {/* ─── 3. Waste Cost ─── */}
-        <SectionCard id="waste-cost" icon="♻️" title="ต้นทุนเศษ (Waste Cost)">
-          <p className="text-sm text-gray-600">คำนวณพื้นที่จริงที่ปูได้, วัสดุที่เสีย, และต้นทุนรวมต่องาน</p>
+    <Card><h2 className="text-lg font-bold text-slate-950">เห็นสถานะแล้วต้องไปทำอะไร</h2><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[720px] text-sm"><thead className="bg-slate-50 text-left text-slate-500"><tr><th className="px-4 py-3">สถานะ</th><th className="px-4 py-3">ผู้ส่งต่อ</th><th className="px-4 py-3">เจ้าของขั้นถัดไป</th><th className="px-4 py-3">หน้าที่ต้องเปิด</th></tr></thead><tbody className="divide-y divide-slate-100">{STATUS.map((row) => <tr key={row[0]}>{row.map((cell, index) => <td key={cell} className={`px-4 py-3 ${index === 0 ? "font-semibold text-slate-900" : index === 2 ? "text-blue-700" : "text-slate-600"}`}>{cell}</td>)}</tr>)}</tbody></table></div></Card>
 
-          <div className="space-y-3">
-            <p className="text-sm font-semibold text-gray-700">ขั้นตอนการใช้งาน</p>
-            <Step n={1}>เปิดเมนู <strong>ต้นทุนเศษ</strong></Step>
-            <Step n={2}>พิมพ์ <strong>เลขบิล</strong> ในช่องค้นหา → ระบบดึงข้อมูล Handover จากงานนั้น</Step>
-            <Step n={3}>กด <strong>+ เพิ่ม Zone</strong> เพื่อเพิ่มพื้นที่ย่อย (เช่น ห้องนอน, ห้องนั่งเล่น)</Step>
-            <Step n={4}>กรอกชื่อ Zone, ความกว้าง, ความยาว (หน่วย ซม.)</Step>
-            <Step n={5}>คลิกไอคอน <strong>ตาราง (🔲)</strong> เพื่อเปิด Grid Editor ของ Zone นั้น</Step>
-          </div>
-
-          <div className="bg-blue-50 rounded-lg px-4 py-4 space-y-3 border border-blue-100">
-            <p className="text-sm font-bold text-blue-900">🔲 Grid Editor — วิธีใช้</p>
-            <div className="space-y-2">
-              <Step n={1}>เลือกขนาดช่อง: <strong>25 / 50 / 100 ซม.</strong> (ค่าเริ่มต้น 50 ซม.)</Step>
-              <Step n={2}>
-                <div>
-                  <strong>คลิกช่องสีเทา</strong> เพื่อตั้งขนาดเฉพาะช่องนั้น (กว้าง × ยาว ซม.)<br/>
-                  <span className="text-xs text-gray-500 mt-0.5 block">ช่องที่ตั้งขนาดแล้วจะเปลี่ยนเป็น สีฟ้า และแสดง W×L</span>
-                </div>
-              </Step>
-              <Step n={3}>
-                <div>
-                  <strong>คลิกช่องสีส้ม (ขวาง)</strong> เพื่อยกเลิกการขวาง<br/>
-                  <strong>ปุ่ม 🚫 ขวาง</strong> ใน panel → ทำเครื่องหมายว่าช่องนั้นไม่มีพื้นที่ปู (เสา, ผนัง ฯลฯ)
-                </div>
-              </Step>
-              <Step n={4}>กด <strong>💾 บันทึก</strong> — ระบบจะคำนวณพื้นที่สุทธิใหม่ทันที</Step>
-            </div>
-            <div className="grid grid-cols-3 gap-2 mt-2">
-              <div className="bg-white rounded p-2 text-center text-xs border border-gray-200">
-                <div className="w-5 h-5 bg-gray-200 rounded mx-auto mb-1"/>
-                <span className="text-gray-600">ช่องปกติ</span>
-              </div>
-              <div className="bg-white rounded p-2 text-center text-xs border border-blue-200">
-                <div className="w-5 h-5 bg-blue-100 border border-blue-300 rounded mx-auto mb-1 flex items-center justify-center text-blue-600" style={{fontSize:8}}>50<br/>50</div>
-                <span className="text-blue-600">กำหนดขนาดแล้ว</span>
-              </div>
-              <div className="bg-white rounded p-2 text-center text-xs border border-orange-200">
-                <div className="w-5 h-5 bg-orange-400 rounded mx-auto mb-1 flex items-center justify-center text-white font-bold" style={{fontSize:10}}>×</div>
-                <span className="text-orange-600">ขวาง / ไม่ปู</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-sm font-semibold text-gray-700">สูตรคำนวณ</p>
-            <div className="bg-gray-50 rounded-lg px-4 py-3 font-mono text-xs text-gray-700 space-y-1">
-              <div>พื้นที่ Zone = กว้าง × ยาว</div>
-              <div>พื้นที่สุทธิ = ผลรวม (W × L) ของทุกช่องที่ไม่ขวาง</div>
-              <div>เศษวัสดุ = ม้วนที่ใช้ × ขนาดม้วน − พื้นที่สุทธิรวม</div>
-              <div>ต้นทุนเศษ = เศษวัสดุ (ตร.ม.) × ราคาต่อ ตร.ม.</div>
-            </div>
-          </div>
-
-          <Tip>หากพื้นที่ zone มีเสากลาง ให้ตีช่องที่เสาอยู่เป็น 🚫 ขวาง เพื่อหักออกจากพื้นที่คำนวณ</Tip>
-          <Note>การบันทึก Grid จะบันทึกลง Supabase ทันที ไม่จำเป็นต้องกด Save หลักของหน้า</Note>
-        </SectionCard>
-
-        {/* ─── 4. Remnants ─── */}
-        <SectionCard id="remnants" icon="✂️" title="เศษวัสดุ (Remnant Stock)">
-          <p className="text-sm text-gray-600">จัดการสต็อกเศษพื้นที่เหลือจากงาน เพื่อนำไปใช้ในงานอื่นที่เหมาะสม</p>
-          <div className="space-y-3">
-            <Step n={1}>เปิดเมนู <strong>เศษวัสดุ</strong></Step>
-            <Step n={2}>กด <strong>+ รับเศษ</strong> → กรอก กว้าง (cm), ยาว (cm), ประเภท (16B/16W/6B/6W), งานต้นทาง</Step>
-            <Step n={3}>เศษที่รับเข้าจะแสดงใน Dashboard แยกตาม width bin (30–140 ซม.)</Step>
-            <Step n={4}>เมื่อนำเศษไปใช้งาน → กด <strong>ใช้แล้ว</strong> เพื่ออัปเดตสถานะ</Step>
-          </div>
-          <div className="bg-gray-50 rounded-lg px-4 py-3 space-y-2">
-            <p className="text-sm font-semibold text-gray-700">Width Bin คืออะไร?</p>
-            <p className="text-xs text-gray-600">ระบบจัดกลุ่มเศษตามความกว้าง (cm) เพื่อให้ค้นหาง่ายว่ามีเศษขนาดใดบ้างที่จะใช้แทนม้วนเต็มได้</p>
-            <div className="flex flex-wrap gap-1">
-              {[30,40,50,60,70,80,90,100,110,120,130,140].map(w => (
-                <span key={w} className="bg-white border border-gray-300 text-xs rounded px-2 py-0.5">{w}+</span>
-              ))}
-            </div>
-          </div>
-          <Tip>ในหน้า ต้นทุนเศษ มีกล่อง <strong>💡 เศษที่ใช้แทนได้</strong> แสดงเศษที่กว้างพอสำหรับแต่ละ Zone โดยอัตโนมัติ</Tip>
-        </SectionCard>
-
-        {/* ─── 5. Inventory ─── */}
-        <SectionCard id="inventory" icon="📦" title="คลังวัสดุ">
-          <p className="text-sm text-gray-600">ดูสต็อกวัสดุคงเหลือ, บันทึกการเบิก/รับของ</p>
-          <div className="space-y-3">
-            <Step n={1}>เปิดเมนู <strong>คลังวัสดุ</strong></Step>
-            <Step n={2}>ค้นหาสินค้าด้วย SKU หรือชื่อ</Step>
-            <Step n={3}>กด <strong>เบิกออก</strong> → ระบุจำนวนและงานที่เบิกเพื่อ</Step>
-            <Step n={4}>กด <strong>รับเข้า</strong> → ระบุจำนวนที่รับเพิ่ม</Step>
-          </div>
-          <Note>การเบิกออกแต่ละครั้งจะบันทึกเป็น Movement History — ดูประวัติได้ที่แต่ละ SKU</Note>
-        </SectionCard>
-
-        {/* ─── 6. BOQ ─── */}
-        <SectionCard id="boq" icon="📐" title="BOQ / BOM">
-          <p className="text-sm text-gray-600">คำนวณปริมาณวัสดุที่ต้องใช้ตาม spec ของงาน</p>
-          <div className="space-y-3">
-            <Step n={1}>เปิดเมนู <strong>BOQ / BOM</strong></Step>
-            <Step n={2}>เลือกงานหรือสร้าง BOQ ใหม่</Step>
-            <Step n={3}>ระบุพื้นที่แต่ละ Zone และประเภทวัสดุ</Step>
-            <Step n={4}>ระบบคำนวณจำนวนม้วน, กาว, และวัสดุเสริมอื่นๆ โดยอัตโนมัติ</Step>
-          </div>
-        </SectionCard>
-
-        {/* ─── 7. Tips & FAQ ─── */}
-        <SectionCard id="tips" icon="💡" title="เคล็ดลับ & FAQ">
-          <div className="space-y-4">
-            {[
-              {
-                q: "ข้อมูลใน ต้นทุนเศษ ไม่แสดงทั้งที่ปิดงานแล้ว?",
-                a: "ตรวจสอบว่ากรอก Handover Data ครบใน Tab ปิดงานของ Card หรือยัง โดยเฉพาะจำนวนม้วนและขนาดพื้นที่"
-              },
-              {
-                q: "พื้นที่สุทธิคำนวณแล้วมากกว่าพื้นที่ Zone?",
-                a: "เกิดจาก cell_cm ทำให้จำนวนช่อง × ขนาดช่อง > พื้นที่จริง ให้ตั้งขนาดช่อง (W×L) ในแต่ละช่องให้ตรงกับพื้นที่จริง"
-              },
-              {
-                q: "จะ Reset กริดทั้งหมดทำอย่างไร?",
-                a: "กดปุ่ม 🗑 ล้างทั้งหมด ใต้กริด — ช่องทั้งหมดจะกลับเป็นค่าเริ่มต้น"
-              },
-              {
-                q: "เศษที่ Reserve ไปแล้วจะหายไปจากหน้า Remnants หรือเปล่า?",
-                a: "ยังแสดงอยู่ แต่ status เปลี่ยนเป็น 'reserved' พร้อมชื่องานที่จอง กด ใช้แล้ว เมื่อใช้งานจริง"
-              },
-              {
-                q: "เพิ่ม Zone ใน ต้นทุนเศษ ไม่ได้?",
-                a: "ตรวจสอบว่าเลือกเลขบิลแล้ว และ user มีสิทธิ์เขียนใน Supabase (ตรวจสอบกับ Admin)"
-              },
-            ].map(({ q, a }) => (
-              <div key={q} className="border-b border-gray-100 pb-4 last:border-0 last:pb-0">
-                <p className="text-sm font-semibold text-gray-800 mb-1">❓ {q}</p>
-                <p className="text-sm text-gray-600">→ {a}</p>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-
-        {/* Footer */}
-        <div className="text-center text-xs text-gray-400 pb-8">
-          <p>MPD Floor Management System — อัปเดตล่าสุด กรกฎาคม 2569</p>
-          <p className="mt-1">พบปัญหา? แจ้งทีม Dev ได้เลย</p>
-        </div>
-
-      </div>
-    </div>
-  );
+    <Card><h2 className="text-lg font-bold text-slate-950">คำถามที่พบบ่อย</h2><div className="mt-4 grid gap-3 md:grid-cols-2"><details className="rounded-xl border border-slate-200 p-4"><summary className="cursor-pointer font-semibold text-slate-800">งาน BBPS ถูกส่งกลับ แก้ที่ไหน?</summary><p className="mt-2 text-sm leading-6 text-slate-600">แก้ใน BBPS CRM ซึ่งเป็นข้อมูลต้นทาง แล้วรอ Sync กลับ FloorNow</p></details><details className="rounded-xl border border-slate-200 p-4"><summary className="cursor-pointer font-semibold text-slate-800">ฝ่ายขายดูสถานะช่างได้อย่างไร?</summary><p className="mt-2 text-sm leading-6 text-slate-600">เปิดงานจากจองคิวหรือใบสั่งงาน จะเห็นสถานะและรูปอัปเดตของทีมช่าง</p></details><details className="rounded-xl border border-slate-200 p-4"><summary className="cursor-pointer font-semibold text-slate-800">คลังหยิบของไม่เท่าตามแผน?</summary><p className="mt-2 text-sm leading-6 text-slate-600">บันทึกจำนวนจริงและรูปในขั้นเตรียมสินค้า เพื่อให้ช่างเห็นก่อนออกหน้างาน</p></details><details className="rounded-xl border border-slate-200 p-4"><summary className="cursor-pointer font-semibold text-slate-800">ผู้บริหารดูอะไร?</summary><p className="mt-2 text-sm leading-6 text-slate-600">เปิดภาพรวมผู้บริหาร แล้วกดสถานะใน Pipeline เพื่อไปยังฝ่ายที่ต้องจัดการ</p></details></div></Card>
+  </main>;
 }
