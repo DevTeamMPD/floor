@@ -4,6 +4,7 @@ import { useState } from "react";
 import { BellRing } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getPushAvailability, subscribeBrowserToPush } from "@/lib/push-client";
+import { floorActionError } from "@/lib/floor-error-message";
 
 export default function TechnicianPushButton({ token, pin }: { token: string; pin: string }) {
   const [busy, setBusy] = useState(false);
@@ -28,7 +29,7 @@ export default function TechnicianPushButton({ token, pin }: { token: string; pi
       if (error) throw error;
       setReady(true); setMessage("มือถือเครื่องนี้พร้อมรับแจ้งเตือนงานใหม่แล้ว");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "เปิดการแจ้งเตือนไม่สำเร็จ");
+      setMessage(floorActionError("เปิดการแจ้งเตือน", error));
     } finally { setBusy(false); }
   }
 

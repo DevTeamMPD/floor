@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, Suspense } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { useSearchParams } from "next/navigation";
+import { floorActionError } from "@/lib/floor-error-message";
 
 interface NcrReport {
   id: string;
@@ -229,7 +230,7 @@ function NcrPageInner() {
       setForm(EMPTY_FORM);
       await loadNcrs();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
+      toast.error(floorActionError("สร้าง NCR", e));
     } finally {
       setSaving(false);
     }

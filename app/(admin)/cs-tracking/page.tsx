@@ -3,6 +3,7 @@ import { useState, useEffect, Suspense } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { IP_STAGES } from "@/lib/types";
 import { toast } from "sonner";
+import { floorActionError } from "@/lib/floor-error-message";
 
 interface Job {
   job_no: string;
@@ -101,7 +102,7 @@ function EvalModal({ row, questions, onClose, onSaved }: {
       toast.success("บันทึกการประเมินแล้ว");
       onSaved(); onClose();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "เกิดข้อผิดพลาด");
+      toast.error(floorActionError("บันทึกผลประเมินลูกค้า", e));
     } finally { setSaving(false); }
   }
 
