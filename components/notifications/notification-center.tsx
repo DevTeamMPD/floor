@@ -6,6 +6,7 @@ import { Bell, BellRing, CheckCheck, Smartphone } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { canUseWebPush, getPushAvailability, subscribeBrowserToPush, type PushAvailability } from "@/lib/push-client";
 import { toast } from "sonner";
+import { floorActionError } from "@/lib/floor-error-message";
 
 interface NotificationRow {
   id: number;
@@ -96,7 +97,7 @@ export default function NotificationCenter() {
       setPushReady(true);
       toast.success("มือถือเครื่องนี้พร้อมรับการแจ้งเตือนแล้ว");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "เปิดการแจ้งเตือนไม่สำเร็จ");
+      toast.error(floorActionError("เปิดการแจ้งเตือน", error));
     } finally { setPushBusy(false); }
   }
 

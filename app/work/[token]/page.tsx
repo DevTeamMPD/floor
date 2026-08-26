@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { floorActionError, floorErrorMessage } from "@/lib/floor-error-message";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import RemnantReportForm, { MaterialMovement, RemnantReportData } from "@/components/technician/remnant-report-form";
 import TechnicianPushButton from "@/components/notifications/technician-push-button";
@@ -103,7 +104,7 @@ function workErrorMessage(error: unknown) {
   if (message.includes("head technician material plan is required")) return "ยังเริ่มงานไม่ได้: หัวหน้าช่างต้องระบุรายการวัสดุและจำนวนแผ่นก่อน";
   if (message.includes("status photo is required")) return "กรุณาถ่ายหรือเลือกรูปหลักฐานอย่างน้อย 1 รูป";
   if (message.includes("remnant report is required")) return "กรุณาบันทึกเศษที่เหลือ หรือยืนยันว่าไม่มีเศษเหลือ ก่อนให้ลูกค้าเซ็นรับงาน";
-  return message ? `บันทึกสถานะไม่สำเร็จ: ${message}` : "บันทึกสถานะไม่สำเร็จ กรุณารีเฟรชหน้าแล้วลองอีกครั้ง หากยังไม่ได้ให้แจ้งหัวหน้าช่าง";
+  return message ? `บันทึกสถานะไม่สำเร็จ: ${floorErrorMessage(error)}` : "บันทึกสถานะไม่สำเร็จ กรุณารีเฟรชหน้าแล้วลองอีกครั้ง หากยังไม่ได้ให้แจ้งหัวหน้าช่าง";
 }
 
 function suggestedMaterialMovements(order: CentralWorkOrder | null): MaterialMovement[] {
@@ -417,7 +418,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       if (error) throw error;
       await reloadProgress(selected.assignmentId);
     } catch (error) {
-      setProgressError(error instanceof Error ? error.message : "บันทึกลายเซ็นไม่สำเร็จ");
+      setProgressError(floorActionError("บันทึกลายเซ็นลูกค้า", error));
     }
     setSaving(false);
   }

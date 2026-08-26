@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
 import { assignmentEvidenceLabel } from "@/lib/technicians";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 
 interface Team { id: string; name: string }
 interface Props {
@@ -68,7 +69,12 @@ export default function TechnicianAssignmentButton({ appointmentId, appointmentT
     }
     if (jobNo) {
       const names = selected.map((id) => technicians.find((t) => t.id === id)?.name).filter((x): x is string => Boolean(x));
-      await supabase.from("install_jobs").update({ assignees: names, updated_at: now }).eq("job_no", jobNo);
+      const { error: summaryError } = await supabase.from("install_jobs").update({ assignees: names, updated_at: now }).eq("job_no", jobNo);
+      if (summaryError) {
+        toast.error(`จ่ายงานให้ช่างแล้ว แต่บันทึกรายชื่อสรุปในใบงานไม่สำเร็จ: ${floorErrorMessage(summaryError)}`);
+        setOpen(false); setSaving(false); onChanged();
+        return;
+      }
     }
     toast.success("จ่ายงานให้ช่างแล้ว");
     setOpen(false); setSaving(false); onChanged();

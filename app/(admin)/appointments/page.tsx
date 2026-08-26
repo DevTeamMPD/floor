@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 import TechnicianManager from "@/components/appointments/technician-manager";
 import TechnicianAssignmentButton from "@/components/appointments/technician-assignment";
 import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
@@ -251,7 +252,7 @@ export default function AppointmentsPage() {
         status: 'ยืนยันคิวแล้ว', waiting_on: 'ไม่ได้ค้าง', waiting_since: null,
         flag_note: null, updated_at: new Date().toISOString(),
       }).eq('job_no', appt.job_id);
-      if (jobError) { toast.error(jobError.message); return; }
+      if (jobError) { toast.error(`อัปเดตสถานะคิวแล้ว แต่ปรับข้อมูลใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); void loadData(); return; }
       await supabase.from('job_activity').insert({
         job_no: appt.job_id, actor: 'หัวหน้าช่าง', action: 'confirm', field: 'status',
         old_value: appt.job?.status ?? null, new_value: 'ยืนยันคิวแล้ว',
@@ -269,9 +270,10 @@ export default function AppointmentsPage() {
       const { count } = await supabase.from('appointments')
         .select('id', { count: 'exact', head: true }).eq('job_id', appt.job_id).neq('status', 'cancelled');
       if (!count) {
-        await supabase.from('install_jobs').update({
+        const { error: jobError } = await supabase.from('install_jobs').update({
           status: 'ยกเลิกคิว', waiting_on: 'ไม่ได้ค้าง', waiting_since: null, updated_at: new Date().toISOString(),
         }).eq('job_no', appt.job_id);
+        if (jobError) { toast.error(`ยกเลิกคิวแล้ว แต่ปรับสถานะใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); void loadData(); return; }
         await supabase.from('job_activity').insert({
           job_no: appt.job_id, actor: 'หัวหน้าช่าง', action: 'cancel', field: 'status',
           old_value: appt.job?.status ?? null, new_value: 'ยกเลิกคิว',
@@ -295,14 +297,16 @@ export default function AppointmentsPage() {
       tech_id: techId, status: 'proposed', confirmed_at: null,
     }).eq('id', appt.id);
     if (error) { toast.error(error.message); return; }
-    await supabase.from('appointment_technicians').update({
+    const { error: revokeError } = await supabase.from('appointment_technicians').update({
       is_active: false, is_lead: false, revoked_at: new Date().toISOString(),
     }).eq('appointment_id', appt.id).eq('is_active', true);
+    if (revokeError) { toast.error(`ย้ายทีมแล้ว แต่ปิดการมอบหมายช่างเดิมไม่สำเร็จ: ${floorErrorMessage(revokeError)}`); void loadData(); return; }
     if (appt.job_id) {
-      await supabase.from('install_jobs').update({
+      const { error: jobError } = await supabase.from('install_jobs').update({
         status: 'รอหัวหน้าช่างยืนยัน', waiting_on: 'หัวหน้าช่าง',
         waiting_since: new Date().toISOString(), assignees: [], updated_at: new Date().toISOString(),
       }).eq('job_no', appt.job_id);
+      if (jobError) { toast.error(`ย้ายทีมแล้ว แต่ปรับข้อมูลใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); void loadData(); return; }
       await supabase.from('job_activity').insert({
         job_no: appt.job_id, actor: 'หัวหน้าช่าง', action: 'reassign', field: 'tech_id',
         old_value: appt.tech_id, new_value: techId,

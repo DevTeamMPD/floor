@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { ipGenOrderNo } from "@/lib/utils";
+import { floorActionError, floorErrorMessage } from "@/lib/floor-error-message";
 import { CUT_TYPES, WELD_TYPES, FINISH_TYPES, FLOOR_CONDITIONS, EMPTY_SURVEY, surveyHasData, type SurveyData } from "@/lib/survey";
 import { WORK_ORDER_STATUS_LABELS, workOrderEventLabel, workOrderStatusClass, type WorkOrderStatus } from "@/lib/work-orders";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
@@ -159,18 +160,6 @@ const WORK_END = "17:00";
 function emptyForm(): FormState {
   return { id: null, tech_id: "", date: "", endDate: "", start: WORK_START, end: WORK_END, notes: "", requirement: "",
     jobNo: "", bill_no: "", customer_name: "", customer_phone: "", address: "", location_url: "", survey: { ...EMPTY_SURVEY, photos: [] } };
-}
-
-function saveErrorMessage(error: unknown): string {
-  if (error && typeof error === "object") {
-    const value = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
-    const message = typeof value.message === "string" ? value.message.trim() : "";
-    const details = typeof value.details === "string" ? value.details.trim() : "";
-    const hint = typeof value.hint === "string" ? value.hint.trim() : "";
-    const code = typeof value.code === "string" ? value.code.trim() : "";
-    return [message, details, hint, code ? `รหัส ${code}` : ""].filter(Boolean).join(" · ");
-  }
-  return error instanceof Error && error.message ? error.message : "ไม่ทราบสาเหตุ กรุณาลองใหม่ หรือติดต่อผู้ดูแลระบบ";
 }
 
 function eachDay(a: string, b: string): string[] {
@@ -372,7 +361,7 @@ export default function ShareQueuePage() {
       }
       setForm((f) => f ? { ...f, survey: { ...f.survey, photos: [...(f.survey.photos ?? []), ...added] } } : f);
     } catch (e: unknown) {
-      alert("อัปโหลดรูปไม่สำเร็จ: " + (e instanceof Error ? e.message : ""));
+      alert(floorActionError("อัปโหลดรูป", e));
     }
     setUploading(false);
   }
@@ -498,7 +487,7 @@ export default function ShareQueuePage() {
       setForm(null);
       await load();
     } catch (e: unknown) {
-      alert("บันทึกไม่สำเร็จ: " + saveErrorMessage(e));
+      alert(floorActionError("บันทึกคิว / เปิดบิล", e));
     }
     setSaving(false);
   }
@@ -512,7 +501,7 @@ export default function ShareQueuePage() {
     const { error } = a.job_id
       ? await query.eq("job_id", a.job_id).neq("status", "cancelled")
       : await query.eq("id", a.id);
-    if (error) { alert("อัปเดตสถานะคิวไม่สำเร็จ"); setUpdatingStatus(false); return; }
+    if (error) { alert(floorActionError("อัปเดตสถานะคิว", error)); setUpdatingStatus(false); return; }
     if (a.job_id) {
       const nextJobStatus = status === "confirmed" ? "ยืนยันคิวแล้ว" : "รอหัวหน้าช่างยืนยัน";
       const { error: jobError } = await supabase.from("install_jobs").update({
@@ -522,7 +511,7 @@ export default function ShareQueuePage() {
         flag_note: null,
         updated_at: new Date().toISOString(),
       }).eq("job_no", a.job_id);
-      if (jobError) { alert("อัปเดต Ticket ไม่สำเร็จ"); setUpdatingStatus(false); return; }
+      if (jobError) { alert(`อัปเดตสถานะคิวแล้ว แต่ปรับข้อมูลใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); setUpdatingStatus(false); await load(); return; }
       await supabase.from("job_activity").insert({
         job_no: a.job_id, actor: "หัวหน้าช่าง", action: status === "confirmed" ? "confirm" : "reopen",
         field: "status", old_value: detailJob?.status ?? null, new_value: nextJobStatus,
@@ -546,7 +535,12 @@ export default function ShareQueuePage() {
         waiting_since: new Date().toISOString(), flag_note: reason.trim(), updated_at: new Date().toISOString(),
       }).eq("job_no", a.job_id),
     ]);
-    if (apptError || jobError) { alert("ส่งกลับไม่สำเร็จ"); return; }
+    if (apptError || jobError) {
+      const failed = [apptError ? `ปรับสถานะคิว: ${floorErrorMessage(apptError)}` : null, jobError ? `ปรับสถานะใบงาน: ${floorErrorMessage(jobError)}` : null].filter(Boolean).join("\n");
+      alert(`ส่งงานกลับฝ่ายขายไม่ครบ\n${failed}\nกรุณารีเฟรชเพื่อตรวจสอบสถานะก่อนทำซ้ำ`);
+      await load();
+      return;
+    }
     await supabase.from("job_activity").insert({
       job_no: a.job_id, actor: "หัวหน้าช่าง", action: "return",
       field: "status", old_value: detailJob?.status ?? null, new_value: `ส่งกลับฝ่ายขายแก้ไข: ${reason.trim()}`,
@@ -559,14 +553,20 @@ export default function ShareQueuePage() {
     if (!canSell) { alert("เฉพาะฝ่ายขายหรือผู้ดูแลระบบเท่านั้นที่ยกเลิกคิวได้"); return; }
     if (!window.confirm("ยกเลิกคิวนี้? ประวัติรายการจะยังถูกเก็บไว้")) return;
     const { error } = await supabase.from("appointments").update({ status: "cancelled" }).eq("id", a.id);
-    if (error) { alert("ลบไม่สำเร็จ"); return; }
+    if (error) { alert(floorActionError("ยกเลิกคิว", error)); return; }
     if (a.job_id) {
       const { count } = await supabase.from("appointments")
         .select("id", { count: "exact", head: true }).eq("job_id", a.job_id).neq("status", "cancelled");
       if (!count) {
-        await supabase.from("install_jobs").update({
+        const { error: jobError } = await supabase.from("install_jobs").update({
           status: "ยกเลิกคิว", waiting_on: "ไม่ได้ค้าง", waiting_since: null, updated_at: new Date().toISOString(),
         }).eq("job_no", a.job_id);
+        if (jobError) {
+          alert(`ยกเลิกคิวแล้ว แต่ปรับสถานะใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`);
+          setDetail(null);
+          await load();
+          return;
+        }
         await supabase.from("job_activity").insert({
           job_no: a.job_id, actor: "ผู้ดูแลคิว", action: "cancel", field: "status",
           old_value: detailJob?.status ?? null, new_value: "ยกเลิกคิว",
