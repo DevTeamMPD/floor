@@ -157,9 +157,72 @@ interface FormState {
 }
 const WORK_START = "09:00";
 const WORK_END = "17:00";
+const QUEUE_DRAFT_KEY = "floornow:share-queue:draft:v1";
+const BOOKING_MIN_LEAD_DAYS = 3;
+const TEAM_B_MAX_LEAD_DAYS = 10;
+
+function bookingDate(daysAhead: number) {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + daysAhead);
+  return ymd(date);
+}
+
+function isTeamB(team: Team | undefined) {
+  // Master data currently contains both "ทีม B" and the legacy typo "ทึม B".
+  // The stable business marker is the final B, not the Thai prefix.
+  return /\bB\s*$/i.test(team?.name ?? "");
+}
+
+function bookingRuleError(form: Pick<FormState, "date" | "endDate">, team: Team | undefined) {
+  const minimum = bookingDate(BOOKING_MIN_LEAD_DAYS);
+  const maximum = isTeamB(team) ? bookingDate(TEAM_B_MAX_LEAD_DAYS) : null;
+  if (form.date && form.date < minimum) {
+    return `ยังจองคิววันนี้ไม่ได้: ต้องจองล่วงหน้าอย่างน้อย ${BOOKING_MIN_LEAD_DAYS} วัน เพื่อให้คลังเตรียมสินค้า (เร็วที่สุด ${new Date(`${minimum}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" })})`;
+  }
+  if (maximum && form.date && form.date > maximum) {
+    return `ทีม B จองล่วงหน้าได้ไม่เกิน ${TEAM_B_MAX_LEAD_DAYS} วัน (เลือกได้ถึง ${new Date(`${maximum}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" })})`;
+  }
+  if (maximum && form.endDate && form.endDate > maximum) {
+    return `ทีม B จองงานหลายวันได้ถึง ${new Date(`${maximum}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" })} เท่านั้น กรุณาลดวันสิ้นสุดหรือเลือกทีมอื่น`;
+  }
+  return null;
+}
+
 function emptyForm(): FormState {
   return { id: null, tech_id: "", date: "", endDate: "", start: WORK_START, end: WORK_END, notes: "", requirement: "",
     jobNo: "", bill_no: "", customer_name: "", customer_phone: "", address: "", location_url: "", survey: { ...EMPTY_SURVEY, photos: [] } };
+}
+
+interface QueueDraft {
+  form: FormState;
+  savedAt: string;
+}
+
+function hasDraftContent(form: FormState) {
+  return Boolean(
+    form.bill_no.trim() || form.customer_name.trim() || form.customer_phone.trim() || form.address.trim()
+    || form.location_url.trim() || form.requirement.trim() || form.notes.trim() || surveyHasData(form.survey),
+  );
+}
+
+function readQueueDraft(): QueueDraft | null {
+  try {
+    const raw = window.localStorage.getItem(QUEUE_DRAFT_KEY);
+    if (!raw) return null;
+    const draft = JSON.parse(raw) as Partial<QueueDraft>;
+    if (!draft.form || typeof draft.form !== "object") return null;
+    const saved = draft.form as Partial<FormState>;
+    const form: FormState = {
+      ...emptyForm(), ...saved,
+      id: typeof saved.id === "string" ? saved.id : null,
+      survey: { ...EMPTY_SURVEY, ...(saved.survey ?? {}), photos: Array.isArray(saved.survey?.photos) ? saved.survey.photos : [] },
+    };
+    return hasDraftContent(form) ? { form, savedAt: typeof draft.savedAt === "string" ? draft.savedAt : new Date().toISOString() } : null;
+  } catch {
+    window.localStorage.removeItem(QUEUE_DRAFT_KEY);
+    return null;
+  }
 }
 
 function eachDay(a: string, b: string): string[] {
@@ -189,6 +252,8 @@ export default function ShareQueuePage() {
   const [appts, setAppts] = useState<Appt[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<FormState | null>(null);
+  const [bookingNotice, setBookingNotice] = useState<{ title: string; message: string } | null>(null);
+  const [queueDraft, setQueueDraft] = useState<QueueDraft | null>(null);
   const [detail, setDetail] = useState<Appt | null>(null);
   const [detailJob, setDetailJob] = useState<JobDetail | null>(null);
   const [detailWorkOrder, setDetailWorkOrder] = useState<DetailWorkOrder | null>(null);
@@ -221,11 +286,68 @@ export default function ShareQueuePage() {
     return () => { active = false; };
   }, [supabase]);
 
+  useEffect(() => {
+    const draft = readQueueDraft();
+    setQueueDraft(draft);
+    // A sales rep usually leaves this screen to check chat, maps, or a bill.
+    // Re-open a meaningful local draft on return so it never looks like it vanished.
+    if (draft) {
+      setForm(draft.form);
+      setShowSurvey(surveyHasData(draft.form.survey));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!form || !hasDraftContent(form)) return;
+    const persist = () => {
+      const draft: QueueDraft = { form, savedAt: new Date().toISOString() };
+      window.localStorage.setItem(QUEUE_DRAFT_KEY, JSON.stringify(draft));
+      setQueueDraft(draft);
+    };
+    const timeout = window.setTimeout(() => {
+      persist();
+    }, 500);
+    window.addEventListener("pagehide", persist);
+    return () => {
+      window.clearTimeout(timeout);
+      window.removeEventListener("pagehide", persist);
+    };
+  }, [form]);
+
   // Active staff may create and amend sales bookings.  Cancellation remains
   // limited to sales/admin because it removes a committed installation slot.
   const canSell = Boolean(staffRole);
   const canCancel = Boolean(staffRole);
   const canDecide = Boolean(staffRole);
+  const selectedFormTeam = form ? teams.find((team) => team.id === form.tech_id) : undefined;
+  const selectedFormRuleError = form ? bookingRuleError(form, selectedFormTeam) : null;
+  const availableFormTeams = form ? teams.filter((team) => {
+    if (form.id || !isTeamB(team)) return true;
+    const max = bookingDate(TEAM_B_MAX_LEAD_DAYS);
+    return (!form.date || form.date <= max) && (!form.endDate || form.endDate <= max);
+  }) : teams;
+
+  function clearQueueDraft() {
+    window.localStorage.removeItem(QUEUE_DRAFT_KEY);
+    setQueueDraft(null);
+  }
+
+  function closeFormWithDraft() {
+    if (form && hasDraftContent(form)) {
+      const draft: QueueDraft = { form, savedAt: new Date().toISOString() };
+      window.localStorage.setItem(QUEUE_DRAFT_KEY, JSON.stringify(draft));
+      setQueueDraft(draft);
+    }
+    setForm(null);
+  }
+
+  function restoreQueueDraft() {
+    const draft = readQueueDraft();
+    if (!draft) { clearQueueDraft(); return; }
+    setDetail(null);
+    setForm(draft.form);
+    setShowSurvey(surveyHasData(draft.form.survey));
+  }
 
   const week = useMemo(() => getWeekDays(offset), [offset]);
   const monthDays = useMemo(() => getMonthDays(mYear, mMonth), [mYear, mMonth]);
@@ -319,9 +441,18 @@ export default function ShareQueuePage() {
 
   function openAdd(date: Date) {
     if (!canSell) return;
+    const selectedDate = ymd(date);
+    const minimum = bookingDate(BOOKING_MIN_LEAD_DAYS);
+    if (selectedDate < minimum) {
+      setBookingNotice({
+        title: "วันนี้ยังเปิดคิวไม่ได้",
+        message: `คลังต้องใช้เวลาเตรียมสินค้าอย่างน้อย ${BOOKING_MIN_LEAD_DAYS} วัน\nเร็วที่สุดที่เลือกได้คือ ${new Date(`${minimum}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" })}`,
+      });
+      return;
+    }
     setDetail(null);
     setShowSurvey(false);
-    setForm({ ...emptyForm(), date: ymd(date), endDate: ymd(date), tech_id: teams[0]?.id ?? "", jobNo: ipGenOrderNo() });
+    setForm({ ...emptyForm(), date: selectedDate, endDate: selectedDate, tech_id: teams[0]?.id ?? "", jobNo: ipGenOrderNo() });
   }
   async function openEdit(a: Appt) {
     if (!canSell) return;
@@ -383,6 +514,8 @@ export default function ShareQueuePage() {
     if (!form) return;
     if (!form.tech_id) { alert("กรุณาเลือกทีมช่าง"); return; }
     if (!form.date) { alert("กรุณาเลือกวันที่"); return; }
+    const dateRuleError = bookingRuleError(form, teams.find((team) => team.id === form.tech_id));
+    if (dateRuleError) { setBookingNotice({ title: "ยังบันทึกคิวไม่ได้", message: dateRuleError }); return; }
     if ((form.end || "12:00") <= (form.start || "09:00")) { alert("เวลาสิ้นสุดต้องหลังเวลาเริ่ม"); return; }
     const holidayMode = /วันหยุด|หยุด|ลาพัก|ไม่รับงาน/.test(form.notes) && !form.bill_no.trim() && !form.customer_name.trim();
     if (!holidayMode) {
@@ -484,6 +617,7 @@ export default function ShareQueuePage() {
         const { error } = await supabase.from("appointments").insert(rows);
         if (error) throw error;
       }
+      clearQueueDraft();
       setForm(null);
       await load();
     } catch (e: unknown) {
@@ -586,15 +720,45 @@ export default function ShareQueuePage() {
 
   return (
     <div className="min-h-screen bg-slate-100">
+      {bookingNotice && <div className="fixed inset-0 z-[70] grid place-items-center p-4" role="dialog" aria-modal="true" aria-labelledby="booking-notice-title">
+        <button type="button" className="absolute inset-0 bg-slate-950/55 backdrop-blur-[2px]" onClick={() => setBookingNotice(null)} aria-label="ปิดข้อความแจ้งเตือน" />
+        <section className="relative w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/5">
+          <div className="h-1.5 bg-gradient-to-r from-amber-400 via-orange-400 to-rose-400" />
+          <div className="p-5 sm:p-6">
+            <div className="flex items-start gap-3">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-amber-100 text-xl">📅</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">กติกาการจองคิว</p>
+                <h2 id="booking-notice-title" className="mt-1 text-lg font-bold text-slate-900">{bookingNotice.title}</h2>
+              </div>
+              <button type="button" onClick={() => setBookingNotice(null)} className="grid h-8 w-8 place-items-center rounded-full text-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="ปิด">×</button>
+            </div>
+            <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm leading-6 text-slate-700">
+              {bookingNotice.message.split("\n").map((line) => <p key={line}>{line}</p>)}
+            </div>
+            <button type="button" autoFocus onClick={() => setBookingNotice(null)} className="mt-5 w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">เข้าใจแล้ว</button>
+          </div>
+        </section>
+      </div>}
       <header className="bg-white border-b sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-3 py-3 sm:px-4 flex items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-bold text-slate-900">🗓️ ตารางคิวช่าง — MPD</h1>
             <p className="hidden text-xs text-slate-500 sm:block">ฝ่ายขายลงคิวและเปิดบิล · กดงานเพื่อดูรายละเอียดและการส่งต่อ</p>
           </div>
-          {canSell ? <button onClick={() => openAdd(new Date())} className="shrink-0 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700">+ ลงคิว</button> : <span className={`rounded-lg px-3 py-2 text-xs ${permissionError ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-500"}`}>{permissionError || (staffRole === null ? "กำลังตรวจสอบสิทธิ์" : "โหมดดูข้อมูล")}</span>}
+          {canSell ? <div className="flex items-center gap-2">
+            {queueDraft && <button type="button" onClick={restoreQueueDraft} className="inline-flex rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-medium text-amber-800 hover:bg-amber-100 sm:px-3">📝 ร่าง</button>}
+            <button onClick={() => openAdd(new Date())} className="shrink-0 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700">+ ลงคิว</button>
+          </div> : <span className={`rounded-lg px-3 py-2 text-xs ${permissionError ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-500"}`}>{permissionError || (staffRole === null ? "กำลังตรวจสอบสิทธิ์" : "โหมดดูข้อมูล")}</span>}
         </div>
       </header>
+
+      {queueDraft && !form && <div className="sticky top-[65px] z-10 border-b border-amber-200 bg-amber-50/95 px-3 py-2 backdrop-blur sm:px-4">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
+          <div className="min-w-0"><p className="text-xs font-semibold text-amber-900">📝 มีร่างคิวที่ยังไม่ได้บันทึก</p><p className="truncate text-[11px] text-amber-700">บันทึกล่าสุด {new Date(queueDraft.savedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น. · ข้อมูลยังไม่ถูกส่งเข้าระบบ</p></div>
+          <button type="button" onClick={restoreQueueDraft} className="shrink-0 rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-amber-600">เปิดร่างต่อ</button>
+        </div>
+      </div>}
 
       <main className="max-w-6xl mx-auto px-3 py-4 sm:px-4">
         <div className="flex items-center gap-2 mb-3 flex-wrap">
@@ -911,33 +1075,59 @@ export default function ShareQueuePage() {
 
       {/* Add / edit form */}
       {form && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4" onClick={() => setForm(null)}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
           <div className="absolute inset-0 bg-black/40" />
           <div className="relative z-10 flex max-h-[96vh] w-full max-w-lg flex-col rounded-t-3xl bg-white shadow-2xl sm:max-h-[90vh] sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b flex items-center justify-between">
-              <h2 className="text-base font-semibold">{form.id ? "แก้ไขคิว/บิล" : "ลงคิว / เปิดบิลใหม่"}</h2>
-              <button onClick={() => setForm(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+              <div><h2 className="text-base font-semibold">{form.id ? "แก้ไขคิว/บิล" : "ลงคิว / เปิดบิลใหม่"}</h2><p className="mt-0.5 text-[11px] text-emerald-600">● บันทึกร่างบนเครื่องอัตโนมัติ</p></div>
+              <button onClick={closeFormWithDraft} className="text-slate-400 hover:text-slate-600 text-xl leading-none" aria-label="เก็บร่างและปิด">×</button>
             </div>
             <div className="p-5 overflow-y-auto space-y-4">
               {/* นัด/ทีม */}
               <div className="space-y-3">
                 <div>
                   <label className="text-xs text-slate-500 block mb-1">ทีมช่าง</label>
-                  <select value={form.tech_id} onChange={(e) => setForm({ ...form, tech_id: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white">
+                  <select value={form.tech_id} onChange={(e) => {
+                    const next = { ...form, tech_id: e.target.value };
+                    setForm(next);
+                    const message = bookingRuleError(next, teams.find((team) => team.id === e.target.value));
+                    if (message) setBookingNotice({ title: "ทีมนี้ยังรับคิววันดังกล่าวไม่ได้", message });
+                  }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white">
                     <option value="">— เลือกทีมช่าง —</option>
-                    {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    {availableFormTeams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
+                  <p className="mt-1 text-[11px] text-slate-500">คลังต้องเตรียมสินค้า: ทุกทีมจองได้ตั้งแต่ {BOOKING_MIN_LEAD_DAYS} วันล่วงหน้า{isTeamB(selectedFormTeam) ? ` · ทีม B เลือกได้ไม่เกิน ${TEAM_B_MAX_LEAD_DAYS} วันล่วงหน้า` : ""}</p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="text-xs text-slate-500 block mb-1">วันที่เริ่ม</label>
-                    <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value, endDate: (!form.endDate || form.endDate < e.target.value) ? e.target.value : form.endDate })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                    <input type="date" value={form.date} min={bookingDate(BOOKING_MIN_LEAD_DAYS)} max={isTeamB(selectedFormTeam) ? bookingDate(TEAM_B_MAX_LEAD_DAYS) : undefined} onChange={(e) => {
+                      const teamBOutOfRange = isTeamB(selectedFormTeam) && e.target.value > bookingDate(TEAM_B_MAX_LEAD_DAYS);
+                      const fallbackTeam = teamBOutOfRange ? teams.find((team) => !isTeamB(team)) : undefined;
+                      const next = { ...form, tech_id: fallbackTeam?.id ?? form.tech_id, date: e.target.value, endDate: (!form.endDate || form.endDate < e.target.value) ? e.target.value : form.endDate };
+                      setForm(next);
+                      if (teamBOutOfRange) {
+                        setBookingNotice({
+                          title: "ทีม B รับคิววันนี้ไม่ได้",
+                          message: `ทีม B รับคิวล่วงหน้าได้ไม่เกิน ${TEAM_B_MAX_LEAD_DAYS} วัน\nระบบเลือก ${fallbackTeam?.name ?? "ทีมอื่น"} ให้แล้ว กรุณาตรวจสอบก่อนบันทึก`,
+                        });
+                        return;
+                      }
+                      const message = bookingRuleError(next, selectedFormTeam);
+                      if (message) setBookingNotice({ title: "เลือกวันดังกล่าวไม่ได้", message });
+                    }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500 block mb-1">ถึงวันที่</label>
-                    <input type="date" value={form.endDate} min={form.date} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                    <input type="date" value={form.endDate} min={form.date > bookingDate(BOOKING_MIN_LEAD_DAYS) ? form.date : bookingDate(BOOKING_MIN_LEAD_DAYS)} max={isTeamB(selectedFormTeam) ? bookingDate(TEAM_B_MAX_LEAD_DAYS) : undefined} onChange={(e) => {
+                      const next = { ...form, endDate: e.target.value };
+                      setForm(next);
+                      const message = bookingRuleError(next, selectedFormTeam);
+                      if (message) setBookingNotice({ title: "เลือกวันสิ้นสุดดังกล่าวไม่ได้", message });
+                    }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                   </div>
                 </div>
+                {selectedFormRuleError && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">⚠️ {selectedFormRuleError}</p>}
                 {form.endDate && form.endDate > form.date && (
                   <p className="text-[11px] text-blue-600 -mt-1">📅 งานหลายวัน: จะสร้างคิว {eachDay(form.date, form.endDate).length} วัน (เวลาเดียวกันทุกวัน)</p>
                 )}
@@ -1081,7 +1271,7 @@ export default function ShareQueuePage() {
               )}
             </div>
             <div className="px-5 py-4 border-t flex gap-2">
-              <button onClick={() => setForm(null)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">ยกเลิก</button>
+              <button onClick={closeFormWithDraft} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">เก็บร่างและปิด</button>
               <button onClick={save} disabled={saving || uploading} className="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : (isHol ? "บันทึกวันหยุด" : "บันทึก / เปิดบิล")}</button>
             </div>
           </div>
