@@ -31,10 +31,10 @@ export default function ReturnedWorkOrders() {
   useEffect(() => {
     supabase.rpc("get_my_floor_staff_profile").then(({ data }) => setStaffRole((data as { role?: string } | null)?.role ?? null));
   }, [supabase]);
-  const canSell = staffRole === "admin" || staffRole === "sales";
+  const canSell = Boolean(staffRole);
   function patch(jobNo: string, value: Partial<Draft>) { setDrafts((current) => ({ ...current, [jobNo]: { ...current[jobNo], ...value } })); }
   async function saveAndResubmit(order: WorkOrder) {
-    if (!canSell) { toast.error("บัญชีนี้ดูข้อมูลได้ แต่ไม่มีสิทธิ์แก้ไขงานฝ่ายขาย"); return; }
+    if (!canSell) { toast.error("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; }
     const draft = drafts[order.job_no]; if (!draft) return;
     const missing = [!draft.bill_no.trim() ? "เลขบิล" : null, !draft.customer_name.trim() ? "ชื่อลูกค้า" : null, !draft.customer_phone.trim() ? "เบอร์โทร" : null, !draft.address.trim() && !draft.location_url.trim() ? "ที่อยู่หรือแผนที่" : null, !draft.product_name.trim() ? "สินค้า/ขอบเขตงาน" : null].filter(Boolean);
     if (missing.length) { toast.error(`กรอกให้ครบ: ${missing.join(", ")}`); return; }

@@ -1,5 +1,6 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 /* ---------- types ---------- */
 type StageN = { id: number; name: string; n: number };
@@ -8,6 +9,7 @@ type WasteTop = { customer: string; bill: string | null; zoneM2: number; actM2: 
 type WasteStats = { count: number; avgPct: number | null; medianPct: number | null; normal: number; heavy: number; abnormal: number };
 type Exec = {
   jobs: { total: number; byStage: StageN[]; bySource: Record<string, number>; byMonth: { month: string; n: number }[]; completedByMonth: { month: string; n: number }[]; done: number; active: number; overdue: number; evaluated: number };
+  workOrders: { status: string; n: number; avgDays: number; maxDays: number }[];
   leadTime: { n: number; avgDays: number | null; medianDays: number | null; p90Days: number | null };
   pipeline: { aging: { id: number; name: string; n: number; avgDays: number; maxDays: number }[]; stuck: { customer: string; product: string; stage: number; stageName: string; days: number }[] };
   upcoming: NamedJob[];
@@ -30,6 +32,16 @@ const DIMS = ["บริการ", "คุณภาพงาน", "ความ
 const TARGET_CSAT = 4.5, TARGET_SATISFIED = 90, TARGET_DONE = 80;
 const TARGET_LEAD_DAYS = 60;
 const NUM: React.CSSProperties = { fontVariantNumeric: "tabular-nums" };
+const WORK_ORDER_PIPELINE = [
+  { status: "head_review", label: "รอหัวหน้าช่างตรวจ", short: "ตรวจงาน", href: "/operations", color: WARN },
+  { status: "returned_sales", label: "ส่งกลับฝ่ายขาย", short: "แก้ข้อมูล", href: "/operations", color: BAD },
+  { status: "warehouse_waiting", label: "รอคลังรับงาน", short: "รอคลัง", href: "/warehouse", color: WARN },
+  { status: "warehouse_preparing", label: "กำลังเตรียมสินค้า", short: "เตรียมสินค้า", href: "/warehouse", color: "#d97706" },
+  { status: "ready_to_install", label: "รอติดตั้ง", short: "รอติดตั้ง", href: "/appointments", color: ACCENT },
+  { status: "installing", label: "กำลังติดตั้ง", short: "ติดตั้ง", href: "/appointments", color: "#0891b2" },
+  { status: "waiting_cs", label: "รอ CS โทรประเมิน", short: "รอ CS", href: "/cs-tracking", color: "#7c3aed" },
+  { status: "closed", label: "ปิดงานแล้ว", short: "ปิดงาน", href: "/orders", color: GOOD },
+] as const;
 
 const THEMES: { key: string; re: RegExp }[] = [
   { key: "กลิ่นกาว / กลิ่นแผ่น", re: /กลิ่น/ },
@@ -121,35 +133,34 @@ export default function ExecPage() {
   const [ex, setEx] = useState<Exec | null>(null);
   const [sv, setSv] = useState<Survey | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const [a, b] = await Promise.all([
-        fetch("/api/exec-overview", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
-        fetch("/api/satisfaction-survey", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
-      ]);
-      setEx(a); setSv(b);
+      const getJson = async <T,>(url: string): Promise<T> => {
+        const response = await fetch(url, { cache: "no-store", credentials: "same-origin" });
+        if (!response.ok) throw new Error(`${url} (${response.status})`);
+        return response.json() as Promise<T>;
+      };
+      // A just-refreshed Supabase session can take one request to reach the
+      // server. Retry once so the dashboard never silently turns real data
+      // into a row of zeroes during that hand-off.
+      let executive: Exec;
+      try { executive = await getJson<Exec>("/api/exec-overview"); }
+      catch {
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+        executive = await getJson<Exec>("/api/exec-overview");
+      }
+      const survey = await getJson<Survey>("/api/satisfaction-survey").catch(() => null);
+      setEx(executive); setSv(survey);
+    } catch {
+      setEx(null);
+      setLoadError("ไม่สามารถเชื่อมข้อมูลภาพรวมงานได้ กรุณากด “โหลดใหม่” อีกครั้ง");
     } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
-
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const [boxfit, setBoxfit] = useState({ s: 1, left: 0 });
-  useEffect(() => {
-    function fit() {
-      const el = wrapRef.current; if (!el) return;
-      const availW = el.clientWidth;
-      const availH = window.innerHeight - el.getBoundingClientRect().top - 16;
-      const s = Math.min(availW / 1280, availH / 720);
-      const use = s > 0 && isFinite(s) ? s : 1;
-      setBoxfit({ s: use, left: Math.max(0, (availW - 1280 * use) / 2) });
-    }
-    fit();
-    const t = setTimeout(fit, 120);
-    window.addEventListener("resize", fit);
-    return () => { window.removeEventListener("resize", fit); clearTimeout(t); };
-  }, [loading, ex, sv]);
 
   const responses = useMemo(() => sv?.responses ?? [], [sv]);
   const allScores = useMemo(() => responses.flatMap((r) => r.scores.filter((x): x is number => x !== null)), [responses]);
@@ -197,6 +208,9 @@ export default function ExecPage() {
   const leadMed = ex?.leadTime?.medianDays ?? null;
   const leadHit = leadMed !== null && leadMed <= TARGET_LEAD_DAYS;
   const evalCoverage = j?.done ? Math.round((evaluated / j.done) * 100) : 0;
+  const workOrders = ex?.workOrders ?? [];
+  const workOrderByStatus = new Map(workOrders.map((row) => [row.status, row]));
+  const maxWorkOrderN = Math.max(1, ...workOrders.map((row) => row.n));
 
   const insight = (() => {
     if (!j) return "";
@@ -221,20 +235,17 @@ export default function ExecPage() {
   ] as { label: string; value: string; unit: string; color: string; note: string; delta?: number | null }[];
 
   return (
-    <div ref={wrapRef} className="w-full relative" style={{ height: 720 * boxfit.s }}>
+    <div className="mx-auto w-full max-w-[1280px]">
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
-          @page { size: 1280px 720px; margin: 0; }
+          @page { size: A4 landscape; margin: 8mm; }
           body { background: #fff !important; }
-          body * { visibility: hidden !important; }
-          .exec-board, .exec-board * { visibility: visible !important; }
-          .exec-board { position: fixed !important; left: 0 !important; top: 0 !important; margin: 0 !important; transform: none !important; }
           .exec-card { box-shadow: none !important; border: 1px solid ${HAIR} !important; }
           .no-print { display: none !important; }
         }
       ` }} />
-      <div className="exec-board absolute top-0 overflow-hidden flex flex-col"
-        style={{ width: 1280, height: 720, transform: `scale(${boxfit.s})`, transformOrigin: "top left", marginLeft: boxfit.left, padding: 22, background: "#e9edf3", fontFamily: 'system-ui,-apple-system,"Segoe UI",sans-serif' }}>
+      <div className="exec-board flex flex-col p-3 sm:p-5 lg:p-[22px]"
+        style={{ background: "#e9edf3", fontFamily: 'system-ui,-apple-system,"Segoe UI",sans-serif' }}>
 
         {/* header — dark anchor */}
         <div className="rounded-2xl px-5 py-3.5 flex items-center gap-3 shrink-0" style={{ background: HEADER_BG, boxShadow: SHADOW }}>
@@ -250,6 +261,7 @@ export default function ExecPage() {
         </div>
 
         {/* summary */}
+        {loadError && <div className="exec-card mt-2.5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{loadError}</div>}
         {insight && (
           <div className="exec-card bg-white rounded-xl mt-2.5 shrink-0 flex items-center gap-3 px-4 py-2" style={{ boxShadow: SHADOW }}>
             <span className="text-[10px] font-bold uppercase shrink-0 px-2 py-0.5 rounded-md" style={{ color: "#fff", background: ACCENT, letterSpacing: "0.06em" }}>สรุปวันนี้</span>
@@ -258,7 +270,7 @@ export default function ExecPage() {
         )}
 
         {/* hero — 5 cards, top accent + selective tint on problems */}
-        <div className="grid grid-cols-5 gap-2.5 mt-2.5 shrink-0">
+        <div className="grid grid-cols-1 gap-2.5 mt-2.5 sm:grid-cols-2 xl:grid-cols-5 shrink-0">
           {heroes.map((h, i) => {
             let d = null;
             if (h.delta !== undefined && h.delta !== null && Math.round(h.delta) !== 0) { const up = h.delta > 0; d = <span className="text-[10px] font-bold" style={{ color: up ? GOOD : BAD, ...NUM }}>{up ? "▲" : "▼"}{Math.abs(Math.round(h.delta))}%</span>; }
@@ -277,7 +289,7 @@ export default function ExecPage() {
         </div>
 
         {/* context micro row */}
-        <div className="flex items-center gap-6 mt-2.5 shrink-0 text-[11px] px-1" style={{ color: MUT }}>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-2.5 shrink-0 text-[11px] px-1" style={{ color: MUT }}>
           <Micro label="งานเข้าเดือนนี้" value={`${lastJobs?.n ?? 0}`} delta={jobDelta} />
           <Micro label="งานเข้าสะสม" value={`${j?.total ?? 0}`} />
           <Micro label="กำลังดำเนินงาน" value={`${j?.active ?? 0}`} />
@@ -286,7 +298,7 @@ export default function ExecPage() {
         </div>
 
         {/* detail — 3 columns */}
-        <div className="grid grid-cols-3 gap-3 mt-2.5 flex-1 min-h-0">
+        <div className="grid grid-cols-1 gap-3 mt-2.5 lg:grid-cols-3 flex-1 min-h-0">
 
           {/* col 1 */}
           <div className="flex flex-col gap-3 min-h-0">
@@ -391,6 +403,37 @@ export default function ExecPage() {
             </Panel>
           </div>
         </div>
+
+        {/* Full-width operational pipeline: one executive view, with direct entry to the team that owns each state. */}
+        <section className="exec-card mt-3 rounded-2xl bg-white p-4" style={{ boxShadow: SHADOW }}>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2">
+              <span className="h-4 w-1 rounded-full" style={{ background: ACCENT }} />
+              <div>
+                <h2 className="text-sm font-bold" style={{ color: INK }}>Pipeline สถานะงานติดตั้ง</h2>
+                <p className="text-[11px]" style={{ color: MUT }}>นับจากใบสั่งงานกลางจริง · กดแต่ละสถานะเพื่อไปทำงานต่อ</p>
+              </div>
+            </div>
+            <span className="text-xs font-medium" style={{ color: SUB, ...NUM }}>งานในระบบ {workOrders.reduce((sum, row) => sum + row.n, 0)} งาน</span>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
+            {WORK_ORDER_PIPELINE.map((stage, index) => {
+              const row = workOrderByStatus.get(stage.status) ?? { n: 0, avgDays: 0, maxDays: 0 };
+              const isClosed = stage.status === "closed";
+              return (
+                <Link key={stage.status} href={stage.href} className="group rounded-xl border p-3 transition hover:-translate-y-0.5 hover:shadow-md" style={{ borderColor: HAIR, background: index % 2 ? "#fbfcfe" : "#fff" }}>
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-[10px] font-bold" style={{ color: stage.color }}>{index + 1}. {stage.short}</span>
+                    <span className="rounded-full px-2 py-0.5 text-xs font-extrabold" style={{ color: stage.color, background: tint(stage.color), ...NUM }}>{row.n}</span>
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full" style={{ background: TRACK }}><div className="h-full rounded-full" style={{ width: `${(row.n / maxWorkOrderN) * 100}%`, background: stage.color }} /></div>
+                  <p className="mt-2 min-h-8 text-[10px] leading-4" style={{ color: SUB }}>{stage.label}</p>
+                  {!isClosed && row.n > 0 ? <p className="text-[10px]" style={{ color: row.maxDays > 2 ? WARN : MUT, ...NUM }}>เฉลี่ย {row.avgDays} วัน · นานสุด {row.maxDays} วัน</p> : <p className="text-[10px]" style={{ color: MUT }}>{isClosed ? "งานจบแล้ว" : "ไม่มีงานค้าง"}</p>}
+                </Link>
+              );
+            })}
+          </div>
+        </section>
 
         {/* footer */}
         <div className="text-[9.5px] mt-2.5 shrink-0 flex flex-wrap gap-x-4 px-1" style={{ color: MUT, ...NUM }}>

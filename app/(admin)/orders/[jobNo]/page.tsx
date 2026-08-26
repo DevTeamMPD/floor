@@ -1,6 +1,7 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -9,6 +10,7 @@ import TechnicianAssignmentButton from "@/components/appointments/technician-ass
 import { WORK_ITEM_CATEGORIES, WORK_ITEM_CATEGORY_LABELS, WORK_ORDER_STATUS_LABELS, type WorkItemCategory, type WorkOrder, type WorkOrderEvent, type WorkOrderItem, workOrderEventLabel, workOrderStatusClass } from "@/lib/work-orders";
 import type { StaffRole } from "@/lib/staff";
 import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
+import { InlineWorkOrderJobContext } from "@/components/work-orders/inline-work-order-context";
 
 interface Job {
   job_no: string; source: string | null; bill_no: string | null; customer_name: string | null; customer_phone: string | null;
@@ -24,12 +26,32 @@ type Assignment = TechnicianAssignment;
 interface DraftItem { id?: string; category: WorkItemCategory; itemName: string; sku: string; specification: string; plannedQty: string; actualQty: string; unit: string; sourceType: string; note: string }
 interface WarehouseFilePreview { id: string; file: File; url: string }
 
+// Floor service SKUs supplied by the sales catalogue. They remain selectable
+// even before the inventory master has created a stock row for them.
+const FLOOR_SERVICE_SKUS: Material[] = [
+  { id: "catalog-LDSSF006", sku: "LDSSF006", name: "[Organic Beige] Rollsafe 0.8 cm บริการติดตั้งแผ่นรองกันลื่น", unit: "แผ่น", qty_on_hand: null },
+  { id: "catalog-LDSSF005", sku: "LDSSF005", name: "[Whitebuzz] Rollsafe 0.8 cm บริการติดตั้งแผ่นรองกันลื่น", unit: "แผ่น", qty_on_hand: null },
+  { id: "catalog-LDSSF004", sku: "LDSSF004", name: "[Whitebuzz] Safespace 0.6cm บริการติดตั้งแผ่นรองกันลื่น", unit: "แผ่น", qty_on_hand: null },
+  { id: "catalog-LDSSF003", sku: "LDSSF003", name: "[Barky beige] Safespace 0.6cm บริการติดตั้งแผ่นรองกันลื่น", unit: "แผ่น", qty_on_hand: null },
+  { id: "catalog-LDSSF001", sku: "LDSSF001", name: "[Whitebuzz] Rollsafe 1.6cm บริการติดตั้งแผ่นรองกันลื่น", unit: "แผ่น", qty_on_hand: null },
+  { id: "catalog-LDSSF002", sku: "LDSSF002", name: "[Organic beige] Rollsafe 1.6cm บริการติดตั้งแผ่นรองกันลื่น", unit: "แผ่น", qty_on_hand: null },
+];
+
 function thaiDate(iso: string) { return new Date(iso).toLocaleString("th-TH", { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" }); }
 function jsonObject(value: unknown): Record<string, unknown> {
   try { const parsed = typeof value === "string" ? JSON.parse(value) : value; return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}; } catch { return {}; }
 }
 function emptyItem(category: WorkItemCategory = "floor_material"): DraftItem {
   return { category, itemName: "", sku: "", specification: "", plannedQty: "", actualQty: "", unit: category === "floor_material" || category === "remnant" ? "แผ่น" : "ชิ้น", sourceType: category === "remnant" ? "remnant" : "new", note: "" };
+}
+// A freeform instruction is deliberately stored as a non-stock "tool" row.
+// It remains part of the central work order and technician view, but has zero
+// planned/actual quantity and is never treated as an inventory pick.
+function isFreeformNote(item: DraftItem) {
+  return item.category === "tool" && item.sourceType === "other" && item.sku === "" && item.plannedQty === "0" && item.unit === "รายการ" && item.itemName === "โน้ต Freeform จากหัวหน้าช่าง";
+}
+function emptyFreeformNote(): DraftItem {
+  return { category: "tool", itemName: "โน้ต Freeform จากหัวหน้าช่าง", sku: "", specification: "", plannedQty: "0", actualQty: "0", unit: "รายการ", sourceType: "other", note: "" };
 }
 function fromSaved(item: WorkOrderItem): DraftItem {
   return { id: item.id, category: item.category, itemName: item.item_name, sku: item.sku ?? "", specification: item.specification ?? "", plannedQty: String(item.planned_qty), actualQty: item.actual_qty == null ? "" : String(item.actual_qty), unit: item.unit, sourceType: item.source_type, note: item.note ?? "" };
@@ -54,8 +76,8 @@ function Card({ title, subtitle, children }: { title: string; subtitle?: string;
 }
 function Field({ label, value }: { label: string; value: React.ReactNode }) { return <div><div className="text-xs font-medium text-slate-400">{label}</div><div className="mt-1 whitespace-pre-wrap text-sm text-slate-800">{value || "—"}</div></div>; }
 
-export default function CentralWorkOrderPage({ params }: { params: Promise<{ jobNo: string }> }) {
-  const { jobNo } = use(params); const supabase = useMemo(() => createClient(), []);
+function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { jobNo: string; embedded?: boolean; onChanged?: () => void }) {
+  const supabase = useMemo(() => createClient(), []);
   const [job, setJob] = useState<Job | null>(null); const [appointment, setAppointment] = useState<Appointment | null>(null);
   const [order, setOrder] = useState<WorkOrder | null>(null); const [items, setItems] = useState<DraftItem[]>([]); const [events, setEvents] = useState<WorkOrderEvent[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]); const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -95,7 +117,9 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
       const { data: linkedAppointment } = await supabase.from("appointments").select("id,job_id,tech_id,slot_start,slot_end,status,notes,requirement").eq("id", wo.appointment_id).maybeSingle();
       appt = linkedAppointment as Appointment | null;
     }
-    const loadedJob = jobResult.data as Job | null; const loadedMaterials = (materialResult.data ?? []) as Material[];
+    const loadedJob = jobResult.data as Job | null;
+    const inventoryMaterials = (materialResult.data ?? []) as Material[];
+    const loadedMaterials = Array.from(new Map([...inventoryMaterials, ...FLOOR_SERVICE_SKUS].map((material) => [material.sku, material])).values());
     setJob(loadedJob); setAppointment(appt); setRole((profileResult.data?.role as StaffRole | undefined) ?? null); setTechnicians((techResult.data ?? []) as Technician[]); setTeams((teamResult.data ?? []) as Team[]); setMaterials(loadedMaterials);
     setOrder(wo); setNote(wo?.note ?? "");
     if (appt && wo) {
@@ -110,9 +134,11 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
     setLoading(false);
   }, [jobNo, supabase]);
   useEffect(() => { void load(); }, [load]);
+  async function refreshAfterChange() { await load(); onChanged?.(); }
 
   function patchItem(index: number, patch: Partial<DraftItem>) { setItems((current) => current.map((item, i) => i === index ? { ...item, ...patch } : item)); }
   function addItem(category: WorkItemCategory = "floor_material") { setItems((current) => [...current, emptyItem(category)]); }
+  function addFreeformNote() { setItems((current) => [...current, emptyFreeformNote()]); }
   function removeItem(index: number) { setItems((current) => current.filter((_, i) => i !== index)); }
   function addWarehouseFiles(files: FileList | null) {
     const added = Array.from(files ?? []).filter((file) => file.type.startsWith("image/")).map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) }));
@@ -133,44 +159,44 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
   function rpcItems(unknownSkus: Set<string>) { return items.map((item) => { const isException = item.category === "floor_material" && unknownSkus.has(item.sku.trim()); return { category: item.category, itemName: item.itemName.trim(), sku: item.sku.trim(), specification: item.specification.trim(), plannedQty: Number(item.plannedQty), unit: item.unit.trim(), sourceType: isException ? "other" : item.sourceType, note: isException ? `[อนุมัติ SKU นอกคลัง]${item.note.trim() ? ` ${item.note.trim()}` : ""}` : item.note.trim() }; }); }
 
   async function confirmOrder() {
-    if (!order) return; if (!items.length || items.some((item) => !item.itemName.trim() || !item.unit.trim() || item.plannedQty === "" || Number(item.plannedQty) < 0 || (item.category === "floor_material" && !item.sku.trim()))) { toast.error("กรอก SKU ชื่อรายการ จำนวน และหน่วยให้ครบทุกบรรทัด"); return; }
+    if (!order) return; if (!items.length || items.some((item) => isFreeformNote(item) ? !item.note.trim() : !item.itemName.trim() || !item.unit.trim() || item.plannedQty === "" || Number(item.plannedQty) < 0 || (item.category === "floor_material" && !item.sku.trim()))) { toast.error("กรอก SKU ชื่อรายการ จำนวน และหน่วยให้ครบทุกบรรทัด หรือพิมพ์ข้อความในโน้ต Freeform"); return; }
     const unknownSkus = new Set(items.filter((item) => item.category === "floor_material" && item.sku.trim() && !materials.some((material) => material.sku === item.sku.trim())).map((item) => item.sku.trim()));
     if (unknownSkus.size && !window.confirm(`พบ SKU ที่ไม่มีในคลัง:\n• ${Array.from(unknownSkus).join("\n• ")}\n\nยืนยันใช้เป็นข้อยกเว้นหรือไม่? ระบบจะบันทึกว่าเป็น SKU นอกคลัง`)) return;
     const exceptionNote = unknownSkus.size ? `อนุมัติข้อยกเว้น SKU นอกคลัง: ${Array.from(unknownSkus).join(", ")}` : null;
     setSaving(true); const { error } = await supabase.rpc("confirm_floor_work_order_v2", { p_work_order_id: order.id, p_items: rpcItems(unknownSkus), p_note: [note.trim(), exceptionNote].filter(Boolean).join("\n") || null }); setSaving(false);
-    if (error) toast.error(error.message); else { toast.success("ยืนยันใบสั่งงานและส่งให้คลังแล้ว"); void load(); }
+    if (error) toast.error(error.message); else { toast.success("ยืนยันใบสั่งงานและส่งให้คลังแล้ว"); void refreshAfterChange(); }
   }
   async function returnOrder() {
     if (!order) return; const reason = window.prompt(job?.source === "bbps" ? "ระบุข้อมูลที่ต้องให้ BBPS แก้ไข" : "ระบุข้อมูลที่ต้องให้ฝ่ายขายแก้ไข");
     if (!reason?.trim()) return; setSaving(true); const { error } = await supabase.rpc("return_floor_work_order_v3", { p_work_order_id: order.id, p_reason: reason.trim() }); setSaving(false);
-    if (error) toast.error(error.message); else { toast.success(job?.source === "bbps" ? "ส่งกลับ BBPS แล้ว" : "ส่งกลับฝ่ายขายแล้ว"); void load(); }
+    if (error) toast.error(error.message); else { toast.success(job?.source === "bbps" ? "ส่งกลับ BBPS แล้ว" : "ส่งกลับฝ่ายขายแล้ว"); void refreshAfterChange(); }
   }
   async function acceptWarehouse() {
     if (!order) return; setSaving(true); const { error } = await supabase.rpc("accept_floor_warehouse_order_v2", { p_work_order_id: order.id }); setSaving(false);
-    if (error) toast.error(error.message); else { toast.success("รับงานเตรียมสินค้าแล้ว"); void load(); }
+    if (error) toast.error(error.message); else { toast.success("รับงานเตรียมสินค้าแล้ว"); void refreshAfterChange(); }
   }
   async function completeWarehouse() {
-    if (!order) return; if (items.some((item) => item.actualQty === "" || Number(item.actualQty) < 0)) { toast.error("กรอกจำนวนหยิบจริงให้ครบทุกบรรทัด"); return; } if (!warehouseFiles.length) { toast.error("ต้องแนบรูปสินค้าที่เตรียมเสร็จอย่างน้อย 1 รูป"); return; }
+    if (!order) return; if (items.some((item) => !isFreeformNote(item) && (item.actualQty === "" || Number(item.actualQty) < 0))) { toast.error("กรอกจำนวนหยิบจริงให้ครบทุกบรรทัด"); return; } if (!warehouseFiles.length) { toast.error("ต้องแนบรูปสินค้าที่เตรียมเสร็จอย่างน้อย 1 รูป"); return; }
     setSaving(true); const paths: string[] = [];
     for (let index = 0; index < warehouseFiles.length; index++) { const file = warehouseFiles[index].file; const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-"); const path = `work-orders/${order.id}/warehouse/${Date.now()}-${index}-${safe}`; const { error } = await supabase.storage.from("job-photos").upload(path, file); if (error) { toast.error(error.message); setSaving(false); return; } paths.push(path); }
-    const actual = items.map((item) => ({ id: item.id, actualQty: Number(item.actualQty) }));
+    const actual = items.map((item) => ({ id: item.id, actualQty: isFreeformNote(item) ? 0 : Number(item.actualQty) }));
     const { error } = await supabase.rpc("complete_floor_warehouse_order_v2", { p_work_order_id: order.id, p_actual_items: actual, p_photo_paths: paths, p_note: note.trim() || null }); setSaving(false);
-    if (error) toast.error(error.message); else { toast.success("เตรียมสินค้าเสร็จและย้ายไปรอติดตั้งแล้ว"); clearWarehouseFiles(); void load(); }
+    if (error) toast.error(error.message); else { toast.success("เตรียมสินค้าเสร็จและย้ายไปรอติดตั้งแล้ว"); clearWarehouseFiles(); void refreshAfterChange(); }
   }
   async function copyLink(token: string) { await navigator.clipboard.writeText(`${window.location.origin}/work/${token}`); toast.success("คัดลอกลิงก์ช่างแล้ว"); }
   async function copyExternalLink() { if (!order?.external_share_token) return; await navigator.clipboard.writeText(`${window.location.origin}/status/${order.external_share_token}`); toast.success("คัดลอกลิงก์ภายนอกแล้ว"); }
-  async function rotateExternalLink() { if (!order || !window.confirm("ลิงก์เดิมจะเปิดไม่ได้ทันที ต้องการสร้างลิงก์ใหม่หรือไม่?")) return; setSaving(true); const { error } = await supabase.rpc("rotate_floor_external_share_v3", { p_work_order_id: order.id }); setSaving(false); if (error) toast.error(error.message); else { toast.success("สร้างลิงก์ใหม่แล้ว"); void load(); } }
-  async function toggleExternalLink() { if (!order) return; setSaving(true); const { error } = await supabase.rpc("set_floor_external_share_enabled_v3", { p_work_order_id: order.id, p_enabled: !order.external_share_enabled }); setSaving(false); if (error) toast.error(error.message); else { toast.success(order.external_share_enabled ? "ปิดลิงก์ภายนอกแล้ว" : "เปิดลิงก์ภายนอกแล้ว"); void load(); } }
+  async function rotateExternalLink() { if (!order || !window.confirm("ลิงก์เดิมจะเปิดไม่ได้ทันที ต้องการสร้างลิงก์ใหม่หรือไม่?")) return; setSaving(true); const { error } = await supabase.rpc("rotate_floor_external_share_v3", { p_work_order_id: order.id }); setSaving(false); if (error) toast.error(error.message); else { toast.success("สร้างลิงก์ใหม่แล้ว"); void refreshAfterChange(); } }
+  async function toggleExternalLink() { if (!order) return; setSaving(true); const { error } = await supabase.rpc("set_floor_external_share_enabled_v3", { p_work_order_id: order.id, p_enabled: !order.external_share_enabled }); setSaving(false); if (error) toast.error(error.message); else { toast.success(order.external_share_enabled ? "ปิดลิงก์ภายนอกแล้ว" : "เปิดลิงก์ภายนอกแล้ว"); void refreshAfterChange(); } }
 
   if (loading) return <div className="py-20 text-center text-slate-400">กำลังโหลดใบสั่งงาน…</div>;
   if (!job || !appointment || !order) return <div className="rounded-2xl border bg-white p-10 text-center text-slate-500">ไม่พบใบสั่งงานสำหรับงานนี้</div>;
-  const survey = jsonObject(job.survey_data); const canEdit = (role === "admin" || role === "head_technician") && order.status === "head_review";
-  const canWarehouse = role === "admin" || role === "warehouse"; const canManageExternal = role === "admin" || role === "head_technician";
+  const survey = jsonObject(job.survey_data); const canEdit = Boolean(role) && order.status === "head_review";
+  const canWarehouse = Boolean(role); const canManageExternal = Boolean(role);
   const materialNotes = bbpsMaterialText(job.raw_payload); const hasLead = assignments.some((row) => row.is_active && row.is_lead);
   const missing = [!job.customer_phone ? "เบอร์โทร" : null, !job.address && !job.location_url ? "สถานที่/แผนที่" : null, !job.product_name && !appointment.requirement ? "สินค้า/ขอบเขตงาน" : null, !hasLead ? "หัวหน้าทีมติดตั้ง" : null, !items.length ? "รายการวัสดุ/อุปกรณ์" : null, items.some((item) => item.category === "floor_material" && !item.sku.trim()) ? "SKU วัสดุปูพื้น" : null, items.some((item) => item.plannedQty === "") ? "จำนวนตามแผน" : null].filter((value): value is string => Boolean(value));
 
-  return <div className="mx-auto max-w-7xl space-y-5">
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><Link href="/operations" className="text-sm text-blue-600">← กลับรายการงาน</Link><div className="mt-3 text-xs font-semibold uppercase tracking-wider text-blue-600">FloorNow · ใบสั่งงานกลาง</div><h1 className="mt-1 text-2xl font-bold text-slate-950">{job.customer_name || job.job_no}</h1><p className="mt-1 text-sm text-slate-500">งาน #{job.job_no}{job.bill_no ? ` · บิล ${job.bill_no}` : ""} · Revision {order.revision}</p></div><span className={`w-fit rounded-full px-4 py-2 text-sm font-semibold ${workOrderStatusClass(order.status)}`}>{WORK_ORDER_STATUS_LABELS[order.status]}</span></div>
+  return <div className={`${embedded ? "space-y-5" : "mx-auto max-w-7xl space-y-5"}`}>
+    {!embedded && <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><Link href="/operations" className="text-sm text-blue-600">← กลับรายการงาน</Link><div className="mt-3 text-xs font-semibold uppercase tracking-wider text-blue-600">FloorNow · ใบสั่งงานกลาง</div><h1 className="mt-1 text-2xl font-bold text-slate-950">{job.customer_name || job.job_no}</h1><p className="mt-1 text-sm text-slate-500">งาน #{job.job_no}{job.bill_no ? ` · บิล ${job.bill_no}` : ""} · Revision {order.revision}</p></div><span className={`w-fit rounded-full px-4 py-2 text-sm font-semibold ${workOrderStatusClass(order.status)}`}>{WORK_ORDER_STATUS_LABELS[order.status]}</span></div>}
 
     {order.status === "returned_sales" ? <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4"><div className="font-semibold text-amber-900">{job.source === "bbps" ? "ส่งกลับให้ BBPS แก้ไขแล้ว" : "ส่งกลับให้ฝ่ายขายแก้ไขแล้ว"}</div><p className="mt-1 whitespace-pre-wrap text-sm text-amber-800">{order.returned_reason || job.flag_note || "ไม่ระบุเหตุผล"}</p>{job.source === "bbps" ? <p className="mt-2 text-xs text-amber-700">ต้องแก้ข้อมูลที่ BBPS CRM เมื่อ Sync revision ใหม่กลับมา งานจะเข้าคิวหัวหน้าช่างอีกครั้ง</p> : null}</div> : null}
     {canEdit ? <div className={`rounded-2xl border p-4 ${missing.length ? "border-amber-300 bg-amber-50" : "border-emerald-300 bg-emerald-50"}`}><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><div className={`font-semibold ${missing.length ? "text-amber-900" : "text-emerald-900"}`}>{missing.length ? `ยังขาด ${missing.length} รายการก่อนอนุมัติ` : "ข้อมูลพร้อมอนุมัติส่งคลัง"}</div><div className="mt-2 flex flex-wrap gap-2">{missing.map((item) => <span key={item} className="rounded-full bg-white px-2.5 py-1 text-xs text-amber-700">ต้องกรอก: {item}</span>)}</div></div><button onClick={() => void returnOrder()} disabled={saving} className="shrink-0 rounded-xl border border-amber-400 bg-white px-4 py-2.5 text-sm font-semibold text-amber-700">↩ ส่งกลับ{job.source === "bbps" ? " BBPS" : "ฝ่ายขาย"}</button></div></div> : null}
@@ -187,21 +213,21 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
         </Card>
         <Card title="3. วัสดุ อุปกรณ์ และของที่ต้องเตรียม" subtitle="หัวหน้ากำหนด SKU และจำนวนตามแผน คลังกรอกเฉพาะจำนวนหยิบจริง">
           {materialNotes.length ? <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4"><div className="text-sm font-semibold text-indigo-950">ข้อความวัสดุจาก BBPS</div><div className="mt-2 space-y-1">{materialNotes.map((text) => <p key={text} className="whitespace-pre-wrap text-sm text-indigo-800">{text}</p>)}</div><p className="mt-2 text-xs text-indigo-600">หัวหน้าช่างต้องเลือก SKU และจำนวนจริงด้านล่างก่อนอนุมัติ</p></div> : null}
-          <div className="space-y-3">{items.map((item, index) => { const stock = materials.find((row) => row.sku === item.sku); return <div key={item.id ?? index} className={`rounded-xl border p-4 ${item.category === "floor_material" && !item.sku ? "border-amber-300 bg-amber-50/50" : "border-slate-200"}`}>
+          <div className="space-y-3">{items.map((item, index) => { const stock = materials.find((row) => row.sku === item.sku); const freeform = isFreeformNote(item); return <div key={item.id ?? index} className={`rounded-xl border p-4 ${freeform ? "border-violet-200 bg-violet-50/50" : item.category === "floor_material" && !item.sku ? "border-amber-300 bg-amber-50/50" : "border-slate-200"}`}>
             <div className="mb-3 flex items-center justify-between"><div className="font-medium text-slate-900">รายการที่ {index + 1}</div>{canEdit ? <button onClick={() => removeItem(index)} className="text-xs font-medium text-red-500">ลบรายการ</button> : null}</div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {freeform ? <div className="rounded-xl border border-violet-200 bg-white p-3"><div className="text-sm font-semibold text-violet-950">📝 โน้ต Freeform</div><p className="mt-1 text-xs text-violet-700">คำสั่งหรือข้อควรระวังถึงคลังและทีมช่าง · ไม่ใช่รายการเบิก จึงไม่ต้องระบุ SKU หรือจำนวน</p><label className="mt-3 block text-xs font-medium text-slate-600">ข้อความ *<textarea value={item.note} disabled={!canEdit} onChange={(e) => patchItem(index, { note: e.target.value })} rows={4} placeholder="เช่น นัดลูกค้าก่อนเข้าหน้างาน / ห้ามวางวัสดุในโถง / ต้องนำอุปกรณ์ป้องกันเพิ่ม" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm disabled:bg-slate-100" /></label></div> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <label className="text-xs font-medium text-slate-500">ประเภท *<select value={item.category} disabled={!canEdit} onChange={(e) => patchItem(index, { category: e.target.value as WorkItemCategory })} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm">{WORK_ITEM_CATEGORIES.map((category) => <option key={category} value={category}>{WORK_ITEM_CATEGORY_LABELS[category]}</option>)}</select></label>
-              <label className="text-xs font-medium text-slate-500">SKU {item.category === "floor_material" ? "*" : ""}<input list="floor-material-skus" value={item.sku} disabled={!canEdit} onChange={(e) => selectMaterial(index, e.target.value)} placeholder="พิมพ์หรือเลือก SKU" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 font-mono text-sm" />{stock ? <span className="mt-1 block text-[11px] text-emerald-600">คงเหลือ {Number(stock.qty_on_hand ?? 0).toLocaleString()} {stock.unit || "หน่วย"}</span> : item.sku ? <span className="mt-1 block text-[11px] text-amber-600">ไม่พบ SKU นี้ในคลัง</span> : null}</label>
+              <label className="text-xs font-medium text-slate-500">SKU {item.category === "floor_material" ? "*" : ""}{item.category === "floor_material" ? <select value={item.sku} disabled={!canEdit} onChange={(e) => selectMaterial(index, e.target.value)} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 font-mono text-sm"><option value="">เลือก SKU</option>{materials.map((material) => <option key={material.id} value={material.sku}>{material.sku} · {material.name}</option>)}</select> : <input list="floor-material-skus" value={item.sku} disabled={!canEdit} onChange={(e) => selectMaterial(index, e.target.value)} placeholder="พิมพ์หรือเลือก SKU" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 font-mono text-sm" />}{stock?.qty_on_hand != null ? <span className="mt-1 block text-[11px] text-emerald-600">คงเหลือ {Number(stock.qty_on_hand).toLocaleString()} {stock.unit || "หน่วย"}</span> : item.sku ? <span className="mt-1 block text-[11px] text-slate-500">รายการบริการจาก Catalog · คลังยังไม่ได้ระบุยอดคงเหลือ</span> : null}</label>
               <label className="text-xs font-medium text-slate-500">ชื่อสินค้า/อุปกรณ์ *<input value={item.itemName} disabled={!canEdit} onChange={(e) => patchItem(index, { itemName: e.target.value })} placeholder="ชื่อรายการ" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label>
               <label className="text-xs font-medium text-slate-500">รุ่น สี ขนาด หรือล็อต<input value={item.specification} disabled={!canEdit} onChange={(e) => patchItem(index, { specification: e.target.value })} placeholder="เช่น Whitebuzz · 1.8 cm" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label>
               <div className="grid grid-cols-[1fr_100px] gap-2"><label className="text-xs font-medium text-slate-500">จำนวนตามแผน *<input type="number" min="0" step="0.01" value={item.plannedQty} disabled={!canEdit} onChange={(e) => patchItem(index, { plannedQty: e.target.value })} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label><label className="text-xs font-medium text-slate-500">หน่วย *<input value={item.unit} disabled={!canEdit} onChange={(e) => patchItem(index, { unit: e.target.value })} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label></div>
               <label className="text-xs font-medium text-slate-500">แหล่งที่มา *<select value={item.sourceType} disabled={!canEdit} onChange={(e) => patchItem(index, { sourceType: e.target.value })} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm"><option value="new">ของใหม่</option><option value="warehouse">ของในคลัง</option><option value="remnant">เศษวัสดุ</option><option value="bring_along">ช่างนำไป</option><option value="other">อื่น ๆ</option></select></label>
               <label className="text-xs font-medium text-slate-500 sm:col-span-2">หมายเหตุสำหรับคลัง/ช่าง<input value={item.note} disabled={!canEdit} onChange={(e) => patchItem(index, { note: e.target.value })} placeholder="ตำแหน่งใช้งาน วิธีแพ็ก หรือข้อควรระวัง" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm" /></label>
               <label className="text-xs font-medium text-slate-500">จำนวนหยิบจริง<input type="number" min="0" step="0.01" value={item.actualQty} disabled={order.status !== "warehouse_preparing" || !canWarehouse} onChange={(e) => patchItem(index, { actualQty: e.target.value })} placeholder="คลังกรอกเมื่อรับงาน" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm disabled:bg-slate-100" /></label>
-            </div>
+            </div>}
           </div>; })}</div>
           <datalist id="floor-material-skus">{materials.map((material) => <option key={material.id} value={material.sku}>{material.name}</option>)}</datalist>
-          {canEdit ? <div className="mt-3 flex flex-wrap gap-2">{WORK_ITEM_CATEGORIES.map((category) => <button key={category} onClick={() => addItem(category)} className="rounded-lg border border-dashed border-blue-300 px-3 py-2 text-xs text-blue-700">+ {WORK_ITEM_CATEGORY_LABELS[category]}</button>)}</div> : null}
+          {canEdit ? <div className="mt-3 flex flex-wrap gap-2">{WORK_ITEM_CATEGORIES.map((category) => <button key={category} onClick={() => addItem(category)} className="rounded-lg border border-dashed border-blue-300 px-3 py-2 text-xs text-blue-700">+ {WORK_ITEM_CATEGORY_LABELS[category]}</button>)}<button onClick={addFreeformNote} className="rounded-lg border border-dashed border-violet-300 bg-violet-50 px-3 py-2 text-xs font-medium text-violet-700">+ โน้ต Freeform</button></div> : null}
         </Card>
       </div>
 
@@ -228,4 +254,11 @@ export default function CentralWorkOrderPage({ params }: { params: Promise<{ job
       </div>
     </div>
   </div>;
+}
+
+export default function CentralWorkOrderPage() {
+  const inlineWorkOrder = useContext(InlineWorkOrderJobContext);
+  const routeParams = useParams<{ jobNo: string }>();
+  const jobNo = inlineWorkOrder?.jobNo ?? routeParams.jobNo;
+  return <CentralWorkOrderWorkspace jobNo={jobNo} embedded={Boolean(inlineWorkOrder)} onChanged={inlineWorkOrder?.onChanged} />;
 }

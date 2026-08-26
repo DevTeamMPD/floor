@@ -116,6 +116,9 @@ function suggestedMaterialMovements(order: CentralWorkOrder | null): MaterialMov
     return { thickness, color, widthCm: width, lengthCm: lengthMatch?.[1] ?? "", qty: String(item.actualQty ?? item.plannedQty ?? 1), note: [item.sku, item.itemName].filter(Boolean).join(" · ") };
   });
 }
+function isFreeformWorkNote(item: CentralWorkItem) {
+  return item.category === "tool" && item.sourceType === "other" && !item.sku && item.plannedQty === 0 && item.unit === "รายการ" && item.itemName === "โน้ต Freeform จากหัวหน้าช่าง";
+}
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><div className="text-xs font-medium text-slate-400">{label}</div><div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{children || "—"}</div></div>;
 }
@@ -563,7 +566,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
             {selected.source === "bbps" ? <BbpsWorkOrderDetails rawPayload={detailJob?.raw_payload} /> : null}
             {centralWorkOrder ? <WorkSection title="📦 ใบสั่งงานที่คลังเตรียมให้" subtitle={`Revision ${centralWorkOrder.revision} · ${centralWorkOrder.warehouseAssignee ? `ผู้เตรียม ${centralWorkOrder.warehouseAssignee}` : "ยังไม่มีผู้รับงานคลัง"}`}>
               <div className="mb-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800">สถานะ: {{ head_review: "รอหัวหน้าช่างตรวจ", returned_sales: "ส่งกลับฝ่ายขาย", warehouse_waiting: "รอคลังรับงาน", warehouse_preparing: "กำลังเตรียมสินค้า", ready_to_install: "รอติดตั้ง", installing: "กำลังติดตั้ง", waiting_cs: "รอ CS โทรประเมิน", closed: "ปิดงานแล้ว", cancelled: "ยกเลิก" }[centralWorkOrder.status] ?? centralWorkOrder.status}</div>
-              <div className="space-y-2">{centralWorkOrder.items.map((item) => <div key={item.id} className="rounded-xl border border-slate-200 p-3 text-sm"><div className="font-medium text-slate-900">{item.itemName}{item.sku ? ` · ${item.sku}` : ""}</div><div className="mt-1 text-xs text-slate-500">{item.specification || "ไม่ระบุสเปก"} · ตามแผน {item.plannedQty} {item.unit} · หยิบจริง {item.actualQty ?? "—"} {item.unit}</div>{item.note ? <div className="mt-1 text-xs text-amber-700">{item.note}</div> : null}</div>)}</div>
+              <div className="space-y-2">{centralWorkOrder.items.map((item) => isFreeformWorkNote(item) ? <div key={item.id} className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm"><div className="font-semibold text-violet-950">📝 โน้ต Freeform จากหัวหน้าช่าง</div><div className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-violet-900">{item.note || "—"}</div></div> : <div key={item.id} className="rounded-xl border border-slate-200 p-3 text-sm"><div className="font-medium text-slate-900">{item.itemName}{item.sku ? ` · ${item.sku}` : ""}</div><div className="mt-1 text-xs text-slate-500">{item.specification || "ไม่ระบุสเปก"} · ตามแผน {item.plannedQty} {item.unit} · หยิบจริง {item.actualQty ?? "—"} {item.unit}</div>{item.note ? <div className="mt-1 text-xs text-amber-700">{item.note}</div> : null}</div>)}</div>
               {centralWorkOrder.note ? <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">หมายเหตุ: {centralWorkOrder.note}</div> : null}
             </WorkSection> : null}
           </div>

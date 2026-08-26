@@ -21,6 +21,7 @@ const CORE_NAV: NavItem[] = [
   { href: "/cs-tracking", icon: "📞", label: "CS รอติดตาม", roles: ["admin", "cs"] },
   { href: "/dashboard", icon: "⭐", label: "คุณภาพและความพึงพอใจ", roles: ["admin", "cs", "executive"] },
   { href: "/exec", icon: "📈", label: "ภาพรวมผู้บริหาร", roles: ["admin", "executive"] },
+  { href: "/docs", icon: "📘", label: "คู่มือการทำงาน", roles: ["admin"] },
   { href: "/staff", icon: "👥", label: "บัญชีพนักงาน", roles: ["admin"] },
 ];
 

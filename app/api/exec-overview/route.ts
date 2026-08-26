@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { getCurrentStaff } from "@/lib/staff-server";
+import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -45,16 +45,21 @@ interface JobRow {
   customer_name: string | null; product_name: string | null; bill_no: string | null; handover_data: unknown; completed_date: string | null; eval_score: number | null; job_no: string; updated_at: string | null;
 }
 interface ZoneRow { job_no: string; width_cm: number | null; length_cm: number | null; }
+interface WorkOrderRow { status: string | null; updated_at: string | null; }
+
+const WORK_ORDER_STATUSES = [
+  "head_review", "returned_sales", "warehouse_waiting", "warehouse_preparing",
+  "ready_to_install", "installing", "waiting_cs", "closed",
+] as const;
 
 export async function GET() {
   const staff = await getCurrentStaff();
   if (!staff) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return NextResponse.json({ error: "Supabase env missing" }, { status: 500 });
-  const supabase = createClient(url, key);
+  // Preserve the signed-in employee session.  Work orders are intentionally
+  // protected by RLS and must not be read through an anonymous API client.
+  const supabase = await createClient();
   const today = new Date().toISOString().slice(0, 10);
 
   let revenue: { month: string; orders: number; qty: number; revenue: number }[] = [];
@@ -98,6 +103,33 @@ export async function GET() {
     if (jb.eval_score !== null && jb.eval_score !== undefined) evaluated++;
   }
   const completedByMonth = Object.keys(completedMap).sort().map((m) => ({ month: m, n: completedMap[m] }));
+
+  // This is the operational source of truth.  `install_jobs.stage` remains in
+  // the response for the legacy KPI cards, while this aggregation drives the
+  // Executive Pipeline so it matches the work that each department acts on.
+  const workOrderMap: Record<string, { n: number; sum: number; max: number }> = {};
+  for (const status of WORK_ORDER_STATUSES) workOrderMap[status] = { n: 0, sum: 0, max: 0 };
+  try {
+    const { data } = await supabase.from("floor_work_orders").select("status,updated_at").neq("status", "cancelled");
+    for (const row of (data ?? []) as WorkOrderRow[]) {
+      const status = row.status ?? "";
+      const bucket = workOrderMap[status];
+      if (!bucket) continue;
+      bucket.n++;
+      if (status !== "closed" && row.updated_at) {
+        const updated = new Date(row.updated_at).getTime();
+        if (!Number.isNaN(updated)) {
+          const days = Math.max(0, Math.floor((Date.now() - updated) / 86400000));
+          bucket.sum += days;
+          bucket.max = Math.max(bucket.max, days);
+        }
+      }
+    }
+  } catch { /* the dashboard can still show legacy KPIs if this query is unavailable */ }
+  const workOrders = WORK_ORDER_STATUSES.map((status) => {
+    const bucket = workOrderMap[status];
+    return { status, n: bucket.n, avgDays: bucket.n ? Math.round(bucket.sum / bucket.n) : 0, maxDays: bucket.max };
+  });
 
   // ---- lead time (รับออเดอร์ -> ปิดงาน) + pipeline aging/bottleneck ----
   const nowMs = Date.now();
@@ -182,5 +214,5 @@ export async function GET() {
     };
   } catch { /* defaults */ }
 
-  return NextResponse.json({ revenue, jobs: { total, byStage, bySource, byMonth, completedByMonth, done, active, overdue, evaluated }, leadTime, pipeline: { aging: pipelineAging, stuck: stuck.slice(0, 8) }, upcoming: upcoming.slice(0, 8), overdueList, waste, updatedAt: new Date().toISOString() });
+  return NextResponse.json({ revenue, jobs: { total, byStage, bySource, byMonth, completedByMonth, done, active, overdue, evaluated }, workOrders, leadTime, pipeline: { aging: pipelineAging, stuck: stuck.slice(0, 8) }, upcoming: upcoming.slice(0, 8), overdueList, waste, updatedAt: new Date().toISOString() });
 }

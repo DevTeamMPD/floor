@@ -30,8 +30,8 @@ export default function TechnicianAssignmentButton({ appointmentId, appointmentT
     void (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data } = await supabase.from("floor_staff_profiles").select("role").eq("id", user.id).maybeSingle();
-      setCanManage(["admin", "head_technician"].includes(String(data?.role ?? "")));
+      const { data } = await supabase.from("floor_staff_profiles").select("id").eq("id", user.id).maybeSingle();
+      setCanManage(Boolean(data));
     })();
   }, [supabase]);
 
@@ -47,7 +47,7 @@ export default function TechnicianAssignmentButton({ appointmentId, appointmentT
   }
 
   async function save() {
-    if (!canManage) { toast.error("เฉพาะหัวหน้าช่างที่จ่ายงานรายบุคคลได้"); return; }
+    if (!canManage) { toast.error("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; }
     if (!selected.length) { toast.error("กรุณาเลือกช่างอย่างน้อย 1 คน"); return; }
     const actualLead = selected.includes(leadId) ? leadId : selected[0];
     setSaving(true);

@@ -5,6 +5,7 @@ import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { ipGenOrderNo } from "@/lib/utils";
 import { CUT_TYPES, WELD_TYPES, FINISH_TYPES, FLOOR_CONDITIONS, EMPTY_SURVEY, surveyHasData, type SurveyData } from "@/lib/survey";
+import { WORK_ORDER_STATUS_LABELS, workOrderEventLabel, workOrderStatusClass, type WorkOrderStatus } from "@/lib/work-orders";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 
 interface Team { id: string; name: string }
@@ -32,6 +33,25 @@ interface DetailTechnician {
   firstOpenedAt: string | null;
   openCount: number;
   acknowledgedAt: string | null;
+}
+interface DetailWorkOrder {
+  id: string;
+  status: WorkOrderStatus;
+  updated_at: string;
+}
+interface DetailWorkEvent {
+  id: number;
+  event_type: string;
+  actor_name: string | null;
+  note: string | null;
+  photo_paths: string[] | null;
+  occurred_at: string;
+}
+interface PreviewPhoto {
+  url: string;
+  label: string;
+  occurredAt: string;
+  eventLabel: string;
 }
 interface LegacyNoteDetail {
   billNo: string;
@@ -157,6 +177,7 @@ function eachDay(a: string, b: string): string[] {
 export default function ShareQueuePage() {
   const supabase = useMemo(() => createClient(), []);
   const [staffRole, setStaffRole] = useState<string | null>(null);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
   const [view, setView] = useState<"month" | "week">("month");
   const [offset, setOffset] = useState(0);
   const now = new Date();
@@ -169,9 +190,14 @@ export default function ShareQueuePage() {
   const [form, setForm] = useState<FormState | null>(null);
   const [detail, setDetail] = useState<Appt | null>(null);
   const [detailJob, setDetailJob] = useState<JobDetail | null>(null);
+  const [detailWorkOrder, setDetailWorkOrder] = useState<DetailWorkOrder | null>(null);
+  const [detailWorkEvents, setDetailWorkEvents] = useState<DetailWorkEvent[]>([]);
+  const [previewPhotos, setPreviewPhotos] = useState<PreviewPhoto[]>([]);
+  const [previewIndex, setPreviewIndex] = useState(0);
   const [detailTechnicians, setDetailTechnicians] = useState<DetailTechnician[]>([]);
   const [detailTechniciansLoading, setDetailTechniciansLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showSurvey, setShowSurvey] = useState(false);
 
@@ -181,17 +207,24 @@ export default function ShareQueuePage() {
 
   useEffect(() => {
     let active = true;
-    supabase.rpc("get_my_floor_staff_profile").then(({ data }) => {
-      if (active) setStaffRole((data as { role?: string } | null)?.role ?? null);
+    supabase.rpc("get_my_floor_staff_profile").then(({ data, error }) => {
+      if (!active) return;
+      if (error) {
+        setPermissionError("ตรวจสอบสิทธิ์ไม่สำเร็จ กรุณารีเฟรชหรือล็อกอินใหม่");
+        return;
+      }
+      const role = (data as { role?: string } | null)?.role ?? null;
+      setStaffRole(role);
+      if (!role) setPermissionError("ไม่พบบัญชีพนักงาน Active ที่เชื่อมกับการเข้าสู่ระบบนี้");
     });
     return () => { active = false; };
   }, [supabase]);
 
   // Active staff may create and amend sales bookings.  Cancellation remains
   // limited to sales/admin because it removes a committed installation slot.
-  const canSell = staffRole === "admin" || staffRole === "sales" || staffRole === "staff";
-  const canCancel = staffRole === "admin" || staffRole === "sales";
-  const canDecide = staffRole === "admin" || staffRole === "head_technician";
+  const canSell = Boolean(staffRole);
+  const canCancel = Boolean(staffRole);
+  const canDecide = Boolean(staffRole);
 
   const week = useMemo(() => getWeekDays(offset), [offset]);
   const monthDays = useMemo(() => getMonthDays(mYear, mMonth), [mYear, mMonth]);
@@ -241,19 +274,30 @@ export default function ShareQueuePage() {
   }, [teamColor]);
 
   async function openDetail(a: Appt) {
-    setDetail(a); setDetailJob(null); setDetailTechnicians([]); setDetailTechniciansLoading(true);
+    setDetail(a); setDetailJob(null); setDetailWorkOrder(null); setDetailWorkEvents([]); setPreviewPhotos([]); setDetailTechnicians([]); setDetailTechniciansLoading(true);
     const jobRequest = a.job_id
       ? supabase.from("install_jobs")
         .select("bill_no, customer_name, customer_phone, address, location_url, product_name, survey_data, status, source, flag_note, raw_payload")
         .eq("job_no", a.job_id).maybeSingle()
       : Promise.resolve({ data: null });
-    const [jobResult, assignmentResult] = await Promise.all([
+    const [jobResult, assignmentResult, workOrderResult] = await Promise.all([
       jobRequest,
       supabase.from("appointment_technicians")
         .select("technician_id, is_lead, first_opened_at, open_count, acknowledged_at")
         .eq("appointment_id", a.id).eq("is_active", true).order("is_lead", { ascending: false }),
+      supabase.from("floor_work_orders")
+        .select("id, status, updated_at")
+        .eq("appointment_id", a.id).maybeSingle(),
     ]);
     if (jobResult.data) setDetailJob(jobResult.data as JobDetail);
+    if (workOrderResult.data) {
+      const workOrder = workOrderResult.data as DetailWorkOrder;
+      setDetailWorkOrder(workOrder);
+      const { data: events } = await supabase.from("floor_work_order_events")
+        .select("id, event_type, actor_name, note, photo_paths, occurred_at")
+        .eq("work_order_id", workOrder.id).order("occurred_at", { ascending: false }).limit(8);
+      setDetailWorkEvents((events ?? []) as DetailWorkEvent[]);
+    }
     const assigned = assignmentResult.data ?? [];
     const technicianIds = assigned.map((row) => row.technician_id);
     if (technicianIds.length) {
@@ -422,7 +466,9 @@ export default function ShareQueuePage() {
       if (form.id) {
         const first = mkRow(dates[0], "proposed");
         const { error } = await supabase.from("appointments")
-          .update({ tech_id: first.tech_id, slot_start: first.slot_start, slot_end: first.slot_end, notes: first.notes, requirement: first.requirement, job_id: first.job_id, status: "proposed", confirmed_at: null })
+          // Editing booking information must not silently revoke a confirmation.
+          // Queue status is changed only through the explicit status controls below.
+          .update({ tech_id: first.tech_id, slot_start: first.slot_start, slot_end: first.slot_end, notes: first.notes, requirement: first.requirement, job_id: first.job_id })
           .eq("id", form.id);
         if (error) throw error;
         const extra = dates.slice(1).map((d) => mkRow(d, "proposed"));
@@ -440,14 +486,16 @@ export default function ShareQueuePage() {
     setSaving(false);
   }
 
-  async function setStatus(a: Appt, status: string) {
-    if (!canDecide) { alert("เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่ยืนยันคิวได้"); return; }
+  async function setStatus(a: Appt, status: "proposed" | "confirmed") {
+    if (!canDecide) { alert("เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่เปลี่ยนสถานะคิวได้"); return; }
+    if (a.status === status) return;
+    setUpdatingStatus(true);
     const confirmedAt = status === "confirmed" ? new Date().toISOString() : null;
     const query = supabase.from("appointments").update({ status, confirmed_at: confirmedAt });
     const { error } = a.job_id
       ? await query.eq("job_id", a.job_id).neq("status", "cancelled")
       : await query.eq("id", a.id);
-    if (error) { alert("อัปเดตไม่สำเร็จ"); return; }
+    if (error) { alert("อัปเดตสถานะคิวไม่สำเร็จ"); setUpdatingStatus(false); return; }
     if (a.job_id) {
       const nextJobStatus = status === "confirmed" ? "ยืนยันคิวแล้ว" : "รอหัวหน้าช่างยืนยัน";
       const { error: jobError } = await supabase.from("install_jobs").update({
@@ -457,14 +505,15 @@ export default function ShareQueuePage() {
         flag_note: null,
         updated_at: new Date().toISOString(),
       }).eq("job_no", a.job_id);
-      if (jobError) { alert("อัปเดต Ticket ไม่สำเร็จ"); return; }
+      if (jobError) { alert("อัปเดต Ticket ไม่สำเร็จ"); setUpdatingStatus(false); return; }
       await supabase.from("job_activity").insert({
-        job_no: a.job_id, actor: "หัวหน้าช่าง", action: "confirm",
+        job_no: a.job_id, actor: "หัวหน้าช่าง", action: status === "confirmed" ? "confirm" : "reopen",
         field: "status", old_value: detailJob?.status ?? null, new_value: nextJobStatus,
       });
     }
     setDetail((d) => (d && d.id === a.id ? { ...d, status } : d));
-    load();
+    await load();
+    setUpdatingStatus(false);
   }
 
   async function sendBack(a: Appt) {
@@ -526,7 +575,7 @@ export default function ShareQueuePage() {
             <h1 className="text-lg font-bold text-slate-900">🗓️ ตารางคิวช่าง — MPD</h1>
             <p className="hidden text-xs text-slate-500 sm:block">ฝ่ายขายลงคิวและเปิดบิล · กดงานเพื่อดูรายละเอียดและการส่งต่อ</p>
           </div>
-          {canSell ? <button onClick={() => openAdd(new Date())} className="shrink-0 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700">+ ลงคิว</button> : <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-500">โหมดดูข้อมูล</span>}
+          {canSell ? <button onClick={() => openAdd(new Date())} className="shrink-0 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700">+ ลงคิว</button> : <span className={`rounded-lg px-3 py-2 text-xs ${permissionError ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-500"}`}>{permissionError || (staffRole === null ? "กำลังตรวจสอบสิทธิ์" : "โหมดดูข้อมูล")}</span>}
         </div>
       </header>
 
@@ -680,6 +729,63 @@ export default function ShareQueuePage() {
                     ) : <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">ยังไม่ได้จ่ายงานให้ช่างรายบุคคล</p>}
                   </section>
 
+                  <section className="rounded-2xl border border-blue-200 bg-blue-50/40 p-4 sm:p-5 md:col-span-2">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-blue-950">📍 สถานะการดำเนินงานและทีมช่าง</h3>
+                        <p className="mt-1 text-xs text-blue-700">ฝ่ายขายติดตามได้อย่างเดียว · ทีมปฏิบัติการเป็นผู้บันทึกสถานะ</p>
+                      </div>
+                      {detailWorkOrder && <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${workOrderStatusClass(detailWorkOrder.status)}`}>{WORK_ORDER_STATUS_LABELS[detailWorkOrder.status]}</span>}
+                    </div>
+                    {detailWorkOrder ? (() => {
+                      const fieldEvents = detailWorkEvents.filter((event) => ["installation_accepted", "field_arrived", "field_installing", "field_completed", "customer_signed"].includes(event.event_type));
+                      const latestFieldEvent = fieldEvents[0];
+                      const statusPhotos = fieldEvents.flatMap((event) => (event.photo_paths ?? []).map((path, index) => ({
+                        url: path.startsWith("http") ? path : photoUrl(path),
+                        label: `${workOrderEventLabel(event.event_type)} · รูปที่ ${index + 1}`,
+                        occurredAt: event.occurred_at,
+                        eventLabel: workOrderEventLabel(event.event_type),
+                      })));
+                      return <>
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          <div className="rounded-xl border border-blue-100 bg-white p-3">
+                            <div className="text-xs text-slate-500">สถานะช่างล่าสุด</div>
+                            {latestFieldEvent ? <>
+                              <div className="mt-1 text-sm font-semibold text-slate-900">{workOrderEventLabel(latestFieldEvent.event_type)}</div>
+                              <div className="mt-1 text-xs text-slate-500">{latestFieldEvent.actor_name || "ทีมช่าง"} · {new Date(latestFieldEvent.occurred_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Bangkok" })}</div>
+                              {latestFieldEvent.note && <div className="mt-2 text-xs text-slate-600">{latestFieldEvent.note}</div>}
+                            </> : <div className="mt-1 text-sm text-slate-500">ทีมช่างยังไม่ได้เริ่มบันทึกสถานะหน้างาน</div>}
+                          </div>
+                          <div className="rounded-xl border border-blue-100 bg-white p-3">
+                            <div className="text-xs text-slate-500">การส่งต่องานล่าสุด</div>
+                            {detailWorkEvents[0] ? <>
+                              <div className="mt-1 text-sm font-semibold text-slate-900">{workOrderEventLabel(detailWorkEvents[0].event_type)}</div>
+                              <div className="mt-1 text-xs text-slate-500">{detailWorkEvents[0].actor_name || "ระบบ"} · {new Date(detailWorkEvents[0].occurred_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Bangkok" })}</div>
+                            </> : <div className="mt-1 text-sm text-slate-500">รอบันทึกการส่งต่องาน</div>}
+                          </div>
+                        </div>
+                        {detailWorkEvents.length > 0 && <div className="mt-4 border-t border-blue-100 pt-3">
+                          <div className="mb-2 text-xs font-medium text-blue-900">ประวัติการดำเนินงานล่าสุด</div>
+                          <div className="space-y-2">{detailWorkEvents.slice(0, 5).map((event) => <div key={event.id} className="flex items-start justify-between gap-3 text-xs"><div className="min-w-0"><span className="font-medium text-slate-800">{workOrderEventLabel(event.event_type)}</span>{event.actor_name && <span className="text-slate-500"> · {event.actor_name}</span>}{event.note && <div className="mt-0.5 truncate text-slate-500">{event.note}</div>}</div><time className="shrink-0 text-slate-400">{new Date(event.occurred_at).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })}</time></div>)}</div>
+                        </div>}
+                        <div className="mt-4 border-t border-blue-100 pt-3">
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <div className="text-xs font-medium text-blue-900">รูปหลักฐานจากช่าง</div>
+                            {statusPhotos.length > 0 && <span className="rounded-full bg-white px-2 py-1 text-[11px] font-medium text-slate-500">{statusPhotos.length} รูป</span>}
+                          </div>
+                          {statusPhotos.length ? <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                            {statusPhotos.map((photo, index) => <button key={`${photo.url}-${index}`} type="button" onClick={() => { setPreviewPhotos(statusPhotos); setPreviewIndex(index); }} className="group relative aspect-square overflow-hidden rounded-xl border border-blue-200 bg-white text-left shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={photo.url} alt={photo.label} loading="lazy" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+                              <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">{index + 1}</span>
+                              <span className="absolute inset-x-0 top-0 bg-gradient-to-b from-black/60 to-transparent px-1.5 py-1 text-[10px] font-medium text-white">{photo.eventLabel}</span>
+                            </button>)}
+                          </div> : <p className="rounded-xl border border-dashed border-blue-200 bg-white px-3 py-3 text-xs text-slate-500">ช่างยังไม่ได้แนบรูปอัปเดตสถานะหน้างาน</p>}
+                        </div>
+                      </>;
+                    })() : <p className="mt-3 rounded-xl border border-dashed border-blue-200 bg-white px-3 py-3 text-sm text-slate-500">{detail.job_id ? "งานนี้ยังไม่มีใบสั่งงานกลาง จึงยังไม่มีสถานะคลังหรือสถานะหน้างานจากทีมช่าง" : "รายการคิวนี้ยังไม่ได้เปิดเป็นใบสั่งงาน"}</p>}
+                  </section>
+
                   {hasCustomerDetail && (
                     <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 md:col-span-2">
                       <h3 className="mb-4 text-sm font-semibold text-slate-900">👤 ลูกค้าและสถานที่ติดตั้ง</h3>
@@ -728,8 +834,26 @@ export default function ShareQueuePage() {
               </div>
 
               <footer className="shrink-0 border-t border-slate-200 bg-white px-4 py-3 sm:px-7">
-                <div className="flex flex-wrap justify-end gap-2">
-                  {canDecide && detail.status === "proposed" && <button onClick={() => setStatus(detail, "confirmed")} className="order-first grow rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 sm:order-none sm:grow-0">ยืนยันนัด</button>}
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {canDecide && detail.status !== "completed" && (
+                    <div className="mr-auto flex w-full items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 sm:w-auto">
+                      <span className="text-xs font-medium text-slate-600">อัปเดตสถานะคิว</span>
+                      <button
+                        type="button"
+                        disabled={updatingStatus || detail.status === "proposed"}
+                        onClick={() => setStatus(detail, "proposed")}
+                        className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 disabled:cursor-not-allowed disabled:opacity-45"
+                      >รอยืนยัน</button>
+                      <button
+                        type="button"
+                        disabled={updatingStatus || detail.status === "confirmed"}
+                        onClick={() => setStatus(detail, "confirmed")}
+                        className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-45"
+                      >{updatingStatus ? "กำลังบันทึก..." : "ยืนยันแล้ว"}</button>
+                    </div>
+                  )}
+                  {detail.status === "completed" && <p className="mr-auto text-xs text-emerald-700">สถานะเสร็จสิ้นถูกบันทึกจากใบงานติดตั้ง</p>}
+                  {!canDecide && detail.status !== "completed" && <p className="mr-auto text-xs text-slate-500">หัวหน้าช่างหรือผู้ดูแลระบบเป็นผู้เปลี่ยนสถานะคิว</p>}
                   {canDecide && detail.status === "proposed" && detail.job_id && <button onClick={() => sendBack(detail)} className="rounded-lg border border-amber-300 px-4 py-2.5 text-sm text-amber-700 hover:bg-amber-50">ส่งกลับแก้ไข</button>}
                   {canSell && !detail.ext_ref?.startsWith("bbps:") && <button onClick={() => openEdit(detail)} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50">แก้ไข</button>}
                   {canCancel && <button onClick={() => remove(detail)} className="rounded-lg border border-red-200 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50">ยกเลิกคิว</button>}
@@ -738,6 +862,34 @@ export default function ShareQueuePage() {
             </aside>
           </div>
         );
+      })()}
+
+      {/* Field evidence preview */}
+      {previewPhotos.length > 0 && previewPhotos[previewIndex] && (() => {
+        const currentPhoto = previewPhotos[previewIndex];
+        const hasPrevious = previewIndex > 0;
+        const hasNext = previewIndex < previewPhotos.length - 1;
+        return <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/90 p-3 sm:p-6" role="dialog" aria-modal="true" aria-label="ดูรูปหลักฐานหน้างาน">
+          <button type="button" className="absolute inset-0 cursor-default" onClick={() => setPreviewPhotos([])} aria-label="ปิดตัวอย่างรูป" />
+          <div className="relative z-10 flex h-full w-full max-w-5xl flex-col">
+            <div className="flex shrink-0 items-center justify-between gap-3 pb-3 text-white">
+              <div className="min-w-0"><div className="truncate text-sm font-semibold">{currentPhoto.label}</div><div className="mt-0.5 text-xs text-slate-300">{new Date(currentPhoto.occurredAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Bangkok" })} · {previewIndex + 1} / {previewPhotos.length}</div></div>
+              <button type="button" onClick={() => setPreviewPhotos([])} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/15 text-2xl hover:bg-white/25" aria-label="ปิด">×</button>
+            </div>
+            <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl bg-black">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={currentPhoto.url} alt={currentPhoto.label} className="h-full w-full object-contain" />
+              {hasPrevious && <button type="button" onClick={() => setPreviewIndex((index) => index - 1)} className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/55 px-4 py-3 text-2xl text-white hover:bg-black/75" aria-label="ดูรูปก่อนหน้า">‹</button>}
+              {hasNext && <button type="button" onClick={() => setPreviewIndex((index) => index + 1)} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/55 px-4 py-3 text-2xl text-white hover:bg-black/75" aria-label="ดูรูปถัดไป">›</button>}
+            </div>
+            {previewPhotos.length > 1 && <div className="mt-3 flex shrink-0 gap-2 overflow-x-auto pb-1">
+              {previewPhotos.map((photo, index) => <button key={`${photo.url}-${index}`} type="button" onClick={() => setPreviewIndex(index)} className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 ${index === previewIndex ? "border-white" : "border-transparent opacity-60 hover:opacity-100"}`} aria-label={`ดูรูปที่ ${index + 1}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={photo.url} alt="" className="h-full w-full object-cover" />
+              </button>)}
+            </div>}
+          </div>
+        </div>;
       })()}
 
       {/* Add / edit form */}
