@@ -56,31 +56,14 @@ export default function TechniciansPage() {
     }
 
     setResetting(resetTarget.id);
-    const nextToken = crypto.randomUUID();
-    const { error: updateError } = await supabase
-      .from("floor_technicians")
-      .update({ personal_token: nextToken, updated_at: new Date().toISOString() })
-      .eq("id", resetTarget.id);
-    if (updateError) {
-      setResetting(null);
-      toast.error("ออกลิงก์ใหม่ไม่สำเร็จ: " + updateError.message);
-      return;
-    }
-
-    const { data: pinSet, error: pinError } = await supabase.rpc("set_floor_technician_pin", {
-      p_personal_token: nextToken,
+    const { data, error } = await supabase.rpc("reset_floor_technician_access", {
+      p_technician_id: resetTarget.id,
       p_pin: pin,
     });
-    if (pinError || !pinSet) {
-      setResetting(null);
-      toast.error("ตั้ง PIN ใหม่ไม่สำเร็จ: " + (pinError?.message ?? "ไม่พบช่างที่ใช้งานอยู่"));
-      return;
-    }
-
-    const { error: deviceError } = await supabase.rpc("reset_floor_device_pin", { p_technician_id: resetTarget.id });
     setResetting(null);
-    if (deviceError) {
-      toast.error("ตั้ง PIN แล้ว แต่ถอดเครื่องเดิมไม่สำเร็จ: " + deviceError.message);
+    const nextToken = (data as { personalToken?: string } | null)?.personalToken;
+    if (error || !nextToken) {
+      toast.error("ตั้ง PIN และออกลิงก์ไม่สำเร็จ: " + (error?.message ?? "ระบบไม่ส่งลิงก์ใหม่กลับมา"));
       return;
     }
 
