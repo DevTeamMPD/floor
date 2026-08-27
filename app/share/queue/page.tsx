@@ -171,6 +171,7 @@ const WORK_END = "17:00";
 const QUEUE_DRAFT_KEY = "floornow:share-queue:draft:v1";
 const BOOKING_MIN_LEAD_DAYS = 3;
 const TEAM_B_MAX_LEAD_DAYS = 10;
+const UNRESTRICTED_BOOKING_EMAIL = "supakrit.k@mpdgroup.co";
 
 function bookingDate(daysAhead: number) {
   const date = new Date();
@@ -185,12 +186,14 @@ function isTeamB(team: Team | undefined) {
   return /\bB\s*$/i.test(team?.name ?? "");
 }
 
-function isTeamBBookingUnavailable(date: Date) {
+function isTeamBBookingUnavailable(date: Date, bypassRules = false) {
+  if (bypassRules) return false;
   const day = ymd(date);
   return day >= bookingDate(0) && day > bookingDate(TEAM_B_MAX_LEAD_DAYS);
 }
 
-function bookingRuleError(form: Pick<FormState, "date" | "endDate">, team: Team | undefined) {
+function bookingRuleError(form: Pick<FormState, "date" | "endDate">, team: Team | undefined, bypassRules = false) {
+  if (bypassRules) return null;
   const minimum = bookingDate(BOOKING_MIN_LEAD_DAYS);
   const maximum = isTeamB(team) ? bookingDate(TEAM_B_MAX_LEAD_DAYS) : null;
   if (form.date && form.date < minimum) {
@@ -257,6 +260,7 @@ function eachDay(a: string, b: string): string[] {
 export default function ShareQueuePage() {
   const supabase = useMemo(() => createClient(), []);
   const [staffRole, setStaffRole] = useState<string | null>(null);
+  const [staffEmail, setStaffEmail] = useState<string | null>(null);
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const [view, setView] = useState<"month" | "week">("month");
   const [offset, setOffset] = useState(0);
@@ -293,8 +297,9 @@ export default function ShareQueuePage() {
 
   useEffect(() => {
     let active = true;
-    supabase.rpc("get_my_floor_staff_profile").then(({ data, error }) => {
+    Promise.all([supabase.rpc("get_my_floor_staff_profile"), supabase.auth.getUser()]).then(([{ data, error }, { data: authData }]) => {
       if (!active) return;
+      setStaffEmail(authData.user?.email?.trim().toLowerCase() ?? null);
       if (error) {
         setPermissionError("ตรวจสอบสิทธิ์ไม่สำเร็จ กรุณารีเฟรชหรือล็อกอินใหม่");
         return;
@@ -339,10 +344,11 @@ export default function ShareQueuePage() {
   const canSell = Boolean(staffRole);
   const canCancel = Boolean(staffRole);
   const canDecide = Boolean(staffRole);
+  const canBypassBookingRules = staffEmail === UNRESTRICTED_BOOKING_EMAIL;
   const selectedFormTeam = form ? teams.find((team) => team.id === form.tech_id) : undefined;
-  const selectedFormRuleError = form ? bookingRuleError(form, selectedFormTeam) : null;
+  const selectedFormRuleError = form ? bookingRuleError(form, selectedFormTeam, canBypassBookingRules) : null;
   const availableFormTeams = form ? teams.filter((team) => {
-    if (form.id || !isTeamB(team)) return true;
+    if (canBypassBookingRules || form.id || !isTeamB(team)) return true;
     const max = bookingDate(TEAM_B_MAX_LEAD_DAYS);
     return (!form.date || form.date <= max) && (!form.endDate || form.endDate <= max);
   }) : teams;
@@ -467,7 +473,7 @@ export default function ShareQueuePage() {
     if (!canSell) return;
     const selectedDate = ymd(date);
     const minimum = bookingDate(BOOKING_MIN_LEAD_DAYS);
-    if (selectedDate < minimum) {
+    if (!canBypassBookingRules && selectedDate < minimum) {
       setBookingNotice({
         title: "วันนี้ยังเปิดคิวไม่ได้",
         message: `คลังต้องใช้เวลาเตรียมสินค้าอย่างน้อย ${BOOKING_MIN_LEAD_DAYS} วัน\nเร็วที่สุดที่เลือกได้คือ ${new Date(`${minimum}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" })}`,
@@ -538,7 +544,7 @@ export default function ShareQueuePage() {
     if (!form) return;
     if (!form.tech_id) { alert("กรุณาเลือกทีมช่าง"); return; }
     if (!form.date) { alert("กรุณาเลือกวันที่"); return; }
-    const dateRuleError = bookingRuleError(form, teams.find((team) => team.id === form.tech_id));
+    const dateRuleError = bookingRuleError(form, teams.find((team) => team.id === form.tech_id), canBypassBookingRules);
     if (dateRuleError) { setBookingNotice({ title: "ยังบันทึกคิวไม่ได้", message: dateRuleError }); return; }
     if ((form.end || "12:00") <= (form.start || "09:00")) { alert("เวลาสิ้นสุดต้องหลังเวลาเริ่ม"); return; }
     const holidayMode = /วันหยุด|หยุด|ลาพัก|ไม่รับงาน/.test(form.notes) && !form.bill_no.trim() && !form.customer_name.trim();
@@ -871,7 +877,7 @@ export default function ShareQueuePage() {
               {monthDays.map((d) => {
                 const inMonth = d.getMonth() === mMonth;
                 const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
-                const teamBUnavailable = isTeamBBookingUnavailable(d);
+                const teamBUnavailable = isTeamBBookingUnavailable(d, canBypassBookingRules);
                 return (
                   <div key={d.toISOString()} onClick={() => canSell && openAdd(d)} title={canSell ? "จิ้มเพื่อลงคิว" : "ดูคิวงาน"} className={`group min-h-[96px] border-b border-r border-slate-100 p-1 flex flex-col ${canSell ? "cursor-pointer hover:bg-blue-50/40" : ""} ${inMonth ? "" : "bg-slate-50/60"}`}>
                     <div className="flex items-center justify-between px-0.5">
@@ -896,7 +902,7 @@ export default function ShareQueuePage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
             {week.map((d) => {
               const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
-              const teamBUnavailable = isTeamBBookingUnavailable(d);
+                const teamBUnavailable = isTeamBBookingUnavailable(d, canBypassBookingRules);
               return (
                 <div key={d.toISOString()} className={`bg-white rounded-xl border ${isToday(d) ? "border-blue-400 ring-1 ring-blue-300" : "border-slate-200"} overflow-hidden flex flex-col min-h-[140px]`}>
                   <div className={`px-2 py-1.5 text-center border-b ${isToday(d) ? "bg-blue-50" : "bg-slate-50"}`}>
@@ -1210,19 +1216,19 @@ export default function ShareQueuePage() {
                   <select value={form.tech_id} onChange={(e) => {
                     const next = { ...form, tech_id: e.target.value };
                     setForm(next);
-                    const message = bookingRuleError(next, teams.find((team) => team.id === e.target.value));
+                    const message = bookingRuleError(next, teams.find((team) => team.id === e.target.value), canBypassBookingRules);
                     if (message) setBookingNotice({ title: "ทีมนี้ยังรับคิววันดังกล่าวไม่ได้", message });
                   }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white">
                     <option value="">— เลือกทีมช่าง —</option>
                     {availableFormTeams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
-                  <p className="mt-1 text-[11px] text-slate-500">คลังต้องเตรียมสินค้า: ทุกทีมจองได้ตั้งแต่ {BOOKING_MIN_LEAD_DAYS} วันล่วงหน้า{isTeamB(selectedFormTeam) ? ` · ทีม B เลือกได้ไม่เกิน ${TEAM_B_MAX_LEAD_DAYS} วันล่วงหน้า` : ""}</p>
+                  <p className="mt-1 text-[11px] text-slate-500">{canBypassBookingRules ? "✓ บัญชีนี้ได้รับสิทธิ์ลงคิวได้ทุกวันและทุกทีม" : `คลังต้องเตรียมสินค้า: ทุกทีมจองได้ตั้งแต่ ${BOOKING_MIN_LEAD_DAYS} วันล่วงหน้า${isTeamB(selectedFormTeam) ? ` · ทีม B เลือกได้ไม่เกิน ${TEAM_B_MAX_LEAD_DAYS} วันล่วงหน้า` : ""}`}</p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="text-xs text-slate-500 block mb-1">วันที่เริ่ม</label>
-                    <input type="date" value={form.date} min={bookingDate(BOOKING_MIN_LEAD_DAYS)} max={isTeamB(selectedFormTeam) ? bookingDate(TEAM_B_MAX_LEAD_DAYS) : undefined} onChange={(e) => {
-                      const teamBOutOfRange = isTeamB(selectedFormTeam) && e.target.value > bookingDate(TEAM_B_MAX_LEAD_DAYS);
+                    <input type="date" value={form.date} min={canBypassBookingRules ? undefined : bookingDate(BOOKING_MIN_LEAD_DAYS)} max={!canBypassBookingRules && isTeamB(selectedFormTeam) ? bookingDate(TEAM_B_MAX_LEAD_DAYS) : undefined} onChange={(e) => {
+                      const teamBOutOfRange = !canBypassBookingRules && isTeamB(selectedFormTeam) && e.target.value > bookingDate(TEAM_B_MAX_LEAD_DAYS);
                       const fallbackTeam = teamBOutOfRange ? teams.find((team) => !isTeamB(team)) : undefined;
                       const next = { ...form, tech_id: fallbackTeam?.id ?? form.tech_id, date: e.target.value, endDate: (!form.endDate || form.endDate < e.target.value) ? e.target.value : form.endDate };
                       setForm(next);
@@ -1233,16 +1239,16 @@ export default function ShareQueuePage() {
                         });
                         return;
                       }
-                      const message = bookingRuleError(next, selectedFormTeam);
+                      const message = bookingRuleError(next, selectedFormTeam, canBypassBookingRules);
                       if (message) setBookingNotice({ title: "เลือกวันดังกล่าวไม่ได้", message });
                     }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500 block mb-1">ถึงวันที่</label>
-                    <input type="date" value={form.endDate} min={form.date > bookingDate(BOOKING_MIN_LEAD_DAYS) ? form.date : bookingDate(BOOKING_MIN_LEAD_DAYS)} max={isTeamB(selectedFormTeam) ? bookingDate(TEAM_B_MAX_LEAD_DAYS) : undefined} onChange={(e) => {
+                    <input type="date" value={form.endDate} min={canBypassBookingRules ? form.date || undefined : (form.date > bookingDate(BOOKING_MIN_LEAD_DAYS) ? form.date : bookingDate(BOOKING_MIN_LEAD_DAYS))} max={!canBypassBookingRules && isTeamB(selectedFormTeam) ? bookingDate(TEAM_B_MAX_LEAD_DAYS) : undefined} onChange={(e) => {
                       const next = { ...form, endDate: e.target.value };
                       setForm(next);
-                      const message = bookingRuleError(next, selectedFormTeam);
+                      const message = bookingRuleError(next, selectedFormTeam, canBypassBookingRules);
                       if (message) setBookingNotice({ title: "เลือกวันสิ้นสุดดังกล่าวไม่ได้", message });
                     }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                   </div>
