@@ -381,16 +381,21 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     if (!statusFiles.length) { setProgressError("กรุณาถ่ายหรือเลือกรูปสถานะอย่างน้อย 1 รูป"); return; }
     if (next.status === "travelling" && (!pickedSheetCount.trim() || Number(pickedSheetCount) < 0)) { setProgressError("กรุณาระบุจำนวนแผ่นที่หยิบจริง"); return; }
     setSaving(true); setProgressError(null);
-    const paths: string[] = [];
+    const uploadResults = await Promise.all(statusFiles.map(async (item, index) => {
+      const file = item.file;
+      const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `work/${selected.appointmentId}/${next.status}/${Date.now()}-${index}-${safe}`;
+      const { error } = await supabase.storage.from("job-photos").upload(path, file, { upsert: false, contentType: file.type || "image/jpeg" });
+      return { path, error };
+    }));
+    const paths = uploadResults.filter((result) => !result.error).map((result) => result.path);
+    const failedCount = uploadResults.length - paths.length;
+    if (failedCount > 0) {
+      setSaving(false);
+      setProgressError(`อัปโหลดรูปไม่สำเร็จ ${failedCount} จาก ${uploadResults.length} รูป (รูปที่อัปโหลดสำเร็จแล้ว ${paths.length} รูปถูกเก็บไว้ ไม่ต้องถ่ายซ้ำ กดบันทึกอีกครั้งเพื่อลองใหม่)`);
+      return;
+    }
     try {
-      for (let index = 0; index < statusFiles.length; index++) {
-        const file = statusFiles[index].file;
-        const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-        const path = `work/${selected.appointmentId}/${next.status}/${Date.now()}-${index}-${safe}`;
-        const { error } = await supabase.storage.from("job-photos").upload(path, file, { upsert: false, contentType: file.type || "image/jpeg" });
-        if (error) throw error;
-        paths.push(path);
-      }
       const { error } = await supabase.rpc("record_technician_work_status", {
         p_token: token, p_pin: pin.trim(), p_assignment_id: selected.assignmentId,
         p_status: next.status, p_photo_paths: paths,
@@ -401,7 +406,8 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       clearStatusFiles(); setStatusNote("");
       await reloadProgress(selected.assignmentId);
     } catch (error) {
-      if (paths.length) await supabase.storage.from("job-photos").remove(paths);
+      // รูปที่อัปโหลดสำเร็จแล้วถูกเก็บไว้โดยตั้งใจ ไม่ลบทิ้ง เพราะการบังคับให้ช่างถ่ายรูปซ้ำกลางหน้างาน
+      // เมื่อ RPC ล้มเหลวชั่วคราว เป็นการลงโทษช่างสำหรับความผิดพลาดที่ไม่ใช่ของช่าง
       setProgressError(workErrorMessage(error));
     }
     setSaving(false);
