@@ -4,16 +4,12 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { ROLE_LABELS, STAFF_ROLES, type StaffProfile, type StaffRole } from "@/lib/staff";
+import { ROLE_LABELS, type StaffProfile, type StaffRole } from "@/lib/staff";
 
 interface NavItem { href: string; icon: string; label: string; roles: StaffRole[] }
 
-// หน้าแรกและคู่มือการทำงานเป็นจุดร่วมของทุกฝ่าย (ทุก role ถูก redirect มา /home
-// หลัง login และ /docs อธิบายขั้นตอนของทุกแผนก) จึงต้องเปิดให้ทุก role เห็น
-const ALL_ROLES = [...STAFF_ROLES];
-
 const CORE_NAV: NavItem[] = [
-  { href: "/home", icon: "🏠", label: "หน้าแรก", roles: ALL_ROLES },
+  { href: "/home", icon: "🏠", label: "หน้าแรก", roles: ["admin"] },
   { href: "/sales-queue", icon: "🗓️", label: "จองคิว", roles: ["admin", "sales"] },
   { href: "/tech-queue", icon: "👷", label: "คิวทีมช่าง", roles: ["admin", "sales"] },
   { href: "/operations", icon: "📥", label: "ต้องตัดสินใจ", roles: ["admin", "head_technician"] },
@@ -25,7 +21,7 @@ const CORE_NAV: NavItem[] = [
   { href: "/cs-tracking", icon: "📞", label: "CS รอติดตาม", roles: ["admin", "cs"] },
   { href: "/dashboard", icon: "⭐", label: "คุณภาพและความพึงพอใจ", roles: ["admin", "cs", "executive"] },
   { href: "/exec", icon: "📈", label: "ภาพรวมผู้บริหาร", roles: ["admin", "executive"] },
-  { href: "/docs", icon: "📘", label: "คู่มือการทำงาน", roles: ALL_ROLES },
+  { href: "/docs", icon: "📘", label: "คู่มือการทำงาน", roles: ["admin"] },
   { href: "/staff", icon: "👥", label: "บัญชีพนักงาน", roles: ["admin"] },
 ];
 
@@ -53,9 +49,9 @@ export default function Sidebar({ staff }: { staff: StaffProfile }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
-  // แสดงเมนูตาม role ที่กำหนดใน NavItem.roles (admin มีอยู่ในทุก item จึงเห็นครบ)
-  // role "staff" (ยังไม่ระบุหน้าที่/ไม่อยู่ใน roles ของ item ใด) คงพฤติกรรมเดิม = เห็นทั้งหมด กันไม่ให้เมนูว่าง
-  const canSee = useMemo(() => (item: NavItem) => staff.role === "staff" || item.roles.includes(staff.role), [staff.role]);
+  // ทุกฝ่ายเห็นข้อมูลและหน้าปฏิบัติงานชุดเดียวกัน; ยกเว้นการจัดการบัญชีพนักงาน
+  // ซึ่งเป็นการตั้งค่าระบบและยังต้องเป็น Admin-only.
+  const canSee = useMemo(() => (item: NavItem) => item.href !== "/staff" || staff.role === "admin", [staff.role]);
   const core = useMemo(() => CORE_NAV.filter(canSee), [canSee]);
   const experimental = useMemo(() => EXPERIMENTAL_NAV.filter(canSee), [canSee]);
   const mobile = useMemo(() => {
