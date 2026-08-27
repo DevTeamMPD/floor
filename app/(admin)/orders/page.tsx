@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { Badge } from "@/components/ui/badge";
 import {
   WORK_ORDER_STATUSES,
   WORK_ORDER_STATUS_LABELS,
@@ -153,7 +154,7 @@ export default function WorkOrdersPage() {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="truncate font-semibold text-slate-950">{job?.customer_name || order.job_no}</h2>
-                {job?.source === "bbps" ? <span className="rounded bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-700">BBPS</span> : null}
+                {job?.source === "bbps" ? <Badge tone="orange">BBPS</Badge> : null}
               </div>
               <p className="mt-1 text-xs text-slate-400">#{order.job_no}{job?.bill_no ? ` · บิล ${job.bill_no}` : ""}</p>
             </div>

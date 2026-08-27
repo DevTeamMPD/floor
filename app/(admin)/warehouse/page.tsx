@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 import { createClient } from "@/lib/supabase/client";
 import { WORK_ORDER_STATUS_LABELS, type WorkOrder, type WorkOrderItem, workOrderStatusClass } from "@/lib/work-orders";
 
@@ -18,7 +19,7 @@ export default function WarehouseWorkspacePage() {
   const [staff, setStaff] = useState<Record<string, Staff>>({}); const [items, setItems] = useState<WorkOrderItem[]>([]); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState<string | null>(null); const [canAct, setCanAct] = useState(false);
   const load = useCallback(async () => {
     setLoading(true); const { data: orderRows, error } = await supabase.from("floor_work_orders").select("*").in("status", ["warehouse_waiting", "warehouse_preparing", "ready_to_install"]).order("updated_at");
-    if (error) { toast.error(error.message); setLoading(false); return; }
+    if (error) { toast.error(floorErrorMessage(error)); setLoading(false); return; }
     const rows = (orderRows ?? []) as WorkOrder[]; setOrders(rows);
     const { data: { user } } = await supabase.auth.getUser();
     const [jobResult, apptResult, staffResult, itemResult, profileResult] = await Promise.all([
@@ -32,7 +33,7 @@ export default function WarehouseWorkspacePage() {
     setJobs(Object.fromEntries(((jobResult.data ?? []) as Job[]).map((row) => [row.job_no, row]))); setAppointments(Object.fromEntries(((apptResult.data ?? []) as Appointment[]).map((row) => [row.id, row]))); setStaff(Object.fromEntries(((staffResult.data ?? []) as Staff[]).map((row) => [row.id, row]))); setItems((itemResult.data ?? []) as WorkOrderItem[]); setLoading(false);
   }, [supabase]);
   useEffect(() => { void load(); }, [load]);
-  async function accept(id: string) { if (!canAct) { toast.error("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; } setSaving(id); const { error } = await supabase.rpc("accept_floor_warehouse_order_v2", { p_work_order_id: id }); setSaving(null); if (error) toast.error(error.message); else { toast.success("รับงานแล้ว"); void load(); } }
+  async function accept(id: string) { if (!canAct) { toast.error("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; } setSaving(id); const { error } = await supabase.rpc("accept_floor_warehouse_order_v2", { p_work_order_id: id }); setSaving(null); if (error) toast.error(floorErrorMessage(error)); else { toast.success("รับงานแล้ว"); void load(); } }
   const columns = ["warehouse_waiting", "warehouse_preparing", "ready_to_install"] as const;
   return <div className="mx-auto max-w-7xl"><div><div className="text-xs font-semibold uppercase tracking-wider text-blue-600">คลังสินค้า</div><h1 className="mt-1 text-2xl font-bold text-slate-950">เตรียมสินค้าสำหรับติดตั้ง</h1><p className="mt-1 text-sm text-slate-500">รับงาน → ตรวจรายการ → บันทึกจำนวนจริงและรูป → ส่งไปรอติดตั้ง</p></div>
     {!canAct && !loading ? <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">กรุณาเข้าสู่ระบบด้วยบัญชีพนักงาน Active เพื่อดำเนินการ</div> : null}

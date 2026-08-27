@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 
 const SECTIONS = [
   { key: "overall", label: "ความพึงพอใจโดยรวม" },
@@ -51,6 +52,7 @@ function EvalForm() {
   const [issueType, setIssueType] = useState("");
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) { setState("invalid"); return; }
@@ -82,8 +84,9 @@ function EvalForm() {
     e.preventDefault();
     if (!token || !job) return;
     setSubmitting(true);
+    setSubmitError(null);
     const overall = scores["overall"] ?? 0;
-    await supabase
+    const { error: evalError } = await supabase
       .from("job_evals")
       .update({
         score_overall: overall,
@@ -97,10 +100,18 @@ function EvalForm() {
       })
       .eq("token", token)
       .is("submitted_at", null);
-    await supabase
+    if (evalError) {
+      setSubmitting(false);
+      setSubmitError(`บันทึกคะแนนไม่สำเร็จ: ${floorErrorMessage(evalError)}`);
+      return;
+    }
+    const { error: jobError } = await supabase
       .from("install_jobs")
       .update({ eval_score: overall })
       .eq("job_no", jobNo);
+    if (jobError) {
+      console.error(jobError);
+    }
     setState("done");
   }
 
@@ -114,6 +125,7 @@ function EvalForm() {
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-lg max-w-md w-full p-6">
         <div className="text-center mb-6">
+          <div className="text-xs font-semibold uppercase tracking-wider text-blue-600">MPD GROUP · FloorNow</div>
           <div className="text-4xl mb-2">🌟</div>
           <h1 className="text-xl font-semibold">ประเมินผลงานติดตั้ง</h1>
           <p className="text-slate-500 text-sm mt-1">{job?.customer} — {job?.product}</p>
@@ -168,6 +180,9 @@ function EvalForm() {
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
           </div>
+          {submitError && (
+            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{submitError}</div>
+          )}
           <button
             type="submit"
             disabled={submitting || !scores["overall"]}
