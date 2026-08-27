@@ -434,15 +434,19 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     setAuthError(null);
     const ok = await load(pin);
     if (!ok) {
-      setAuthError("PIN ไม่ถูกต้อง หรือยังไม่ได้ตั้ง PIN ให้ลิงก์นี้");
+      // RPC (get_technician_workspace) ไม่ส่ง error กลับมาแยกกรณี "PIN ผิด" กับ
+      // "ยังไม่ได้ตั้ง PIN" — ทั้งสองกรณีได้ผลลัพธ์เหมือนกันทุกประการจากฝั่ง client
+      // จึงยังต้องใช้ข้อความเดียว แต่ทำให้สั่งการได้ชัดเจนว่าต้องทำอะไรต่อ
+      setAuthError("PIN ไม่ถูกต้อง หรือยังไม่ได้ตั้ง PIN — ลองพิมพ์ใหม่อีกครั้ง หากยังไม่สำเร็จให้แจ้งหัวหน้าช่างตั้ง PIN ให้ลิงก์นี้ใหม่");
       setLoading(false);
     }
   }
 
   if (loading) return <main className="min-h-screen bg-slate-50 grid place-items-center text-slate-500">กำลังโหลดตารางงาน…</main>;
-  if (!workspace) return <main className="min-h-screen bg-slate-50 grid place-items-center p-6">
-    <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="text-xs font-medium uppercase tracking-wide text-slate-400">FloorNow · หน้างานของฉัน</div>
+  if (!workspace) return <main className="min-h-screen bg-slate-950 px-4 py-10 grid place-items-center">
+    <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-6">
+      <div className="text-xs font-semibold uppercase tracking-wider text-blue-600">MPD GROUP · FloorNow</div>
+      <div className="mt-2 text-xs font-medium uppercase tracking-wide text-slate-400">FloorNow · หน้างานของฉัน</div>
       <h1 className="mt-2 text-xl font-semibold text-slate-900">ใส่ PIN เพื่อเปิดตารางงาน</h1>
       <p className="mt-1 text-sm text-slate-500">ใช้รหัสจากหัวหน้าช่างร่วมกับลิงก์ประจำตัวนี้</p>
       <div className="mt-4 space-y-3">
@@ -453,7 +457,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
             onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
             inputMode="numeric"
             autoComplete="one-time-code"
-            placeholder="123456"
+            placeholder="••••••"
             className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-3 text-base outline-none focus:border-blue-500"
           />
         </div>
@@ -461,7 +465,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
         <button
           onClick={() => void unlock()}
           disabled={!pin.trim()}
-          className="w-full rounded-xl bg-blue-600 px-4 py-3 font-medium text-white disabled:opacity-50"
+          className="w-full rounded-xl bg-blue-600 px-4 py-3 font-medium text-white hover:bg-blue-700 disabled:bg-slate-300 disabled:text-slate-500"
         >
           เปิดตารางงาน
         </button>
