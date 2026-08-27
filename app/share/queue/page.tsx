@@ -39,6 +39,8 @@ interface DetailWorkOrder {
   id: string;
   status: WorkOrderStatus;
   updated_at: string;
+  external_share_token: string;
+  external_share_enabled: boolean;
 }
 interface DetailWorkEvent {
   id: number;
@@ -53,6 +55,11 @@ interface PreviewPhoto {
   label: string;
   occurredAt: string;
   eventLabel: string;
+}
+interface CustomerSummary {
+  caption: string;
+  photos: string[];
+  updatedAt?: string;
 }
 interface LegacyNoteDetail {
   billNo: string;
@@ -109,6 +116,10 @@ function getMonthDays(year: number, month: number): Date[] {
 function fmtDate(d: Date) { return d.toLocaleDateString("th-TH", { day: "numeric", month: "short" }); }
 function fmtTime(iso: string) { return new Date(iso).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" }); }
 function fmtFullDate(iso: string) { return new Date(iso).toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Bangkok" }); }
+function customerSummaryOf(survey: SurveyData | null): CustomerSummary {
+  const value = survey && typeof survey === "object" ? (survey as SurveyData & { customerSummary?: Partial<CustomerSummary> }).customerSummary : null;
+  return { caption: typeof value?.caption === "string" ? value.caption : "", photos: Array.isArray(value?.photos) ? value.photos.filter((item): item is string => typeof item === "string") : [], updatedAt: value?.updatedAt };
+}
 function ymd(d: Date) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 function sameDay(d: Date, iso: string) { const x = new Date(iso); return d.getFullYear() === x.getFullYear() && d.getMonth() === x.getMonth() && d.getDate() === x.getDate(); }
 function isToday(d: Date) { const n = new Date(); return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate(); }
@@ -172,6 +183,11 @@ function isTeamB(team: Team | undefined) {
   // Master data currently contains both "ทีม B" and the legacy typo "ทึม B".
   // The stable business marker is the final B, not the Thai prefix.
   return /\bB\s*$/i.test(team?.name ?? "");
+}
+
+function isTeamBBookingUnavailable(date: Date) {
+  const day = ymd(date);
+  return day >= bookingDate(0) && day > bookingDate(TEAM_B_MAX_LEAD_DAYS);
 }
 
 function bookingRuleError(form: Pick<FormState, "date" | "endDate">, team: Team | undefined) {
@@ -266,6 +282,10 @@ export default function ShareQueuePage() {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showSurvey, setShowSurvey] = useState(false);
+  const [showCustomerSummary, setShowCustomerSummary] = useState(false);
+  const [customerSummary, setCustomerSummary] = useState<CustomerSummary>({ caption: "", photos: [] });
+  const [customerSummarySaving, setCustomerSummarySaving] = useState(false);
+  const [customerSummaryUploading, setCustomerSummaryUploading] = useState(false);
 
   useEffect(() => {
     if (window.matchMedia("(max-width: 640px)").matches) setView("week");
@@ -397,7 +417,7 @@ export default function ShareQueuePage() {
   }, [teamColor]);
 
   async function openDetail(a: Appt) {
-    setDetail(a); setDetailJob(null); setDetailWorkOrder(null); setDetailWorkEvents([]); setPreviewPhotos([]); setDetailTechnicians([]); setDetailTechniciansLoading(true);
+    setDetail(a); setDetailJob(null); setDetailWorkOrder(null); setDetailWorkEvents([]); setPreviewPhotos([]); setDetailTechnicians([]); setDetailTechniciansLoading(true); setShowCustomerSummary(false); setCustomerSummary({ caption: "", photos: [] });
     const jobRequest = a.job_id
       ? supabase.from("install_jobs")
         .select("bill_no, customer_name, customer_phone, address, location_url, product_name, survey_data, status, source, flag_note, raw_payload")
@@ -409,10 +429,14 @@ export default function ShareQueuePage() {
         .select("technician_id, is_lead, first_opened_at, open_count, acknowledged_at")
         .eq("appointment_id", a.id).eq("is_active", true).order("is_lead", { ascending: false }),
       supabase.from("floor_work_orders")
-        .select("id, status, updated_at")
+        .select("id, status, updated_at, external_share_token, external_share_enabled")
         .eq("appointment_id", a.id).maybeSingle(),
     ]);
-    if (jobResult.data) setDetailJob(jobResult.data as JobDetail);
+    if (jobResult.data) {
+      const job = jobResult.data as JobDetail;
+      setDetailJob(job);
+      try { setCustomerSummary(customerSummaryOf({ ...EMPTY_SURVEY, ...JSON.parse(job.survey_data || "{}") })); } catch { setCustomerSummary({ caption: "", photos: [] }); }
+    }
     if (workOrderResult.data) {
       const workOrder = workOrderResult.data as DetailWorkOrder;
       setDetailWorkOrder(workOrder);
@@ -656,6 +680,59 @@ export default function ShareQueuePage() {
     setUpdatingStatus(false);
   }
 
+  async function uploadCustomerSummaryPhotos(files: File[]) {
+    if (!detail?.job_id || !files.length) return;
+    setCustomerSummaryUploading(true);
+    const added: string[] = [];
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = `customer-summary/${detail.job_id}/${Date.now()}-${i}-${safe}`;
+        const { error } = await supabase.storage.from("job-photos").upload(path, file, { upsert: false, contentType: file.type || "image/jpeg" });
+        if (error) throw error;
+        added.push(path);
+      }
+      setCustomerSummary((current) => ({ ...current, photos: [...current.photos, ...added] }));
+    } catch (error: unknown) {
+      alert(floorActionError("อัปโหลดภาพสรุปสำหรับลูกค้า", error));
+    } finally {
+      setCustomerSummaryUploading(false);
+    }
+  }
+
+  async function saveCustomerSummary() {
+    if (!detail?.job_id || !detailJob) return;
+    setCustomerSummarySaving(true);
+    try {
+      let survey: SurveyData & { customerSummary?: CustomerSummary } = { ...EMPTY_SURVEY };
+      try { survey = { ...survey, ...JSON.parse(detailJob.survey_data || "{}") }; } catch { /* Preserve a usable summary even if legacy survey data is malformed. */ }
+      const nextSummary = { ...customerSummary, caption: customerSummary.caption.trim(), updatedAt: new Date().toISOString() };
+      const { error } = await supabase.from("install_jobs").update({ survey_data: JSON.stringify({ ...survey, customerSummary: nextSummary }), updated_at: new Date().toISOString() }).eq("job_no", detail.job_id);
+      if (error) throw error;
+      setCustomerSummary(nextSummary);
+      setDetailJob({ ...detailJob, survey_data: JSON.stringify({ ...survey, customerSummary: nextSummary }) });
+      setShowCustomerSummary(false);
+    } catch (error: unknown) {
+      alert(floorActionError("บันทึกภาพสรุปสำหรับลูกค้า", error));
+    } finally {
+      setCustomerSummarySaving(false);
+    }
+  }
+
+  async function copyCustomerStatusLink() {
+    if (!detailWorkOrder?.external_share_token || !detailWorkOrder.external_share_enabled) {
+      alert("งานนี้ยังไม่มีลิงก์ลูกค้าที่เปิดใช้งาน\nกรุณายืนยันใบสั่งงานก่อน แล้วกลับมาคัดลอกลิงก์ได้จากหน้านี้");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/status/${detailWorkOrder.external_share_token}`);
+      alert("คัดลอกลิงก์ติดตามงานสำหรับลูกค้าแล้ว");
+    } catch {
+      alert("คัดลอกลิงก์ไม่สำเร็จ กรุณาอนุญาต Clipboard ในเบราว์เซอร์แล้วลองอีกครั้ง");
+    }
+  }
+
   async function sendBack(a: Appt) {
     if (!canDecide) { alert("เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่ส่งงานกลับได้"); return; }
     if (!a.job_id) return;
@@ -780,6 +857,7 @@ export default function ShareQueuePage() {
           ))}
           <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-slate-200" />🏖️ วันหยุด</span>
           <span className="inline-flex items-center gap-1 text-slate-400"><span className="inline-block w-3 h-3 rounded border border-dashed border-slate-400" />รอยืนยัน (เส้นประ)</span>
+          <span className="inline-flex items-center gap-1 text-amber-700"><span className="inline-block h-3 w-3 rounded bg-amber-200" />ทีม B ยังไม่พร้อมจอง (เกิน {TEAM_B_MAX_LEAD_DAYS} วัน)</span>
         </div>
 
         {loading ? (
@@ -793,6 +871,7 @@ export default function ShareQueuePage() {
               {monthDays.map((d) => {
                 const inMonth = d.getMonth() === mMonth;
                 const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
+                const teamBUnavailable = isTeamBBookingUnavailable(d);
                 return (
                   <div key={d.toISOString()} onClick={() => canSell && openAdd(d)} title={canSell ? "จิ้มเพื่อลงคิว" : "ดูคิวงาน"} className={`group min-h-[96px] border-b border-r border-slate-100 p-1 flex flex-col ${canSell ? "cursor-pointer hover:bg-blue-50/40" : ""} ${inMonth ? "" : "bg-slate-50/60"}`}>
                     <div className="flex items-center justify-between px-0.5">
@@ -800,6 +879,7 @@ export default function ShareQueuePage() {
                       {canSell && <span className="text-[11px] text-slate-300 group-hover:text-blue-600 leading-none px-1">＋</span>}
                     </div>
                     <div className="mt-0.5 space-y-0.5 flex-1">
+                      {teamBUnavailable && <div className="rounded border border-amber-200 bg-amber-50 px-1 py-0.5 text-[9px] leading-tight text-amber-800">⏳ ทีม B · ยังไม่พร้อมจอง</div>}
                       {dayAppts.map((a) => (
                         <button key={a.id} onClick={(ev) => { ev.stopPropagation(); openDetail(a); }} className={`w-full text-left rounded px-1 py-0.5 text-[10px] leading-tight ${chipCls(a)} hover:brightness-95`}>
                           <span className="font-semibold">{isHoliday(a) ? "🏖️" : fmtTime(a.slot_start)}</span> {teamName(a.tech_id)}
@@ -816,6 +896,7 @@ export default function ShareQueuePage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
             {week.map((d) => {
               const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
+              const teamBUnavailable = isTeamBBookingUnavailable(d);
               return (
                 <div key={d.toISOString()} className={`bg-white rounded-xl border ${isToday(d) ? "border-blue-400 ring-1 ring-blue-300" : "border-slate-200"} overflow-hidden flex flex-col min-h-[140px]`}>
                   <div className={`px-2 py-1.5 text-center border-b ${isToday(d) ? "bg-blue-50" : "bg-slate-50"}`}>
@@ -823,6 +904,7 @@ export default function ShareQueuePage() {
                     <div className="text-sm font-semibold text-slate-800">{d.getDate()}/{d.getMonth() + 1}</div>
                   </div>
                   <div className="p-1.5 space-y-1.5 flex-1">
+                    {teamBUnavailable && <div className="rounded-lg border border-amber-200 bg-amber-50 px-1.5 py-1 text-[10px] leading-tight text-amber-800">⏳ ทีม B ยังไม่พร้อมจอง</div>}
                     {dayAppts.map((a) => {
                       const st = STATUS[a.status] ?? STATUS.proposed;
                       return (
@@ -875,7 +957,7 @@ export default function ShareQueuePage() {
                       {detail.job_id && <span>เลขงาน <strong className="font-medium text-slate-700">{detail.job_id}</strong></span>}
                       {billNo && <span>เลขบิล <strong className="font-medium text-slate-700">{billNo}</strong></span>}
                     </div>
-                    {detail.job_id ? <a href={`/orders/${encodeURIComponent(detail.job_id)}`} className="mt-3 inline-flex rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">เปิดใบสั่งงานและสถานะการส่งต่อ</a> : null}
+                    {detail.job_id ? <div className="mt-3 flex flex-wrap gap-2"><a href={`/orders/${encodeURIComponent(detail.job_id)}`} className="inline-flex rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">เปิดใบสั่งงานและสถานะการส่งต่อ</a><button type="button" onClick={() => setShowCustomerSummary(true)} className="inline-flex rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700">🖼️ รูปสรุปลูกค้า</button><button type="button" onClick={() => void copyCustomerStatusLink()} className="inline-flex rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-800 hover:bg-violet-100">🔗 คัดลอกลิงก์ลูกค้า</button></div> : null}
                   </div>
                   <button onClick={() => setDetail(null)} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-2xl text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="ปิด">×</button>
                 </div>
@@ -967,6 +1049,25 @@ export default function ShareQueuePage() {
                     })() : <p className="mt-3 rounded-xl border border-dashed border-blue-200 bg-white px-3 py-3 text-sm text-slate-500">{detail.job_id ? "งานนี้ยังไม่มีใบสั่งงานกลาง จึงยังไม่มีสถานะคลังหรือสถานะหน้างานจากทีมช่าง" : "รายการคิวนี้ยังไม่ได้เปิดเป็นใบสั่งงาน"}</p>}
                   </section>
 
+                  {detail.job_id && (
+                    <section className="rounded-2xl border border-violet-200 bg-violet-50/50 p-4 sm:p-5 md:col-span-2">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-semibold text-violet-950">🖼️ ภาพสรุปสำหรับลูกค้า</h3>
+                          <p className="mt-1 text-xs text-violet-700">ฝ่ายขายเลือกภาพและข้อความที่ต้องการให้ลูกค้าเห็นผ่านลิงก์ติดตามงาน</p>
+                        </div>
+                        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-violet-700">{customerSummary.photos.length} รูป</span>
+                      </div>
+                      {customerSummary.caption && <p className="mt-3 whitespace-pre-wrap rounded-xl border border-violet-100 bg-white px-3 py-2 text-sm text-slate-700">{customerSummary.caption}</p>}
+                      {customerSummary.photos.length > 0 ? <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">{customerSummary.photos.map((path, index) => <button key={path} type="button" onClick={() => { const photos = customerSummary.photos.map((item, photoIndex) => ({ url: photoUrl(item), label: `ภาพสรุปสำหรับลูกค้า · รูปที่ ${photoIndex + 1}`, occurredAt: customerSummary.updatedAt || detail.slot_start, eventLabel: "ฝ่ายขาย" })); setPreviewPhotos(photos); setPreviewIndex(index); }} className="group relative aspect-square overflow-hidden rounded-xl border border-violet-200 bg-white"><img src={photoUrl(path)} alt={`ภาพสรุปสำหรับลูกค้า ${index + 1}`} className="h-full w-full object-cover transition-transform group-hover:scale-105" /><span className="absolute bottom-1 left-1 rounded bg-black/65 px-1.5 py-0.5 text-[10px] text-white">{index + 1}</span></button>)}</div> : <p className="mt-3 rounded-xl border border-dashed border-violet-200 bg-white px-3 py-3 text-xs text-slate-500">ยังไม่ได้เพิ่มภาพสรุปสำหรับลูกค้า</p>}
+                      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                        <button type="button" onClick={() => setShowCustomerSummary(true)} className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-700">{customerSummary.photos.length || customerSummary.caption ? "แก้ไขภาพสรุปสำหรับลูกค้า" : "เพิ่มภาพสรุปสำหรับลูกค้า"}</button>
+                        <button type="button" onClick={() => void copyCustomerStatusLink()} className="rounded-xl border border-violet-300 bg-white px-4 py-2.5 text-sm font-semibold text-violet-800 hover:bg-violet-50">🔗 คัดลอกลิงก์สำหรับลูกค้า</button>
+                      </div>
+                      {!detailWorkOrder && <p className="mt-2 text-xs text-amber-700">ลิงก์ลูกค้าจะพร้อมหลังยืนยันใบสั่งงานแล้ว</p>}
+                    </section>
+                  )}
+
                   {hasCustomerDetail && (
                     <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 md:col-span-2">
                       <h3 className="mb-4 text-sm font-semibold text-slate-900">👤 ลูกค้าและสถานที่ติดตั้ง</h3>
@@ -1044,6 +1145,25 @@ export default function ShareQueuePage() {
           </div>
         );
       })()}
+
+      {showCustomerSummary && detail && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/55 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="ภาพสรุปสำหรับลูกค้า">
+          <div className="flex max-h-[94vh] w-full max-w-xl flex-col rounded-t-3xl bg-white shadow-2xl sm:rounded-2xl">
+            <header className="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4">
+              <div><h2 className="text-base font-semibold text-slate-900">ภาพสรุปสำหรับลูกค้า</h2><p className="mt-1 text-xs text-slate-500">ข้อมูลนี้จะแสดงบนลิงก์ติดตามงานที่ส่งให้ลูกค้า</p></div>
+              <button type="button" onClick={() => setShowCustomerSummary(false)} className="grid h-9 w-9 place-items-center rounded-full text-xl text-slate-400 hover:bg-slate-100" aria-label="ปิด">×</button>
+            </header>
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
+              <div><label className="mb-1.5 block text-sm font-medium text-slate-700">ข้อความสรุปถึงลูกค้า</label><textarea value={customerSummary.caption} onChange={(event) => setCustomerSummary((current) => ({ ...current, caption: event.target.value }))} rows={4} placeholder="เช่น ทีมงานตรวจสอบพื้นที่แล้ว และเตรียมเข้าดำเนินการตามวันนัดหมาย" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-100" /></div>
+              <div><div className="flex items-center justify-between gap-3"><div><div className="text-sm font-medium text-slate-700">รูปภาพจริงสำหรับลูกค้า</div><p className="mt-0.5 text-xs text-slate-500">เพิ่มได้หลายรูป และกดที่รูปเพื่อดูตัวอย่างขนาดใหญ่</p></div><label className="cursor-pointer rounded-xl border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-100"><input type="file" accept="image/*" multiple className="hidden" disabled={customerSummaryUploading} onChange={(event) => { void uploadCustomerSummaryPhotos(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }} />{customerSummaryUploading ? "กำลังอัปโหลด…" : "📷 เพิ่มรูป"}</label></div>
+                {customerSummary.photos.length ? <div className="mt-3 grid grid-cols-3 gap-3 sm:grid-cols-4">{customerSummary.photos.map((path, index) => <div key={path} className="relative aspect-square overflow-hidden rounded-xl border border-slate-200 bg-slate-100"><button type="button" onClick={() => { const photos = customerSummary.photos.map((item, photoIndex) => ({ url: photoUrl(item), label: `ภาพสรุปสำหรับลูกค้า · รูปที่ ${photoIndex + 1}`, occurredAt: customerSummary.updatedAt || detail.slot_start, eventLabel: "ฝ่ายขาย" })); setPreviewPhotos(photos); setPreviewIndex(index); }} className="h-full w-full"><img src={photoUrl(path)} alt={`ภาพสรุป ${index + 1}`} className="h-full w-full object-cover" /></button><button type="button" onClick={() => setCustomerSummary((current) => ({ ...current, photos: current.photos.filter((item) => item !== path) }))} className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-red-500 text-sm font-bold text-white shadow hover:bg-red-600" aria-label={`ลบรูปที่ ${index + 1}`}>×</button></div>)}</div> : <div className="mt-3 rounded-xl border border-dashed border-slate-300 px-4 py-7 text-center text-sm text-slate-400">ยังไม่มีรูปภาพสรุป</div>}
+              </div>
+              <div className="rounded-xl bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-800">รูปและข้อความที่บันทึกแล้วจะเห็นได้ผ่านลิงก์ลูกค้าเท่านั้น โปรดตรวจสอบความถูกต้องก่อนส่งลิงก์</div>
+            </div>
+            <footer className="flex shrink-0 gap-3 border-t border-slate-200 px-5 py-4"><button type="button" onClick={() => setShowCustomerSummary(false)} className="flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-700">ยกเลิก</button><button type="button" disabled={customerSummarySaving || customerSummaryUploading} onClick={() => void saveCustomerSummary()} className="flex-1 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50">{customerSummarySaving ? "กำลังบันทึก…" : "บันทึกภาพสรุป"}</button></footer>
+          </div>
+        </div>
+      )}
 
       {/* Field evidence preview */}
       {previewPhotos.length > 0 && previewPhotos[previewIndex] && (() => {
