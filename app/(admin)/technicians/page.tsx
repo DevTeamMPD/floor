@@ -1,14 +1,9 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { useEffect, useMemo, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
 
 interface Technician {
   id: string;
@@ -25,6 +20,9 @@ function makePin() {
 }
 
 export default function TechniciansPage() {
+  // The SSR client forwards the logged-in browser session to Supabase.  A raw
+  // anon client cannot call the secured PIN-reset RPC.
+  const supabase = useMemo(() => createClient(), []);
   const [techs, setTechs] = useState<Technician[]>([]);
   const [loading, setLoading] = useState(true);
   const [resetting, setResetting] = useState<string | null>(null);
