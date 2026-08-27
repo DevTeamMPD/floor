@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Obstacle { id: string; name: string; width_cm: number; length_cm: number; deduct: boolean; }
@@ -1279,7 +1280,7 @@ export default function WasteCostPage() {
                                     const { error } = await supabase.from("remnant_stock")
                                       .update({ status: "reserved", reserved_for: selectedJobNo })
                                       .eq("id", r.id);
-                                    if (error) toast.error(error.message);
+                                    if (error) toast.error(floorErrorMessage(error));
                                     else { toast.success("จองเศษสำหรับงานนี้แล้ว — ไปหยิบได้ที่หน้า เศษวัสดุ"); fetchRemnants(); }
                                     setReservingRemnant(null);
                                   }}

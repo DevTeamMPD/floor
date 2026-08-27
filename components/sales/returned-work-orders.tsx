@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { WorkOrder } from "@/lib/work-orders";
 
@@ -22,7 +23,7 @@ export default function ReturnedWorkOrders() {
   const [staffRole, setStaffRole] = useState<string | null>(null);
   const load = useCallback(async () => {
     setLoading(true); const { data: orderRows, error } = await supabase.from("floor_work_orders").select("*").eq("status", "returned_sales").order("returned_at", { ascending: false });
-    if (error) { toast.error(error.message); setLoading(false); return; }
+    if (error) { toast.error(floorErrorMessage(error)); setLoading(false); return; }
     const rows = (orderRows ?? []) as WorkOrder[]; setOrders(rows);
     const { data: jobRows, error: jobError } = rows.length ? await supabase.from("install_jobs").select("job_no,source,bill_no,customer_name,customer_phone,address,location_url,product_name,flag_note").in("job_no", rows.map((row) => row.job_no)) : { data: [], error: null };
     if (jobError) toast.error(jobError.message); const list = (jobRows ?? []) as Job[]; setJobs(Object.fromEntries(list.map((row) => [row.job_no, row]))); setDrafts(Object.fromEntries(list.map((row) => [row.job_no, draftOf(row)]))); setLoading(false);
@@ -39,7 +40,7 @@ export default function ReturnedWorkOrders() {
     const missing = [!draft.bill_no.trim() ? "เลขบิล" : null, !draft.customer_name.trim() ? "ชื่อลูกค้า" : null, !draft.customer_phone.trim() ? "เบอร์โทร" : null, !draft.address.trim() && !draft.location_url.trim() ? "ที่อยู่หรือแผนที่" : null, !draft.product_name.trim() ? "สินค้า/ขอบเขตงาน" : null].filter(Boolean);
     if (missing.length) { toast.error(`กรอกให้ครบ: ${missing.join(", ")}`); return; }
     setSaving(order.id); const { error } = await supabase.from("install_jobs").update({ ...draft, updated_at: new Date().toISOString() }).eq("job_no", order.job_no);
-    if (error) { toast.error(error.message); setSaving(null); return; }
+    if (error) { toast.error(floorErrorMessage(error)); setSaving(null); return; }
     const { error: rpcError } = await supabase.rpc("resubmit_floor_work_order_v3", { p_work_order_id: order.id }); setSaving(null);
     if (rpcError) toast.error(rpcError.message); else { toast.success("แก้ข้อมูลและส่งให้หัวหน้าช่างตรวจใหม่แล้ว"); setOpenId(null); void load(); }
   }

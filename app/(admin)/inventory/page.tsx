@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 
 interface Material {
   id: string;
@@ -115,7 +116,7 @@ export default function InventoryPage() {
       reorder_point: Number(form.reorder_point) || 0,
     });
     setSaving(false);
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(floorErrorMessage(error)); return; }
     toast.success('เพิ่มวัสดุเรียบร้อย');
     setModalMode(null);
     load();

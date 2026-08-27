@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 import { createClient } from "@/lib/supabase/client";
 import TechnicianAssignmentButton from "@/components/appointments/technician-assignment";
 import CentralWorkOrderPage from "@/app/(admin)/orders/[jobNo]/page";
@@ -49,7 +50,7 @@ export default function OperationsPage() {
     const reason = window.prompt(source === "bbps" ? "ระบุข้อมูลที่ต้องการให้ BBPS แก้ไข" : "ระบุข้อมูลที่ต้องการให้ฝ่ายขายแก้ไข");
     if (!reason?.trim()) return;
     const { error } = await supabase.rpc("return_floor_work_order_v3", { p_work_order_id: workOrderId, p_reason: reason.trim() });
-    if (error) toast.error(error.message); else {
+    if (error) toast.error(floorErrorMessage(error)); else {
       // The work order deliberately remains in returned_sales until its source
       // supplies corrected data.  Switch tabs immediately so the same card and
       // its reason remain visible instead of appearing to disappear.

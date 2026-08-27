@@ -242,7 +242,7 @@ function NcrPageInner() {
     const patch: Record<string, unknown> = { status: next, updated_at: new Date().toISOString() };
     if (next === "closed") patch.closed_at = new Date().toISOString();
     const { error } = await supabase.from("ncr_reports").update(patch).eq("id", ncr.id);
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(floorActionError("เลื่อนสถานะ", error)); return; }
     toast.success(`เลื่อนเป็น: ${NEXT_LABEL[ncr.status]}`);
     setSelected(null);
     await loadNcrs();

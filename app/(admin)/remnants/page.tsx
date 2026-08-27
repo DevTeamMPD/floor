@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 
 interface Remnant {
   id: string;
@@ -97,7 +98,7 @@ export default function RemnantsPage() {
     if (form.note.trim())       payload.note = form.note.trim();
 
     const { error } = await supabase.from("remnant_stock").insert(payload);
-    if (error) toast.error(error.message);
+    if (error) toast.error(floorErrorMessage(error));
     else {
       toast.success("บันทึกเศษแล้ว");
       setForm({ ...EMPTY_FORM });
@@ -112,14 +113,14 @@ export default function RemnantsPage() {
       .from("remnant_stock")
       .update({ status: "used" })
       .eq("id", id);
-    if (error) toast.error(error.message);
+    if (error) toast.error(floorErrorMessage(error));
     else { toast.success("บันทึกว่าใช้แล้ว"); fetch(); }
   }
 
   async function deleteRemnant(id: string) {
     if (!confirm("ลบรายการนี้?")) return;
     const { error } = await supabase.from("remnant_stock").delete().eq("id", id);
-    if (error) toast.error(error.message);
+    if (error) toast.error(floorErrorMessage(error));
     else { toast.success("ลบแล้ว"); fetch(); }
   }
 
@@ -131,7 +132,7 @@ export default function RemnantsPage() {
     } else if (!window.confirm("ยืนยันตรวจรับเศษรายการนี้เข้าสต็อกพร้อมใช้?")) return;
     setReviewingId(id);
     const { error } = await supabase.rpc("review_remnant_report_staff", { p_report_id: id, p_decision: decision, p_note: note });
-    if (error) toast.error(error.message);
+    if (error) toast.error(floorErrorMessage(error));
     else { toast.success(decision === "accept" ? "ตรวจรับและเพิ่มเศษเข้าสต็อกแล้ว" : "ส่งกลับให้ช่างแก้ไขแล้ว"); await fetch(); }
     setReviewingId(null);
   }
