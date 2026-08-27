@@ -192,8 +192,11 @@ function isTeamBBookingUnavailable(date: Date, bypassRules = false) {
   return day >= bookingDate(0) && day > bookingDate(TEAM_B_MAX_LEAD_DAYS);
 }
 
-function bookingRuleError(form: Pick<FormState, "date" | "endDate">, team: Team | undefined, bypassRules = false) {
-  if (bypassRules) return null;
+function bookingRuleError(form: Pick<FormState, "id" | "date" | "endDate">, team: Team | undefined, bypassRules = false) {
+  // Lead-time rules protect new bookings for warehouse preparation.  An
+  // existing appointment must remain editable, even if it is now inside the
+  // lead-time window (for example correcting customer details or rescheduling).
+  if (bypassRules || Boolean(form.id)) return null;
   const minimum = bookingDate(BOOKING_MIN_LEAD_DAYS);
   const maximum = isTeamB(team) ? bookingDate(TEAM_B_MAX_LEAD_DAYS) : null;
   if (form.date && form.date < minimum) {
@@ -1227,8 +1230,8 @@ export default function ShareQueuePage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="text-xs text-slate-500 block mb-1">วันที่เริ่ม</label>
-                    <input type="date" value={form.date} min={canBypassBookingRules ? undefined : bookingDate(BOOKING_MIN_LEAD_DAYS)} max={!canBypassBookingRules && isTeamB(selectedFormTeam) ? bookingDate(TEAM_B_MAX_LEAD_DAYS) : undefined} onChange={(e) => {
-                      const teamBOutOfRange = !canBypassBookingRules && isTeamB(selectedFormTeam) && e.target.value > bookingDate(TEAM_B_MAX_LEAD_DAYS);
+                    <input type="date" value={form.date} min={canBypassBookingRules || form.id ? undefined : bookingDate(BOOKING_MIN_LEAD_DAYS)} max={!canBypassBookingRules && !form.id && isTeamB(selectedFormTeam) ? bookingDate(TEAM_B_MAX_LEAD_DAYS) : undefined} onChange={(e) => {
+                      const teamBOutOfRange = !canBypassBookingRules && !form.id && isTeamB(selectedFormTeam) && e.target.value > bookingDate(TEAM_B_MAX_LEAD_DAYS);
                       const fallbackTeam = teamBOutOfRange ? teams.find((team) => !isTeamB(team)) : undefined;
                       const next = { ...form, tech_id: fallbackTeam?.id ?? form.tech_id, date: e.target.value, endDate: (!form.endDate || form.endDate < e.target.value) ? e.target.value : form.endDate };
                       setForm(next);
@@ -1245,7 +1248,7 @@ export default function ShareQueuePage() {
                   </div>
                   <div>
                     <label className="text-xs text-slate-500 block mb-1">ถึงวันที่</label>
-                    <input type="date" value={form.endDate} min={canBypassBookingRules ? form.date || undefined : (form.date > bookingDate(BOOKING_MIN_LEAD_DAYS) ? form.date : bookingDate(BOOKING_MIN_LEAD_DAYS))} max={!canBypassBookingRules && isTeamB(selectedFormTeam) ? bookingDate(TEAM_B_MAX_LEAD_DAYS) : undefined} onChange={(e) => {
+                    <input type="date" value={form.endDate} min={canBypassBookingRules || form.id ? form.date || undefined : (form.date > bookingDate(BOOKING_MIN_LEAD_DAYS) ? form.date : bookingDate(BOOKING_MIN_LEAD_DAYS))} max={!canBypassBookingRules && !form.id && isTeamB(selectedFormTeam) ? bookingDate(TEAM_B_MAX_LEAD_DAYS) : undefined} onChange={(e) => {
                       const next = { ...form, endDate: e.target.value };
                       setForm(next);
                       const message = bookingRuleError(next, selectedFormTeam, canBypassBookingRules);
