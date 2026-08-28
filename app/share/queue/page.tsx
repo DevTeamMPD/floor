@@ -1004,7 +1004,9 @@ export default function ShareQueuePage() {
               {monthDays.map((d) => {
                 const inMonth = d.getMonth() === mMonth;
                 const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
-                const teamBUnavailable = isTeamBBookingUnavailable(d, canBypassBookingRules);
+                // Show the planning warning to everyone; the Supakrit override
+                // only bypasses booking validation and must not hide the signal.
+                const teamBUnavailable = isTeamBBookingUnavailable(d);
                 const meetingMark = dcMeetingMark(d);
                 return (
                   <div key={d.toISOString()} onClick={() => canSell && openAdd(d)} title={canSell ? "จิ้มเพื่อลงคิว" : "ดูคิวงาน"} className={`group min-h-[96px] border-b border-r border-slate-100 p-1 flex flex-col ${canSell ? "cursor-pointer hover:bg-blue-50/40" : ""} ${inMonth ? "" : "bg-slate-50/60"}`}>
@@ -1032,7 +1034,7 @@ export default function ShareQueuePage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
             {week.map((d) => {
               const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
-                const teamBUnavailable = isTeamBBookingUnavailable(d, canBypassBookingRules);
+              const teamBUnavailable = isTeamBBookingUnavailable(d);
               const meetingMark = dcMeetingMark(d);
               return (
                 <div key={d.toISOString()} className={`bg-white rounded-xl border ${isToday(d) ? "border-blue-400 ring-1 ring-blue-300" : "border-slate-200"} overflow-hidden flex flex-col min-h-[140px]`}>
