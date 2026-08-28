@@ -1,6 +1,6 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { ipGenOrderNo } from "@/lib/utils";
@@ -25,6 +25,18 @@ interface JobDetail {
   bill_no: string | null; customer_name: string | null; customer_phone: string | null;
   address: string | null; location_url: string | null; product_name: string | null; survey_data: string | null;
   status: string | null; source: string | null; flag_note: string | null; raw_payload: unknown;
+  created_by_user_id: string | null;
+}
+interface SalesInfoRequest {
+  id: string;
+  notificationId: number | null;
+  title: string;
+  ticketOwnerName: string | null;
+  body: string | null;
+  job_no: string | null;
+  appointment_id: string | null;
+  read_at: string | null;
+  created_at: string;
 }
 interface DetailTechnician {
   id: string;
@@ -279,6 +291,7 @@ export default function ShareQueuePage() {
   const [queueDraft, setQueueDraft] = useState<QueueDraft | null>(null);
   const [detail, setDetail] = useState<Appt | null>(null);
   const [detailJob, setDetailJob] = useState<JobDetail | null>(null);
+  const [detailCreatorName, setDetailCreatorName] = useState<string | null>(null);
   const [detailWorkOrder, setDetailWorkOrder] = useState<DetailWorkOrder | null>(null);
   const [detailWorkEvents, setDetailWorkEvents] = useState<DetailWorkEvent[]>([]);
   const [previewPhotos, setPreviewPhotos] = useState<PreviewPhoto[]>([]);
@@ -293,6 +306,9 @@ export default function ShareQueuePage() {
   const [customerSummary, setCustomerSummary] = useState<CustomerSummary>({ caption: "", photos: [] });
   const [customerSummarySaving, setCustomerSummarySaving] = useState(false);
   const [customerSummaryUploading, setCustomerSummaryUploading] = useState(false);
+  const [salesInfoRequests, setSalesInfoRequests] = useState<SalesInfoRequest[]>([]);
+  const [salesInboxOpen, setSalesInboxOpen] = useState(false);
+  const salesInboxInitialized = useRef(false);
 
   useEffect(() => {
     if (window.matchMedia("(max-width: 640px)").matches) setView("week");
@@ -313,6 +329,66 @@ export default function ShareQueuePage() {
     });
     return () => { active = false; };
   }, [supabase]);
+
+  const loadSalesInfoRequests = useCallback(async () => {
+    // RLS limits floor_notifications to the logged-in recipient.  The event
+    // itself is created only for the direct-sales ticket owner, not every sale.
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setSalesInfoRequests([]); return; }
+    const [notificationResult, returnedResult] = await Promise.all([
+      supabase.from("floor_notifications")
+        .select("id,title,body,job_no,appointment_id,read_at,created_at")
+        .eq("event_type", "work_returned")
+        .order("created_at", { ascending: false }).limit(20),
+      // Fallback for a page opened after an earlier notification was read or
+      // for an older ticket: the ticket owner still sees any work awaiting data.
+      supabase.from("floor_work_orders")
+        .select("id,job_no,appointment_id,returned_reason,returned_at")
+        .eq("status", "returned_sales").eq("source_owner_user_id", user.id)
+        .order("returned_at", { ascending: false }).limit(20),
+    ]);
+    const notifications = ((notificationResult.data ?? []) as { id: number; title: string; body: string | null; job_no: string | null; appointment_id: string | null; read_at: string | null; created_at: string }[]).map((row) => ({
+      ...row, id: `notification-${row.id}`, notificationId: Number(row.id),
+    }));
+    const returnedRows = (returnedResult.data ?? []) as { id: string; job_no: string; appointment_id: string | null; returned_reason: string | null; returned_at: string | null }[];
+    const allJobNos = Array.from(new Set([...notifications.map((row) => row.job_no), ...returnedRows.map((row) => row.job_no)].filter(Boolean) as string[]));
+    const { data: requestedJobs } = allJobNos.length
+      ? await supabase.from("install_jobs").select("job_no,customer_name,created_by_user_id").in("job_no", allJobNos)
+      : { data: [] as { job_no: string; customer_name: string | null; created_by_user_id: string | null }[] };
+    const { data: ownerWorkOrders } = allJobNos.length
+      ? await supabase.from("floor_work_orders").select("job_no,source_owner_user_id").in("job_no", allJobNos)
+      : { data: [] as { job_no: string; source_owner_user_id: string | null }[] };
+    const jobByNo = new Map(((requestedJobs ?? []) as { job_no: string; customer_name: string | null; created_by_user_id: string | null }[]).map((job) => [job.job_no, job]));
+    const workOrderOwnerByJobNo = new Map(((ownerWorkOrders ?? []) as { job_no: string; source_owner_user_id: string | null }[]).map((workOrder) => [workOrder.job_no, workOrder.source_owner_user_id]));
+    const ticketOwnerIdFor = (jobNo: string | null) => jobNo ? jobByNo.get(jobNo)?.created_by_user_id || workOrderOwnerByJobNo.get(jobNo) || null : null;
+    const ownerIds = Array.from(new Set(allJobNos.map((jobNo) => ticketOwnerIdFor(jobNo)).filter(Boolean) as string[]));
+    const { data: owners } = ownerIds.length
+      ? await supabase.from("floor_staff_profiles").select("id,full_name").in("id", ownerIds)
+      : { data: [] as { id: string; full_name: string | null }[] };
+    const ownerNames = new Map(((owners ?? []) as { id: string; full_name: string | null }[]).map((owner) => [owner.id, owner.full_name]));
+    const ownerNameFor = (jobNo: string | null) => ownerNames.get(ticketOwnerIdFor(jobNo) ?? "") ?? null;
+    const notificationsWithOwner: SalesInfoRequest[] = notifications.map((row) => ({ ...row, ticketOwnerName: ownerNameFor(row.job_no) }));
+    const statusFallbacks: SalesInfoRequest[] = returnedRows.filter((row) => !notificationsWithOwner.some((item) => item.job_no === row.job_no)).map((row) => ({
+      id: `returned-${row.id}`, notificationId: null, job_no: row.job_no, appointment_id: row.appointment_id,
+      title: jobByNo.get(row.job_no)?.customer_name || "งานถูกส่งกลับให้แก้ไข", ticketOwnerName: ownerNameFor(row.job_no), body: row.returned_reason,
+      read_at: null, created_at: row.returned_at || new Date().toISOString(),
+    }));
+    const rows = [...statusFallbacks, ...notificationsWithOwner].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    setSalesInfoRequests(rows);
+    if (!salesInboxInitialized.current) {
+      salesInboxInitialized.current = true;
+      setSalesInboxOpen(rows.length > 0);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    void loadSalesInfoRequests();
+    const channel = supabase.channel("sales-info-request-inbox")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "floor_notifications" }, () => {
+        void loadSalesInfoRequests();
+      }).subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [loadSalesInfoRequests, supabase]);
 
   useEffect(() => {
     const draft = readQueueDraft();
@@ -426,10 +502,10 @@ export default function ShareQueuePage() {
   }, [teamColor]);
 
   async function openDetail(a: Appt) {
-    setDetail(a); setDetailJob(null); setDetailWorkOrder(null); setDetailWorkEvents([]); setPreviewPhotos([]); setDetailTechnicians([]); setDetailTechniciansLoading(true); setShowCustomerSummary(false); setCustomerSummary({ caption: "", photos: [] });
+    setDetail(a); setDetailJob(null); setDetailCreatorName(null); setDetailWorkOrder(null); setDetailWorkEvents([]); setPreviewPhotos([]); setDetailTechnicians([]); setDetailTechniciansLoading(true); setShowCustomerSummary(false); setCustomerSummary({ caption: "", photos: [] });
     const jobRequest = a.job_id
       ? supabase.from("install_jobs")
-        .select("bill_no, customer_name, customer_phone, address, location_url, product_name, survey_data, status, source, flag_note, raw_payload")
+        .select("bill_no, customer_name, customer_phone, address, location_url, product_name, survey_data, status, source, flag_note, raw_payload, created_by_user_id")
         .eq("job_no", a.job_id).maybeSingle()
       : Promise.resolve({ data: null });
     const [jobResult, assignmentResult, workOrderResult] = await Promise.all([
@@ -445,6 +521,10 @@ export default function ShareQueuePage() {
       const job = jobResult.data as JobDetail;
       setDetailJob(job);
       try { setCustomerSummary(customerSummaryOf({ ...EMPTY_SURVEY, ...JSON.parse(job.survey_data || "{}") })); } catch { setCustomerSummary({ caption: "", photos: [] }); }
+      if (job.created_by_user_id) {
+        const { data: creator } = await supabase.from("floor_staff_profiles").select("full_name").eq("id", job.created_by_user_id).maybeSingle();
+        setDetailCreatorName(creator?.full_name || null);
+      }
     }
     if (workOrderResult.data) {
       const workOrder = workOrderResult.data as DetailWorkOrder;
@@ -470,6 +550,18 @@ export default function ShareQueuePage() {
       }));
     }
     setDetailTechniciansLoading(false);
+  }
+
+  async function openSalesInfoRequest(request: SalesInfoRequest, mode: "view" | "edit" = "view") {
+    if (request.notificationId) await supabase.from("floor_notifications").update({ read_at: new Date().toISOString() }).eq("id", request.notificationId);
+    setSalesInfoRequests((rows) => rows.map((row) => row.id === request.id ? { ...row, read_at: row.read_at ?? new Date().toISOString() } : row));
+    const existing = request.appointment_id ? appts.find((appointment) => appointment.id === request.appointment_id) : undefined;
+    if (existing) { if (mode === "edit") await openEdit(existing); else await openDetail(existing); return; }
+    const query = request.appointment_id
+      ? supabase.from("appointments").select("id, job_id, tech_id, slot_start, slot_end, status, notes, requirement, ext_ref").eq("id", request.appointment_id).maybeSingle()
+      : supabase.from("appointments").select("id, job_id, tech_id, slot_start, slot_end, status, notes, requirement, ext_ref").eq("job_id", request.job_no ?? "").neq("status", "cancelled").order("slot_start", { ascending: false }).limit(1).maybeSingle();
+    const { data } = await query;
+    if (data) { if (mode === "edit") await openEdit(data as Appt); else await openDetail(data as Appt); }
   }
 
   function openAdd(date: Date) {
@@ -834,6 +926,7 @@ export default function ShareQueuePage() {
           </div>
           {canSell ? <div className="flex items-center gap-2">
             {queueDraft && <button type="button" onClick={restoreQueueDraft} className="inline-flex rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-medium text-amber-800 hover:bg-amber-100 sm:px-3">📝 ร่าง</button>}
+            <button type="button" onClick={() => setSalesInboxOpen(true)} className="relative inline-flex rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 sm:px-3">🔔 Inbox{salesInfoRequests.length ? ` (${salesInfoRequests.length})` : ""}</button>
             <button onClick={() => openAdd(new Date())} className="shrink-0 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700">+ ลงคิว</button>
           </div> : <span className={`rounded-lg px-3 py-2 text-xs ${permissionError ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-500"}`}>{permissionError || (staffRole === null ? "กำลังตรวจสอบสิทธิ์" : "โหมดดูข้อมูล")}</span>}
         </div>
@@ -935,6 +1028,20 @@ export default function ShareQueuePage() {
         <p className="text-[11px] text-slate-400 mt-4">ตารางนี้เชื่อมกับระบบ MPD แบบเรียลไทม์ · เปิดบิลที่นี่ = สร้างงานเข้า Pipeline</p>
       </main>
 
+      {salesInboxOpen && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/55 p-0 sm:items-center sm:p-5" role="dialog" aria-modal="true" aria-labelledby="sales-inbox-title">
+        <button type="button" className="absolute inset-0 cursor-default" onClick={() => setSalesInboxOpen(false)} aria-label="ปิด Inbox" />
+        <section className="relative z-10 flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-t-3xl bg-amber-50 shadow-2xl sm:max-h-[88vh] sm:rounded-3xl">
+          <header className="flex shrink-0 items-start justify-between gap-4 border-b border-amber-200 bg-amber-50 px-5 py-4 sm:px-6">
+            <div><p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Inbox ฝ่ายขาย · เฉพาะตั๋วที่คุณเปิด</p><h2 id="sales-inbox-title" className="mt-1 text-xl font-bold text-amber-950">ต้องแก้ไข {salesInfoRequests.length} งาน</h2><p className="mt-1 text-sm text-amber-800">แก้ตามเหตุผลแล้วส่งกลับให้หัวหน้าช่างตรวจใหม่</p></div>
+            <button type="button" onClick={() => setSalesInboxOpen(false)} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-2xl text-amber-700 hover:bg-amber-100" aria-label="ปิด Inbox">×</button>
+          </header>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">{salesInfoRequests.map((request) => <article key={request.id} className="rounded-2xl border border-amber-300 bg-white p-4 sm:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="text-base font-semibold text-slate-950">{request.title}</h3><span className="rounded bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">ขายตรง</span>{!request.read_at && <span className="rounded bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">ใหม่</span>}</div><p className="mt-1 text-xs text-slate-500">{request.job_no ? `#${request.job_no}` : "ตั๋วที่คุณเปิด"} · ผู้เปิดตั๋ว: <b className="font-semibold text-slate-700">{request.ticketOwnerName || "ไม่ระบุ"}</b> · {new Date(request.created_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Bangkok" })}</p>{request.body && <p className="mt-3 inline-block rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-950"><b>เหตุผล:</b> {request.body}</p>}</div><div className="flex shrink-0 gap-2"><button type="button" onClick={() => { setSalesInboxOpen(false); void openSalesInfoRequest(request); }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">ดูงาน</button><button type="button" onClick={() => { setSalesInboxOpen(false); void openSalesInfoRequest(request, "edit"); }} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">แก้ไขข้อมูล</button></div></div>
+          </article>)}{!salesInfoRequests.length && <div className="rounded-2xl border border-dashed border-amber-300 bg-white px-5 py-12 text-center text-sm text-amber-800">ตอนนี้ยังไม่มีตั๋วของคุณที่ช่างขอข้อมูลเพิ่มเติม</div>}</div>
+          <footer className="shrink-0 border-t border-amber-200 bg-white px-5 py-4 text-right"><button type="button" onClick={() => setSalesInboxOpen(false)} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">ปิด Inbox</button></footer>
+        </section>
+      </div>}
+
       {/* Detail modal */}
       {detail && (() => {
         const st = STATUS[detail.status] ?? STATUS.proposed;
@@ -965,6 +1072,7 @@ export default function ShareQueuePage() {
                     <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
                       {detail.job_id && <span>เลขงาน <strong className="font-medium text-slate-700">{detail.job_id}</strong></span>}
                       {billNo && <span>เลขบิล <strong className="font-medium text-slate-700">{billNo}</strong></span>}
+                      {detailCreatorName && <span>ผู้เปิดตั๋ว <strong className="font-medium text-slate-700">{detailCreatorName}</strong></span>}
                     </div>
                     {detail.job_id ? <div className="mt-3 flex flex-wrap gap-2"><a href={`/orders/${encodeURIComponent(detail.job_id)}`} className="inline-flex rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">เปิดใบสั่งงานและสถานะการส่งต่อ</a><button type="button" onClick={() => setShowCustomerSummary(true)} className="inline-flex rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700">🖼️ รูปสรุปลูกค้า</button><button type="button" onClick={() => void copyCustomerStatusLink()} className="inline-flex rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-800 hover:bg-violet-100">🔗 คัดลอกลิงก์ลูกค้า</button></div> : null}
                   </div>
