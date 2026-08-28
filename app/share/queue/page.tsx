@@ -284,6 +284,7 @@ export default function ShareQueuePage() {
   const [mMonth, setMMonth] = useState(now.getMonth());
   const [teams, setTeams] = useState<Team[]>([]);
   const [jobs, setJobs] = useState<Record<string, string>>({});
+  const [jobBookers, setJobBookers] = useState<Record<string, string>>({});
   const [appts, setAppts] = useState<Appt[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<FormState | null>(null);
@@ -474,11 +475,32 @@ export default function ShareQueuePage() {
     setAppts(apps);
     const jobIds = Array.from(new Set(apps.map((a) => a.job_id).filter(Boolean))) as string[];
     if (jobIds.length) {
-      const { data: js } = await supabase.from("install_jobs").select("job_no, customer_name").in("job_no", jobIds);
+      const [{ data: js }, { data: workOrders }] = await Promise.all([
+        supabase.from("install_jobs").select("job_no, customer_name, created_by_user_id").in("job_no", jobIds),
+        supabase.from("floor_work_orders").select("job_no, source_owner_user_id").in("job_no", jobIds),
+      ]);
       const jm: Record<string, string> = {};
-      (js ?? []).forEach((j: { job_no: string; customer_name: string | null }) => { jm[j.job_no] = j.customer_name ?? ""; });
+      const ownerIdByJobNo: Record<string, string> = {};
+      (workOrders ?? []).forEach((order: { job_no: string; source_owner_user_id: string | null }) => {
+        if (order.source_owner_user_id) ownerIdByJobNo[order.job_no] = order.source_owner_user_id;
+      });
+      (js ?? []).forEach((j: { job_no: string; customer_name: string | null; created_by_user_id: string | null }) => {
+        jm[j.job_no] = j.customer_name ?? "";
+        if (j.created_by_user_id) ownerIdByJobNo[j.job_no] = j.created_by_user_id;
+      });
       setJobs(jm);
-    } else setJobs({});
+      const ownerIds = Array.from(new Set(Object.values(ownerIdByJobNo)));
+      const { data: ownerProfiles } = ownerIds.length
+        ? await supabase.from("floor_staff_profiles").select("id, full_name").in("id", ownerIds)
+        : { data: [] as { id: string; full_name: string | null }[] };
+      const ownerNameById = new Map(((ownerProfiles ?? []) as { id: string; full_name: string | null }[]).map((profile) => [profile.id, profile.full_name]));
+      const bookers: Record<string, string> = {};
+      Object.entries(ownerIdByJobNo).forEach(([jobNo, ownerId]) => {
+        const name = ownerNameById.get(ownerId);
+        if (name) bookers[jobNo] = name;
+      });
+      setJobBookers(bookers);
+    } else { setJobs({}); setJobBookers({}); }
     setLoading(false);
   }, [days, supabase]);
 
@@ -490,6 +512,7 @@ export default function ShareQueuePage() {
     if (!n) return "—";
     return n.split(/[·\n/]/)[0].trim() || n;
   }, [jobs]);
+  const bookingOwner = useCallback((a: Appt) => a.job_id ? jobBookers[a.job_id] || null : null, [jobBookers]);
 
   const teamColor = useCallback((id: string | null) => {
     const idx = teams.findIndex((t) => t.id === id);
@@ -986,6 +1009,7 @@ export default function ShareQueuePage() {
                         <button key={a.id} onClick={(ev) => { ev.stopPropagation(); openDetail(a); }} className={`w-full text-left rounded px-1 py-0.5 text-[10px] leading-tight ${chipCls(a)} hover:brightness-95`}>
                           <span className="font-semibold">{isHoliday(a) ? "🏖️" : fmtTime(a.slot_start)}</span> {teamName(a.tech_id)}
                           <span className="block truncate opacity-80">{chipLabel(a)}</span>
+                          {bookingOwner(a) && <span className="block truncate text-[9px] opacity-70">ผู้จอง: {bookingOwner(a)}</span>}
                         </button>
                       ))}
                     </div>
@@ -1014,6 +1038,7 @@ export default function ShareQueuePage() {
                           <div className="text-xs font-semibold">{teamName(a.tech_id)}{isHoliday(a) ? " · 🏖️ วันหยุด" : ""}</div>
                           {!isHoliday(a) && <div className="text-[11px] opacity-70">{fmtTime(a.slot_start)}–{fmtTime(a.slot_end)}</div>}
                           <div className="text-[11px] opacity-80 truncate">{chipLabel(a)}</div>
+                          {bookingOwner(a) && <div className="text-[10px] opacity-70 truncate">ผู้จอง: {bookingOwner(a)}</div>}
                           <span className="inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-white/60">{st.label}</span>
                         </button>
                       );
