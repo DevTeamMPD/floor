@@ -184,6 +184,14 @@ const QUEUE_DRAFT_KEY = "floornow:share-queue:draft:v1";
 const BOOKING_MIN_LEAD_DAYS = 3;
 const TEAM_B_MAX_LEAD_DAYS = 10;
 const UNRESTRICTED_BOOKING_EMAIL = "supakrit.k@mpdgroup.co";
+const DC_MEETING_MARKS: Record<string, string> = {
+  "2026-09-10": "09:00–12:00 Meeting พี่พั๊นกับทีม DC · รับคิวบ่ายไม่เกิน 15 ตร.ม.",
+  "2026-10-15": "09:00–12:00 Meeting พี่พั๊นกับทีม DC · รับคิวบ่ายไม่เกิน 15 ตร.ม.",
+  "2026-11-19": "09:00–12:00 Meeting พี่พั๊นกับทีม DC · รับคิวบ่ายไม่เกิน 15 ตร.ม.",
+  "2026-12-17": "09:00–12:00 Meeting พี่พั๊นกับทีม DC · รับคิวบ่ายไม่เกิน 15 ตร.ม.",
+};
+
+function dcMeetingMark(date: Date) { return DC_MEETING_MARKS[ymd(date)] ?? null; }
 
 function bookingDate(daysAhead: number) {
   const date = new Date();
@@ -997,6 +1005,7 @@ export default function ShareQueuePage() {
                 const inMonth = d.getMonth() === mMonth;
                 const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
                 const teamBUnavailable = isTeamBBookingUnavailable(d, canBypassBookingRules);
+                const meetingMark = dcMeetingMark(d);
                 return (
                   <div key={d.toISOString()} onClick={() => canSell && openAdd(d)} title={canSell ? "จิ้มเพื่อลงคิว" : "ดูคิวงาน"} className={`group min-h-[96px] border-b border-r border-slate-100 p-1 flex flex-col ${canSell ? "cursor-pointer hover:bg-blue-50/40" : ""} ${inMonth ? "" : "bg-slate-50/60"}`}>
                     <div className="flex items-center justify-between px-0.5">
@@ -1004,6 +1013,7 @@ export default function ShareQueuePage() {
                       {canSell && <span className="text-[11px] text-slate-300 group-hover:text-blue-600 leading-none px-1">＋</span>}
                     </div>
                     <div className="mt-0.5 space-y-0.5 flex-1">
+                      {meetingMark && <div title={meetingMark} className="rounded border border-violet-200 bg-violet-50 px-1 py-0.5 text-[9px] leading-tight text-violet-800">📌 09:00–12:00 Meeting พี่พั๊น + ทีม DC<br />รับคิวบ่าย ≤15 ตร.ม.</div>}
                       {teamBUnavailable && <div className="rounded border border-amber-200 bg-amber-50 px-1 py-0.5 text-[9px] leading-tight text-amber-800">⏳ ทีม B · ยังไม่พร้อมจอง</div>}
                       {dayAppts.map((a) => (
                         <button key={a.id} onClick={(ev) => { ev.stopPropagation(); openDetail(a); }} className={`w-full text-left rounded px-1 py-0.5 text-[10px] leading-tight ${chipCls(a)} hover:brightness-95`}>
@@ -1023,6 +1033,7 @@ export default function ShareQueuePage() {
             {week.map((d) => {
               const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
                 const teamBUnavailable = isTeamBBookingUnavailable(d, canBypassBookingRules);
+              const meetingMark = dcMeetingMark(d);
               return (
                 <div key={d.toISOString()} className={`bg-white rounded-xl border ${isToday(d) ? "border-blue-400 ring-1 ring-blue-300" : "border-slate-200"} overflow-hidden flex flex-col min-h-[140px]`}>
                   <div className={`px-2 py-1.5 text-center border-b ${isToday(d) ? "bg-blue-50" : "bg-slate-50"}`}>
@@ -1030,6 +1041,7 @@ export default function ShareQueuePage() {
                     <div className="text-sm font-semibold text-slate-800">{d.getDate()}/{d.getMonth() + 1}</div>
                   </div>
                   <div className="p-1.5 space-y-1.5 flex-1">
+                    {meetingMark && <div title={meetingMark} className="rounded-lg border border-violet-200 bg-violet-50 px-1.5 py-1 text-[10px] leading-tight text-violet-800">📌 09:00–12:00 Meeting พี่พั๊น + ทีม DC<br />รับคิวบ่าย ≤15 ตร.ม.</div>}
                     {teamBUnavailable && <div className="rounded-lg border border-amber-200 bg-amber-50 px-1.5 py-1 text-[10px] leading-tight text-amber-800">⏳ ทีม B ยังไม่พร้อมจอง</div>}
                     {dayAppts.map((a) => {
                       const st = STATUS[a.status] ?? STATUS.proposed;
