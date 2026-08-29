@@ -124,15 +124,25 @@ export default function TechniciansPage() {
                   ลิงก์: /work/{t.personal_token}
                 </div>
               </div>
-              <button
-                disabled={resetting === t.id}
-                onClick={() => openReset(t)}
-                className="shrink-0 text-sm font-medium px-4 py-2 rounded-lg border transition-colors
-                  enabled:bg-red-50 enabled:text-red-700 enabled:border-red-200 enabled:hover:bg-red-100
-                  disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 disabled:cursor-not-allowed"
-              >
-                {resetting === t.id ? "กำลังรีเซ็ต…" : t.device_count > 0 ? "รีเซ็ต PIN" : "ตั้ง PIN / ออกลิงก์"}
-              </button>
+              <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                <a
+                  href={`/work/${t.personal_token}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-center text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100"
+                >
+                  ดูมุมมองช่าง
+                </a>
+                <button
+                  disabled={resetting === t.id}
+                  onClick={() => openReset(t)}
+                  className="text-sm font-medium px-4 py-2 rounded-lg border transition-colors
+                    enabled:bg-red-50 enabled:text-red-700 enabled:border-red-200 enabled:hover:bg-red-100
+                    disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 disabled:cursor-not-allowed"
+                >
+                  {resetting === t.id ? "กำลังรีเซ็ต…" : t.device_count > 0 ? "รีเซ็ต PIN" : "ตั้ง PIN / ออกลิงก์"}
+                </button>
+              </div>
             </div>
           ))}
         </div>

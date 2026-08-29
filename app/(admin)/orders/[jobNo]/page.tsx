@@ -11,6 +11,7 @@ import { WORK_ITEM_CATEGORIES, WORK_ITEM_CATEGORY_LABELS, WORK_ORDER_STATUS_LABE
 import type { StaffRole } from "@/lib/staff";
 import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
 import { InlineWorkOrderJobContext } from "@/components/work-orders/inline-work-order-context";
+import { ImageLightbox } from "@/components/ui/image-lightbox";
 
 interface Job {
   job_no: string; source: string | null; bill_no: string | null; customer_name: string | null; customer_phone: string | null;
@@ -208,7 +209,7 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
         </Card>
         <Card title="2. รายละเอียดหน้างาน" subtitle="ข้อมูลสำรวจและรูปทั้งหมดที่ฝ่ายขายบันทึก">
           <div className="grid gap-3 sm:grid-cols-2">{Object.entries(survey).filter(([key, value]) => key !== "photos" && key !== "customerSummary" && value !== "" && value != null && (!Array.isArray(value) || value.length)).map(([key, value]) => <Field key={key} label={key} value={Array.isArray(value) ? value.join(", ") : String(value)} />)}</div>
-          {Array.isArray(survey.photos) && survey.photos.length ? <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{(survey.photos as string[]).map((path, index) => { const url = path.startsWith("http") ? path : supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl; return <a key={path} href={url} target="_blank" rel="noreferrer" className="group relative h-28 overflow-hidden rounded-xl border border-slate-200 bg-slate-100"><img src={url} alt={`ภาพหน้างาน ${index + 1}`} className="h-full w-full object-cover transition-transform group-hover:scale-105" /><span className="absolute bottom-1 right-1 rounded bg-black/65 px-1.5 py-0.5 text-[10px] text-white">เปิดรูป</span></a>; })}</div> : <p className="mt-3 text-sm text-amber-600">ยังไม่มีรูปสำรวจหน้างาน</p>}
+          {Array.isArray(survey.photos) && survey.photos.length ? <ImageLightbox label="รูปหน้างาน" images={(survey.photos as string[]).map((path) => path.startsWith("http") ? path : supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl)} renderTrigger={(open) => <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{(survey.photos as string[]).map((path, index) => { const url = path.startsWith("http") ? path : supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl; return <button type="button" key={path} onClick={() => open(index)} className="group relative h-28 overflow-hidden rounded-xl border border-slate-200 bg-slate-100 text-left"><img src={url} alt={`ภาพหน้างาน ${index + 1}`} className="h-full w-full object-cover transition-transform group-hover:scale-105" /><span className="absolute bottom-1 right-1 rounded bg-black/65 px-1.5 py-0.5 text-[10px] text-white">เปิดรูป</span></button>; })}</div>} /> : <p className="mt-3 text-sm text-amber-600">ยังไม่มีรูปสำรวจหน้างาน</p>}
           {job.source === "bbps" ? <div className="mt-5"><BbpsWorkOrderDetails rawPayload={job.raw_payload} /></div> : null}
         </Card>
         <Card title="3. วัสดุ อุปกรณ์ และของที่ต้องเตรียม" subtitle="หัวหน้ากำหนด SKU และจำนวนตามแผน คลังกรอกเฉพาะจำนวนหยิบจริง">

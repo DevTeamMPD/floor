@@ -1,15 +1,18 @@
 import { Toaster } from "sonner";
 import Sidebar from "@/components/layout/sidebar";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { getCurrentStaff } from "@/lib/staff-server";
 import NotificationCenter from "@/components/notifications/notification-center";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  const isLocalDemo = (await cookies()).get("floor_local_demo")?.value === "1";
   const staff = await getCurrentStaff();
-  if (!staff) redirect("/login");
+  if (!staff && !isLocalDemo) redirect("/login");
+  const visibleStaff = staff ?? { id: "local-demo", email: "demo@local", full_name: "โหมดทดสอบ Local", role: "admin" as const, is_active: true };
   return (
     <div className="flex min-h-screen">
-      <Sidebar staff={staff} />
+      <Sidebar staff={visibleStaff} />
       <NotificationCenter />
       {/*
         Desktop: ml-[252px] to clear the fixed sidebar

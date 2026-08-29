@@ -25,7 +25,8 @@ export const ROLE_LABELS: Record<StaffRole, string> = {
 export const ROLE_HOME: Record<StaffRole, string> = {
   admin: "/home",
   staff: "/home",
-  sales: "/home",
+  // ฝ่ายขายเริ่มต้นที่ตารางคิว เพื่อเห็นงานที่ต้องจัดการทันทีบนมือถือ
+  sales: "/sales-queue",
   head_technician: "/home",
   cs: "/home",
   executive: "/home",

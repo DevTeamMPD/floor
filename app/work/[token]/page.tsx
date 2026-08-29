@@ -6,6 +6,8 @@ import { floorActionError, floorErrorMessage } from "@/lib/floor-error-message";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import RemnantReportForm, { MaterialMovement, RemnantReportData } from "@/components/technician/remnant-report-form";
 import TechnicianPushButton from "@/components/notifications/technician-push-button";
+import TicketChat from "@/components/tickets/ticket-chat";
+import LendiSkeleton from "@/components/brand/lendi-skeleton";
 
 interface WorkAssignment {
   assignmentId: string | null; isLead: boolean; isTeamQueue?: boolean; firstOpenedAt: string | null; lastOpenedAt: string | null;
@@ -117,6 +119,51 @@ function suggestedMaterialMovements(order: CentralWorkOrder | null): MaterialMov
     return { thickness, color, widthCm: width, lengthCm: lengthMatch?.[1] ?? "", qty: String(item.actualQty ?? item.plannedQty ?? 1), note: [item.sku, item.itemName].filter(Boolean).join(" · ") };
   });
 }
+
+function totalSheetQuantity(order: CentralWorkOrder | null, field: "plannedQty" | "actualQty") {
+  if (!order) return null;
+  const quantities = order.items
+    .filter((item) => item.unit.trim().includes("แผ่น"))
+    .map((item) => item[field])
+    .filter((quantity): quantity is number => typeof quantity === "number");
+  return quantities.length ? quantities.reduce((total, quantity) => total + quantity, 0) : null;
+}
+
+interface LinkRedirect {
+  newToken: string;
+}
+
+function localDemoWorkspace(): Workspace {
+  const start = new Date();
+  start.setDate(start.getDate() + 1);
+  start.setHours(9, 0, 0, 0);
+  const end = new Date(start);
+  end.setHours(12, 0, 0, 0);
+  return {
+    technician: { id: "00000000-0000-4000-8000-000000000001", name: "โจเซฟ (ข้อมูลจำลอง)", phone: "080-000-0000", teamId: "demo-team", teamName: "ทีม B", isTeamLead: true },
+    assignments: [{
+      assignmentId: "00000000-0000-4000-8000-000000000002", isLead: true, firstOpenedAt: null, lastOpenedAt: null, openCount: 0, acknowledgedAt: null,
+      appointmentId: "00000000-0000-4000-8000-000000000003", slotStart: start.toISOString(), slotEnd: end.toISOString(), appointmentStatus: "confirmed", teamName: "ทีม B",
+      notes: "ข้อมูลจำลองสำหรับทดสอบหน้าช่างบน local เท่านั้น", requirement: "ติดตั้งกระเบื้องยาง Safespace พร้อมเก็บขอบ", jobNo: "DEMO-LOCAL-001", source: "demo",
+      billNo: "DEMO-260827", customerName: "ลูกค้าทดสอบ Local", customerPhone: "080-000-0000", address: "123 ถนนทดสอบ กรุงเทพมหานคร", locationUrl: "https://maps.google.com/?q=13.7563,100.5018",
+      productName: "Safespace 0.6 cm", surveyData: JSON.stringify({ areaSqm: "25", floorCondition: "แห้งสะอาด", notes: "ใช้เพื่อทดสอบหน้าจอเท่านั้น" }),
+      pickPlan: { newItems: [{ width: "110", length_cm: "250", qty: "10", note: "กระเบื้องยาง Safespace" }], note: "โปรดตรวจสอบจำนวนก่อนออกหน้างาน" },
+    }],
+  };
+}
+
+function localDemoWorkProgress(): WorkProgress {
+  return { plannedSheetCount: 10, pickedSheetCount: null, events: [] };
+}
+
+function localDemoWorkOrder(): CentralWorkOrder {
+  return {
+    id: "00000000-0000-4000-8000-000000000004", status: "ready_to_install", revision: 1,
+    note: "ข้อมูลจำลอง: คลังเตรียมและจ่ายกระเบื้องให้ครบ 10 แผ่น", warehouseAssignee: "คลังสินค้า (ข้อมูลจำลอง)", warehouseAcceptedAt: new Date().toISOString(), warehouseCompletedAt: new Date().toISOString(), isLead: true,
+    items: [{ id: "00000000-0000-4000-8000-000000000005", category: "material", itemName: "กระเบื้องยาง Safespace", sku: "LDSSF004", specification: "0.6 cm", plannedQty: 10, actualQty: 10, unit: "แผ่น", sourceType: "sku", note: null }],
+    events: [],
+  };
+}
 function isFreeformWorkNote(item: CentralWorkItem) {
   return item.category === "tool" && item.sourceType === "other" && !item.sku && item.plannedQty === 0 && item.unit === "รายการ" && item.itemName === "โน้ต Freeform จากหัวหน้าช่าง";
 }
@@ -141,7 +188,7 @@ function EvidenceGallery({ paths, label, supabase }: { paths: string[]; label: s
     </div>
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
       {paths.map((path, index) => {
-        const url = path.startsWith("http") ? path : supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl;
+        const url = /^(https?:|blob:|data:)/.test(path) ? path : supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl;
         return <a key={`${path}-${index}`} href={url} target="_blank" rel="noreferrer" className="group relative aspect-square overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={url} alt={`${label} รูปที่ ${index + 1}`} loading="lazy" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
@@ -165,6 +212,7 @@ function CustomerSignature({ busy, onSubmit }: { busy: boolean; onSubmit: (name:
   const drawing = useRef(false);
   const [name, setName] = useState("");
   const [hasInk, setHasInk] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   function point(event: React.PointerEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current!; const rect = canvas.getBoundingClientRect();
@@ -186,9 +234,10 @@ function CustomerSignature({ busy, onSubmit }: { busy: boolean; onSubmit: (name:
   }
 
   return <div className="space-y-3">
+    <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-xs leading-relaxed text-violet-950"><div className="font-semibold">ข้อกำหนดก่อนลงนาม</div><p className="mt-1">ลูกค้าตรวจรับผลงานตามขอบเขตที่ตกลง รับทราบวิธีดูแลรักษา และยอมรับว่าหากพบประเด็นเพิ่มเติมจะแจ้งผ่านช่องทางบริการลูกค้า</p><label className="mt-2 flex cursor-pointer items-start gap-2 font-medium"><input type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} className="mt-0.5" />ข้าพเจ้าอ่านและยอมรับข้อกำหนดข้างต้น</label></div>
     <input value={name} onChange={(event) => setName(event.target.value)} placeholder="ชื่อผู้รับงาน" className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
     <div className="overflow-hidden rounded-xl border border-dashed border-slate-300 bg-white"><canvas ref={canvasRef} width={700} height={240} onPointerDown={start} onPointerMove={move} onPointerUp={stop} onPointerCancel={stop} className="h-40 w-full touch-none" /></div>
-    <div className="flex gap-2"><button type="button" onClick={clear} className="flex-1 rounded-xl border border-slate-300 py-2 text-sm">ล้างลายเซ็น</button><button type="button" onClick={() => void submit()} disabled={busy || !name.trim() || !hasInk} className="flex-1 rounded-xl bg-blue-600 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? "กำลังบันทึก…" : "ลูกค้าเซ็นรับงาน"}</button></div>
+    <div className="flex gap-2"><button type="button" onClick={clear} className="flex-1 rounded-xl border border-slate-300 py-2 text-sm">ล้างลายเซ็น</button><button type="button" onClick={() => void submit()} disabled={busy || !acceptedTerms || !name.trim() || !hasInk} className="flex-1 rounded-xl bg-blue-600 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? "กำลังบันทึก…" : "ยอมรับและเซ็นรับงาน"}</button></div>
   </div>;
 }
 
@@ -197,6 +246,8 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   const supabase = useMemo(() => createClient(), []);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [loading, setLoading] = useState(true);
+  const [demoMode, setDemoMode] = useState(false);
+  const [linkRedirect, setLinkRedirect] = useState<LinkRedirect | null | undefined>(undefined);
   const [pin, setPin] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [selected, setSelected] = useState<WorkAssignment | null>(null);
@@ -221,6 +272,16 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   useEffect(() => {
     setRequestedJob(new URLSearchParams(window.location.search).get("job"));
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    supabase.rpc("get_floor_technician_link_redirect", { p_old_token: token }).then(({ data }) => {
+      if (!active) return;
+      const value = data as LinkRedirect | null;
+      setLinkRedirect(value?.newToken ? value : null);
+    });
+    return () => { active = false; };
+  }, [supabase, token]);
 
   const load = useCallback(async (pinValue: string) => {
     const normalized = pinValue.trim();
@@ -255,6 +316,13 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const isLocalDemo = ["localhost", "127.0.0.1"].includes(window.location.hostname) && new URLSearchParams(window.location.search).get("demo") === "1";
+    if (isLocalDemo) {
+      setDemoMode(true);
+      setWorkspace(localDemoWorkspace());
+      setLoading(false);
+      return;
+    }
     const saved = window.sessionStorage.getItem(pinStorageKey);
     if (saved) {
       setPin(saved);
@@ -275,7 +343,11 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   }, [upcoming]);
 
   async function openWork(a: WorkAssignment) {
-    setSelected(a);
+    const openedAt = new Date().toISOString();
+    const openedAssignment = demoMode && !a.firstOpenedAt
+      ? { ...a, firstOpenedAt: openedAt, lastOpenedAt: openedAt, openCount: a.openCount + 1 }
+      : a;
+    setSelected(openedAssignment);
     setResponsibles([]);
     setDetailJob(null);
     setWorkProgress(null);
@@ -285,6 +357,15 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     setStatusNote("");
     setPickedSheetCount("");
     setProgressError(null);
+    if (demoMode) {
+      setWorkspace((current) => current ? {
+        ...current,
+        assignments: current.assignments.map((item) => item.assignmentId === a.assignmentId ? openedAssignment : item),
+      } : current);
+      setWorkProgress(localDemoWorkProgress());
+      setCentralWorkOrder(localDemoWorkOrder());
+      return;
+    }
     if (a.assignmentId) {
       await supabase.rpc("record_technician_work_event", {
         p_token: token,
@@ -327,6 +408,16 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
 
   async function acknowledge() {
     if (!selected?.assignmentId) return;
+    if (demoMode) {
+      const acknowledgedAt = new Date().toISOString();
+      const acknowledgedAssignment = { ...selected, acknowledgedAt };
+      setSelected(acknowledgedAssignment);
+      setWorkspace((current) => current ? {
+        ...current,
+        assignments: current.assignments.map((item) => item.assignmentId === selected.assignmentId ? acknowledgedAssignment : item),
+      } : current);
+      return;
+    }
     setSaving(true);
     const { data, error } = await supabase.rpc("record_technician_work_event", {
       p_token: token,
@@ -371,15 +462,33 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     setStatusFiles([]);
   }
 
+  function retainStatusFilesAsEvidence() {
+    statusFilesRef.current = [];
+    setStatusFiles([]);
+  }
+
   async function updateWorkStatus() {
     if (!selected?.assignmentId) return;
-    const coreEvents = (workProgress?.events ?? []).filter((event) => event.status !== "customer_signed");
+    const coreEvents = (workProgress?.events ?? []).filter((event) => !["customer_signed", "warehouse_returned"].includes(event.status));
     const current = coreEvents.at(-1)?.status;
     const currentIndex = WORK_STEPS.findIndex((step) => step.status === current);
     const next = WORK_STEPS[currentIndex + 1];
     if (!next) return;
     if (!statusFiles.length) { setProgressError("กรุณาถ่ายหรือเลือกรูปสถานะอย่างน้อย 1 รูป"); return; }
     if (next.status === "travelling" && (!pickedSheetCount.trim() || Number(pickedSheetCount) < 0)) { setProgressError("กรุณาระบุจำนวนแผ่นที่หยิบจริง"); return; }
+    if (demoMode) {
+      const occurredAt = new Date().toISOString();
+      const photoPaths = statusFiles.map((item) => item.url);
+      setWorkProgress((currentProgress) => ({
+        plannedSheetCount: currentProgress?.plannedSheetCount ?? 10,
+        pickedSheetCount: next.status === "travelling" ? Number(pickedSheetCount) : currentProgress?.pickedSheetCount ?? null,
+        events: [...(currentProgress?.events ?? []), { id: Date.now(), status: next.status, note: statusNote.trim() || null, photoPaths, pickedSheetCount: next.status === "travelling" ? Number(pickedSheetCount) : null, customerSignedName: null, customerSignaturePath: null, occurredAt }],
+      }));
+      retainStatusFilesAsEvidence();
+      setStatusNote("");
+      setProgressError(null);
+      return;
+    }
     setSaving(true); setProgressError(null);
     const paths: string[] = [];
     try {
@@ -409,6 +518,14 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
 
   async function saveCustomerSignature(customerName: string, blob: Blob) {
     if (!selected?.assignmentId) return;
+    if (demoMode) {
+      const signaturePath = URL.createObjectURL(blob);
+      setWorkProgress((current) => ({
+        plannedSheetCount: current?.plannedSheetCount ?? 10, pickedSheetCount: current?.pickedSheetCount ?? null,
+        events: [...(current?.events ?? []), { id: Date.now(), status: "customer_signed", note: "ลูกค้าอ่านและยอมรับข้อกำหนด", photoPaths: [signaturePath], pickedSheetCount: null, customerSignedName: customerName, customerSignaturePath: signaturePath, occurredAt: new Date().toISOString() }],
+      }));
+      return;
+    }
     setSaving(true); setProgressError(null);
     try {
       const path = `work/${selected.appointmentId}/signature/${Date.now()}-customer.png`;
@@ -423,6 +540,41 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     setSaving(false);
   }
 
+  async function saveWarehouseReturn() {
+    if (!selected?.assignmentId) return;
+    if (!statusFiles.length) { setProgressError("กรุณาแนบภาพยืนยันการนำสินค้า/เศษกลับคลังอย่างน้อย 1 รูป"); return; }
+    if (demoMode) {
+      const photoPaths = statusFiles.map((item) => item.url);
+      setWorkProgress((current) => ({
+        plannedSheetCount: current?.plannedSheetCount ?? 10, pickedSheetCount: current?.pickedSheetCount ?? null,
+        events: [...(current?.events ?? []), { id: Date.now(), status: "warehouse_returned", note: "นำสินค้า/เศษกลับถึงคลังแล้ว", photoPaths, pickedSheetCount: null, customerSignedName: null, customerSignaturePath: null, occurredAt: new Date().toISOString() }],
+      }));
+      retainStatusFilesAsEvidence();
+      setProgressError(null);
+      return;
+    }
+    setSaving(true); setProgressError(null);
+    const paths: string[] = [];
+    try {
+      for (let index = 0; index < statusFiles.length; index++) {
+        const file = statusFiles[index].file;
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = `work/${selected.appointmentId}/warehouse-return/${Date.now()}-${index}-${safeName}`;
+        const { error } = await supabase.storage.from("job-photos").upload(path, file, { upsert: false, contentType: file.type || "image/jpeg" });
+        if (error) throw error;
+        paths.push(path);
+      }
+      const { error } = await supabase.rpc("record_technician_warehouse_return", { p_token: token, p_pin: pin.trim(), p_assignment_id: selected.assignmentId, p_photo_paths: paths, p_note: statusNote.trim() || null });
+      if (error) throw error;
+      clearStatusFiles(); setStatusNote("");
+      await reloadProgress(selected.assignmentId);
+    } catch (error) {
+      if (paths.length) await supabase.storage.from("job-photos").remove(paths);
+      setProgressError(floorActionError("บันทึกการนำสินค้ากลับคลัง", error));
+    }
+    setSaving(false);
+  }
+
   async function unlock() {
     setLoading(true);
     setAuthError(null);
@@ -433,7 +585,15 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     }
   }
 
-  if (loading) return <main className="min-h-screen bg-slate-50 grid place-items-center text-slate-500">กำลังโหลดตารางงาน…</main>;
+  if (loading || linkRedirect === undefined) return <main className="grid min-h-screen place-items-center bg-slate-50 p-4"><div className="w-full max-w-3xl"><LendiSkeleton label="กำลังโหลดตารางงานและสถานะใบงาน…" cards={3} compact /></div></main>;
+  if (linkRedirect) return <main className="min-h-screen bg-slate-50 grid place-items-center p-6">
+    <div className="w-full max-w-md rounded-2xl border border-amber-200 bg-white p-6 text-center shadow-sm">
+      <div className="text-3xl">🔗</div>
+      <h1 className="mt-3 text-xl font-semibold text-slate-900">ลิงก์นี้ถูกแทนที่แล้ว</h1>
+      <p className="mt-2 text-sm leading-relaxed text-slate-600">เพื่อให้ได้รับตารางงานล่าสุด กรุณาใช้ลิงก์ใหม่จากหัวหน้าช่าง พร้อม PIN ล่าสุด</p>
+      <a href={`/work/${linkRedirect.newToken}`} className="mt-5 inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700">ไปที่ลิงก์ใหม่</a>
+    </div>
+  </main>;
   if (!workspace) return <main className="min-h-screen bg-slate-50 grid place-items-center p-6">
     <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="text-xs font-medium uppercase tracking-wide text-slate-400">FloorNow · หน้างานของฉัน</div>
@@ -465,9 +625,9 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
 
   return <main className="min-h-screen bg-slate-50 pb-12">
     <header className="bg-slate-950 text-white px-4 py-5">
-      <div className="max-w-2xl mx-auto"><div className="text-xs text-slate-400">MPD FloorNow · หน้างานของฉัน</div><h1 className="text-xl font-semibold mt-1">{workspace.technician.name}</h1><div className="text-sm text-slate-300">{workspace.technician.teamName ?? "ไม่ระบุทีม"}{workspace.technician.isTeamLead ? " · หัวหน้าทีม" : ""}</div><TechnicianPushButton token={token} pin={pin} /></div>
+      <div className="max-w-4xl mx-auto"><div className="text-xs text-slate-400">LENDI Engineering · หน้างานของฉัน</div><h1 className="text-xl font-semibold mt-1">{workspace.technician.name}</h1><div className="text-sm text-slate-300">{workspace.technician.teamName ?? "ไม่ระบุทีม"}{workspace.technician.isTeamLead ? " · หัวหน้าทีม" : ""}</div>{demoMode ? <div className="mt-3 rounded-lg border border-amber-300/60 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">🧪 โหมดข้อมูลจำลองบน local — ปุ่มบันทึกจะไม่เชื่อมกับงานจริง</div> : <TechnicianPushButton token={token} pin={pin} />}</div>
     </header>
-    <div className="max-w-2xl mx-auto px-4 py-5">
+    <div className="max-w-4xl mx-auto px-4 py-5">
       <div className="flex items-end justify-between mb-4"><div><h2 className="font-semibold text-slate-900">ตารางงานของฉัน</h2><p className="text-xs text-slate-500">กดงานเพื่อเปิดรายละเอียดและบันทึกการเปิดใบงาน</p></div><span className="text-xs text-slate-500">{upcoming.length} งาน</span></div>
       <div className="space-y-5">
         {grouped.map(([day, jobs]) => <section key={day}>
@@ -505,7 +665,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
           </div>
         </div>
 
-        <div className="grid gap-4 p-4 sm:grid-cols-[1.35fr_0.85fr] sm:p-5">
+        <div className="grid gap-4 p-4 md:grid-cols-[1.2fr_0.8fr] md:p-5">
           <WorkSection title="📍 ข้อมูลงานที่ฝ่ายขายยืนยันแล้ว" subtitle="ข้อมูลหลักที่ช่างต้องใช้ก่อนออกงาน">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="ลูกค้า">{selected.customerName}</Field>
@@ -543,6 +703,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
 
           <div className="space-y-4">
             <PickPlanDetails value={selected.pickPlan} />
+            {selected.jobNo && <TicketChat jobNo={selected.jobNo} viewer="technician" viewerName={`${selected.isLead ? "หัวหน้าช่าง" : "ช่าง"} · ${workspace.technician.name}`} technicianToken={token} technicianPin={pin.trim()} />}
             {(() => {
               const survey = parseJsonObject(detailJob?.survey_data ?? selected.surveyData);
               const photos = Array.isArray(survey?.photos) ? survey.photos.map(textOf).filter(Boolean) : [];
@@ -585,14 +746,18 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
             <WorkSection title="📸 อัปเดตหน้างานวันนี้" subtitle="ทุกสถานะต้องมีรูปและบันทึกเวลาอัตโนมัติ">
               {selected.isTeamQueue ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">หัวหน้าช่างต้องจ่ายงานให้คุณก่อน จึงจะอัปเดตสถานะได้</div> : (() => {
                 const events = workProgress?.events ?? [];
-                const coreEvents = events.filter((event) => event.status !== "customer_signed");
+                const coreEvents = events.filter((event) => !["customer_signed", "warehouse_returned"].includes(event.status));
                 const currentStatus = coreEvents.at(-1)?.status;
                 const currentIndex = WORK_STEPS.findIndex((step) => step.status === currentStatus);
                 const next = WORK_STEPS[currentIndex + 1];
                 const signed = events.find((event) => event.status === "customer_signed");
+                const warehouseReturned = events.find((event) => event.status === "warehouse_returned");
                 const remnantReady = remnantReport?.status === "pending_review" || remnantReport?.status === "accepted";
                 const workReady = !centralWorkOrder || centralWorkOrder.status === "ready_to_install" || centralWorkOrder.status === "installing";
                 const canStart = currentStatus || !centralWorkOrder || (centralWorkOrder.status === "ready_to_install" && centralWorkOrder.isLead);
+                const headPlannedSheetCount = workProgress?.plannedSheetCount ?? totalSheetQuantity(centralWorkOrder, "plannedQty");
+                const warehousePreparedSheetCount = totalSheetQuantity(centralWorkOrder, "actualQty");
+                const technicianPickedSheetCount = pickedSheetCount.trim() ? Number(pickedSheetCount) : null;
                 return <div className="space-y-4">
                   <div className="space-y-2">{WORK_STEPS.map((step, index) => {
                     const stepEvents = events.filter((item) => item.status === step.status);
@@ -609,7 +774,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
 
                   {next && selected.acknowledgedAt && workReady && canStart ? <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
                     <div className="text-sm font-semibold text-blue-950">ขั้นต่อไป: {next.status === "travelling" && centralWorkOrder ? "รับงานติดตั้งและเริ่มเดินทาง" : next.label}</div>
-                    {next.status === "travelling" ? <div className="mt-3"><label className="text-xs font-medium text-blue-800">จำนวนแผ่นที่หยิบจริง *</label><div className="mt-1 flex items-center gap-2"><input type="number" min={0} step={1} value={pickedSheetCount} onChange={(event) => setPickedSheetCount(event.target.value)} placeholder="จำนวนแผ่น" className="min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm" /><span className="text-xs text-blue-700">แผน {workProgress?.plannedSheetCount ?? "—"} แผ่น</span></div></div> : null}
+                    {next.status === "travelling" ? <div className="mt-3"><label className="text-xs font-medium text-blue-800">จำนวนแผ่นที่หยิบจริง *</label><div className="mt-2 grid grid-cols-3 gap-2 text-center"><div className="rounded-lg border border-violet-200 bg-violet-50 px-2 py-2"><div className="text-[10px] text-violet-700">หัวหน้าช่างแจ้ง</div><div className="mt-0.5 text-sm font-semibold text-violet-950">{headPlannedSheetCount ?? "—"} <span className="text-[10px] font-normal">แผ่น</span></div></div><div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2"><div className="text-[10px] text-emerald-700">คลังเตรียม/จ่าย</div><div className="mt-0.5 text-sm font-semibold text-emerald-950">{warehousePreparedSheetCount ?? "—"} <span className="text-[10px] font-normal">แผ่น</span></div></div><div className={`rounded-lg border px-2 py-2 ${technicianPickedSheetCount == null ? "border-slate-200 bg-white" : "border-blue-200 bg-blue-50"}`}><div className="text-[10px] text-blue-700">ช่างหยิบจริง</div><div className="mt-0.5 text-sm font-semibold text-blue-950">{technicianPickedSheetCount ?? "—"} <span className="text-[10px] font-normal">แผ่น</span></div></div></div><div className="mt-2 flex items-center gap-2"><input type="number" min={0} step={1} value={pickedSheetCount} onChange={(event) => setPickedSheetCount(event.target.value)} placeholder="กรอกจำนวนที่หยิบจริง" className="min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm" /><span className="text-xs text-blue-700">แผ่น</span></div><div className={`mt-2 text-xs ${technicianPickedSheetCount != null && warehousePreparedSheetCount != null && technicianPickedSheetCount !== warehousePreparedSheetCount ? "text-amber-700" : "text-slate-500"}`}>{technicianPickedSheetCount != null && warehousePreparedSheetCount != null && technicianPickedSheetCount !== warehousePreparedSheetCount ? `จำนวนต่างจากที่คลังจ่าย ${Math.abs(technicianPickedSheetCount - warehousePreparedSheetCount)} แผ่น — กรุณาระบุเหตุผล` : "ใช้ตรวจสอบก่อนเริ่มเดินทาง หากจำนวนต่างกัน ให้บันทึกเหตุผลในหมายเหตุ"}</div></div> : null}
                     <textarea value={statusNote} onChange={(event) => setStatusNote(event.target.value)} rows={2} placeholder="หมายเหตุ (ถ้ามี)" className="mt-3 w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm" />
                     <label className="mt-3 block cursor-pointer rounded-xl border border-dashed border-blue-300 bg-white px-3 py-3 text-center text-sm font-medium text-blue-700">📷 ถ่ายรูป / เพิ่มรูป<input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(event) => { addStatusFiles(event.target.files); event.currentTarget.value = ""; }} /></label>
                     {statusFiles.length ? <div className="mt-3"><div className="mb-2 flex items-center justify-between"><div className="text-xs font-semibold text-blue-800">ภาพที่เลือก ({statusFiles.length})</div><button type="button" onClick={clearStatusFiles} className="text-xs font-medium text-red-500">ล้างทั้งหมด</button></div><div className="grid grid-cols-3 gap-2">{statusFiles.map((item, index) => <div key={item.id} className="relative aspect-square overflow-hidden rounded-xl border border-blue-200 bg-white"><img src={item.url} alt={`ภาพสถานะ ${index + 1}`} className="h-full w-full object-cover" /><button type="button" onClick={() => removeStatusFile(item.id)} aria-label={`ลบภาพ ${index + 1}`} className="absolute right-1.5 top-1.5 rounded-full bg-black/70 px-2 py-1 text-[10px] font-semibold text-white">ลบ</button><span className="absolute bottom-1.5 left-1.5 rounded-full bg-black/65 px-2 py-1 text-[10px] text-white">{index + 1}</span></div>)}</div></div> : <div className="mt-2 text-xs text-blue-600">ยังไม่ได้เลือกรูป</div>}
@@ -618,10 +783,12 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
                   {next && selected.acknowledgedAt && !workReady ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">ยังเริ่มงานไม่ได้: ใบสั่งงานอยู่สถานะ {{ head_review: "รอหัวหน้าช่างตรวจ", warehouse_waiting: "รอคลังรับงาน", warehouse_preparing: "กำลังเตรียมสินค้า" }[centralWorkOrder?.status ?? ""] ?? centralWorkOrder?.status}</div> : null}
                   {next && selected.acknowledgedAt && workReady && !canStart ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">หัวหน้าทีมที่ได้รับมอบหมายต้องกด “รับงานติดตั้ง” ก่อน</div> : null}
                   {next && !selected.acknowledgedAt ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">กดรับทราบงานก่อนเริ่มอัปเดตสถานะ</div> : null}
-                  {currentStatus === "completed" && selected.isLead ? <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3"><div className="mb-3"><div className="text-sm font-semibold text-amber-950">✂️ สรุปวัสดุและเศษหลังติดตั้ง</div><div className="mt-0.5 text-xs text-amber-700">ต้องบันทึกส่วนนี้ก่อนให้ลูกค้าเซ็นรับงาน</div></div><RemnantReportForm token={token} pin={pin.trim()} assignmentId={selected.assignmentId!} appointmentId={selected.appointmentId} initial={remnantReport} suggestedMaterials={suggestedRemnantMaterials} onSaved={setRemnantReport} /></div> : null}
-                  {currentStatus === "completed" && !signed && !selected.isLead ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">รอหัวหน้าทีมบันทึกสรุปวัสดุและเศษก่อนส่งมอบงาน</div> : null}
-                  {currentStatus === "completed" && !signed && remnantReady ? <div className="rounded-xl border border-violet-200 bg-violet-50 p-3"><div className="mb-3 text-sm font-semibold text-violet-950">ขั้นตอนสุดท้าย: ให้ลูกค้าเซ็นรับงาน</div><CustomerSignature busy={saving} onSubmit={saveCustomerSignature} /></div> : null}
-                  {signed ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-700">✓ ลูกค้า {signed.customerSignedName} เซ็นรับงานแล้ว เวลา {new Date(signed.occurredAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })}</div> : null}
+                  {currentStatus === "completed" && !signed && selected.isLead ? <div className="rounded-xl border border-violet-200 bg-violet-50 p-3"><div className="mb-3"><div className="text-sm font-semibold text-violet-950">5. ลูกค้าอ่านข้อกำหนดและเซ็นรับงาน</div><div className="mt-0.5 text-xs text-violet-700">ให้ลูกค้าอ่าน กดยอมรับข้อกำหนด แล้วลงลายเซ็น</div></div><CustomerSignature busy={saving} onSubmit={saveCustomerSignature} /></div> : null}
+                  {currentStatus === "completed" && !signed && !selected.isLead ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">รอหัวหน้าทีมให้ลูกค้าอ่านข้อกำหนดและเซ็นรับงาน</div> : null}
+                  {signed ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-700">✓ ลูกค้า {signed.customerSignedName} ยอมรับข้อกำหนดและเซ็นรับงานแล้ว เวลา {new Date(signed.occurredAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })}</div> : null}
+                  {signed && !remnantReady && selected.isLead ? <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3"><div className="mb-3"><div className="text-sm font-semibold text-amber-950">6. รับเศษกลับคลัง</div><div className="mt-0.5 text-xs text-amber-700">บันทึกวัสดุที่ใช้และเศษที่เหลือ เพื่อส่งให้คลังตรวจรับ</div></div><RemnantReportForm token={token} pin={pin.trim()} assignmentId={selected.assignmentId!} appointmentId={selected.appointmentId} initial={remnantReport} suggestedMaterials={suggestedRemnantMaterials} onSaved={setRemnantReport} demoMode={demoMode} /></div> : null}
+                  {signed && remnantReady && !warehouseReturned && selected.isLead ? <div className="rounded-xl border border-sky-200 bg-sky-50 p-3"><div className="text-sm font-semibold text-sky-950">7. ภาพยืนยันนำสินค้า/เศษกลับคลัง</div><div className="mt-0.5 text-xs text-sky-700">แนบได้หลายรูป และต้องมีอย่างน้อย 1 รูปก่อนยืนยัน</div><label className="mt-3 block cursor-pointer rounded-xl border border-dashed border-sky-300 bg-white px-3 py-3 text-center text-sm font-medium text-sky-700">📷 ถ่ายรูป / เพิ่มรูป<input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(event) => { addStatusFiles(event.target.files); event.currentTarget.value = ""; }} /></label>{statusFiles.length ? <div className="mt-3 grid grid-cols-3 gap-2">{statusFiles.map((item, index) => <div key={item.id} className="relative aspect-square overflow-hidden rounded-xl border border-sky-200 bg-white"><img src={item.url} alt={`ภาพกลับคลัง ${index + 1}`} className="h-full w-full object-cover" /><button type="button" onClick={() => removeStatusFile(item.id)} className="absolute right-1.5 top-1.5 rounded-full bg-black/70 px-2 py-1 text-[10px] font-semibold text-white">ลบ</button></div>)}</div> : null}<textarea value={statusNote} onChange={(event) => setStatusNote(event.target.value)} rows={2} placeholder="หมายเหตุถึงคลัง (ถ้ามี)" className="mt-3 w-full rounded-xl border border-sky-200 bg-white px-3 py-2 text-sm" /><button type="button" onClick={() => void saveWarehouseReturn()} disabled={saving} className="mt-3 w-full rounded-xl bg-sky-600 py-3 text-sm font-semibold text-white disabled:opacity-50">{saving ? "กำลังบันทึก…" : "ยืนยันนำกลับถึงคลัง"}</button></div> : null}
+                  {warehouseReturned ? <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-800"><div className="font-semibold">✓ ยืนยันนำสินค้า/เศษกลับถึงคลังแล้ว</div><EvidenceGallery paths={warehouseReturned.photoPaths ?? []} label="นำกลับคลัง" supabase={supabase} /></div> : null}
                   {progressError ? <div className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{progressError}</div> : null}
                 </div>;
               })()}

@@ -15,10 +15,14 @@ async function handle(req: Request) {
   const auth = req.headers.get("authorization");
   if (auth !== `Bearer ${token}`) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
+  // Webhook นี้ต้องอ่านและเขียนตารางภายในหลายตาราง จึงต้องใช้ key ฝั่ง server
+  // เท่านั้น ห้ามใช้ anon key หรือเปิดสิทธิ์ anon ให้ข้อมูลใบงาน.
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return NextResponse.json({ error: "supabase_env_missing" }, { status: 500 });
-  const supabase = createClient(url, key);
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceRoleKey) return NextResponse.json({ error: "supabase_server_env_missing" }, { status: 500 });
+  const supabase = createClient(url, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 
   // อ่าน raw body ครั้งเดียว (ต้องใช้ bytes ดิบสำหรับ HMAC)
   const raw = await req.text();
