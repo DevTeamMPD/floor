@@ -3,7 +3,11 @@ import { createHmac, timingSafeEqual } from "crypto";
 // ตรวจ HMAC-SHA256 + กัน replay ด้วย timestamp (เปิดใช้เมื่อมี BBPS_WEBHOOK_SECRET เท่านั้น)
 // รูปแบบการเซ็นที่คาดหวังจากฝั่ง BBPS:
 //   signedPayload = `${X-Timestamp}.${rawBody}`
-//   X-Signature   = "sha256=" + hex( HMAC_SHA256(secret, signedPayload) )
+//   X-Signature   = "v1=" + hex( HMAC_SHA256(secret, signedPayload) )
+//
+// BBPS ส่งมาด้วยคำนำหน้า "v1=" (ดู src/lib/webhook-signature.ts ฝั่งนั้น) แต่โค้ดเดิม
+// ตัดเฉพาะ "sha256=" ทำให้ลายเซ็นจริงถูกปฏิเสธทุกครั้งถ้าเปิดใช้ BBPS_WEBHOOK_SECRET
+// จึงรับทั้งสองคำนำหน้า (และ hex เปล่า) เพื่อไม่ให้ integration ที่ตั้งค่าถูกต้องพัง
 export interface VerifyResult { ok: boolean; reason?: string }
 
 function parseTs(ts: string): number | null {
@@ -38,7 +42,7 @@ export function verifyBbpsSignature(params: {
   if (Math.abs(now - tsMs) / 1000 > toleranceSec) return { ok: false, reason: "timestamp_expired" };
 
   const expected = createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex");
-  const provided = signature.startsWith("sha256=") ? signature.slice(7) : signature;
+  const provided = signature.includes("=") ? signature.slice(signature.indexOf("=") + 1) : signature;
   if (!safeEqualHex(expected, provided)) return { ok: false, reason: "invalid_signature" };
 
   return { ok: true };
