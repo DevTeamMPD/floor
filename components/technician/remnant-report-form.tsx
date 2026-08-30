@@ -43,15 +43,16 @@ const EMPTY_MATERIAL: MaterialMovement = { thickness: "16", color: "B", widthCm:
 const EMPTY_PIECE: PieceDraft = { widthCm: "110", lengthCm: "", qty: "1", thickness: "16", color: "B", note: "", photoPaths: [], localPhotos: [] };
 
 function publicPhotoUrl(path: string, supabase: ReturnType<typeof createClient>) {
-  return path.startsWith("http") ? path : supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl;
+  return /^(https?:|blob:|data:)/.test(path) ? path : supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl;
 }
 
 export default function RemnantReportForm({
-  token, pin, assignmentId, appointmentId, initial, suggestedMaterials, onSaved,
+  token, pin, assignmentId, appointmentId, initial, suggestedMaterials, onSaved, demoMode = false,
 }: {
   token: string; pin: string; assignmentId: string; appointmentId: string;
   initial: RemnantReportData | null; suggestedMaterials: MaterialMovement[];
   onSaved: (report: RemnantReportData) => void;
+  demoMode?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const [noRemnant, setNoRemnant] = useState(false);
@@ -62,7 +63,7 @@ export default function RemnantReportForm({
   const [error, setError] = useState<string | null>(null);
   const piecesRef = useRef(pieces);
   useEffect(() => { piecesRef.current = pieces; }, [pieces]);
-  useEffect(() => () => piecesRef.current.forEach((piece) => piece.localPhotos.forEach((photo) => URL.revokeObjectURL(photo.url))), []);
+  useEffect(() => () => { if (!demoMode) piecesRef.current.forEach((piece) => piece.localPhotos.forEach((photo) => URL.revokeObjectURL(photo.url))); }, [demoMode]);
 
   useEffect(() => {
     const loadedPieces = (initial?.pieces ?? []).map((piece) => ({ ...piece, note: piece.note ?? "", localPhotos: [] }));
@@ -106,6 +107,10 @@ export default function RemnantReportForm({
       const payloadPieces: RemnantReportPiece[] = [];
       for (let pieceIndex = 0; pieceIndex < (noRemnant ? 0 : pieces.length); pieceIndex++) {
         const piece = pieces[pieceIndex]; const photoPaths = [...piece.photoPaths];
+        if (demoMode) {
+          payloadPieces.push({ widthCm: piece.widthCm, lengthCm: piece.lengthCm, qty: piece.qty, thickness: piece.thickness, color: piece.color, note: piece.note, photoPaths: [...photoPaths, ...piece.localPhotos.map((photo) => photo.url)] });
+          continue;
+        }
         for (let photoIndex = 0; photoIndex < piece.localPhotos.length; photoIndex++) {
           const photo = piece.localPhotos[photoIndex]; const safe = photo.file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
           const path = `remnants/${appointmentId}/${Date.now()}-${pieceIndex}-${photoIndex}-${safe}`;
@@ -115,6 +120,11 @@ export default function RemnantReportForm({
         payloadPieces.push({ widthCm: piece.widthCm, lengthCm: piece.lengthCm, qty: piece.qty, thickness: piece.thickness, color: piece.color, note: piece.note, photoPaths });
       }
       const cleanMaterials = materials.filter((item) => Number(item.lengthCm) > 0 && Number(item.qty) > 0);
+      if (demoMode) {
+        onSaved({ exists: true, isLead: true, status: "pending_review", noRemnant, materials: cleanMaterials, notes, pieces: payloadPieces, submittedAt: new Date().toISOString() });
+        setSaving(false);
+        return;
+      }
       const { data, error: rpcError } = await supabase.rpc("save_technician_remnant_report", {
         p_token: token, p_pin: pin, p_assignment_id: assignmentId, p_no_remnant: noRemnant,
         p_materials: cleanMaterials, p_pieces: payloadPieces, p_notes: notes.trim() || null,
@@ -156,12 +166,11 @@ export default function RemnantReportForm({
       <label className="mt-2 flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-3 text-sm font-medium text-slate-800"><input disabled={locked} type="checkbox" checked={noRemnant} onChange={(e)=>setNoRemnant(e.target.checked)} /> งานนี้ไม่มีเศษเหลือส่งกลับคลัง</label>
       {!noRemnant ? <div className="mt-3 space-y-3">{pieces.map((piece,index)=><div key={index} className="rounded-xl border border-amber-200 bg-amber-50 p-3">
         <div className="mb-2 flex items-center justify-between"><span className="text-sm font-semibold text-amber-950">เศษชิ้นที่ {index+1}</span>{!locked && pieces.length>1?<button type="button" onClick={()=>setPieces((rows)=>rows.filter((_,i)=>i!==index))} className="text-xs text-red-600">ลบรายการ</button>:null}</div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-          <select disabled={locked} value={piece.thickness} onChange={(e)=>updatePiece(index,{thickness:e.target.value})} className="rounded-lg border px-2 py-2 text-xs"><option value="16">หนา 16 มม.</option><option value="6">หนา 6 มม.</option></select>
-          <select disabled={locked} value={piece.color} onChange={(e)=>updatePiece(index,{color:e.target.value})} className="rounded-lg border px-2 py-2 text-xs"><option value="B">สี B</option><option value="W">สี W</option></select>
-          <select disabled={locked} value={piece.widthCm} onChange={(e)=>updatePiece(index,{widthCm:e.target.value})} className="rounded-lg border px-2 py-2 text-xs"><option value="110">RS-110</option><option value="140">RS-140</option></select>
-          <input disabled={locked} type="number" min="0.1" step="0.1" value={piece.lengthCm} onChange={(e)=>updatePiece(index,{lengthCm:e.target.value})} placeholder="ยาวจริง (ซม.) *" className="rounded-lg border px-2 py-2 text-xs" />
-          <input disabled={locked} type="number" min="1" step="1" value={piece.qty} onChange={(e)=>updatePiece(index,{qty:e.target.value})} placeholder="จำนวน *" className="rounded-lg border px-2 py-2 text-xs" />
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-[11px] font-medium text-amber-900">ชนิดเศษ<select disabled={locked} value={`${piece.thickness}${piece.color}`} onChange={(e)=>updatePiece(index,{thickness:e.target.value.slice(0,-1),color:e.target.value.slice(-1)})} className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm"><option value="16B">หนา 16 มม. · สี B</option><option value="16W">หนา 16 มม. · สี W</option><option value="6B">หนา 6 มม. · สี B</option><option value="6W">หนา 6 มม. · สี W</option></select></label>
+          <label className="text-[11px] font-medium text-amber-900">ความกว้าง<select disabled={locked} value={piece.widthCm} onChange={(e)=>updatePiece(index,{widthCm:e.target.value})} className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm"><option value="110">RS-110</option><option value="140">RS-140</option></select></label>
+          <label className="text-[11px] font-medium text-amber-900">ความยาว (ซม.)<input disabled={locked} type="number" min="0.1" step="0.1" value={piece.lengthCm} onChange={(e)=>updatePiece(index,{lengthCm:e.target.value})} placeholder="เช่น 80" className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm" /></label>
+          <label className="text-[11px] font-medium text-amber-900">จำนวนชิ้น<input disabled={locked} type="number" min="1" step="1" value={piece.qty} onChange={(e)=>updatePiece(index,{qty:e.target.value})} placeholder="เช่น 1" className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm" /></label>
         </div>
         <input disabled={locked} value={piece.note} onChange={(e)=>updatePiece(index,{note:e.target.value})} placeholder="ตำหนิ / หมายเหตุของเศษ (ถ้ามี)" className="mt-2 w-full rounded-lg border px-3 py-2 text-xs" />
         {!locked?<label className="mt-2 block cursor-pointer rounded-lg border border-dashed border-amber-400 bg-white px-3 py-2 text-center text-xs font-medium text-amber-800">📷 ถ่ายรูปเศษ / เพิ่มรูป<input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e)=>{addPhotos(index,e.target.files);e.currentTarget.value="";}} /></label>:null}

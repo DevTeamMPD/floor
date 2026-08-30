@@ -13,10 +13,15 @@ interface Remnant {
   reserved_for: string | null;
   source_job: string | null;
   note: string | null;
+  unit_cost_per_sqm: number;
+  used_for_job: string | null;
+  disposal_reason: string | null;
   created_at: string;
 }
 interface PendingRemnantPiece { id: string; widthCm: number; lengthCm: number; qty: number; matType: string; note: string | null; photoPaths: string[] }
 interface RemnantReport { id: string; jobNo: string; status: "pending_review" | "accepted" | "rejected"; noRemnant: boolean; notes: string | null; technicianName: string; submittedAt: string; reviewNote: string | null; pieces: PendingRemnantPiece[] }
+interface CostRate { matType: string; costPerSqm: number }
+interface CostSummary { availableValue: number; reservedValue: number; reusedValue: number; disposedValue: number }
 
 const WIDTH_BINS = [30, 40, 50, 60, 70, 80, 90, 110, 140];
 const MAT_TYPES = ["16B", "16W", "6B", "6W"];
@@ -24,11 +29,13 @@ const STATUS_STYLE: Record<string, string> = {
   available: "bg-green-100 text-green-700",
   reserved:  "bg-amber-100 text-amber-700",
   used:      "bg-slate-100 text-slate-400",
+  disposed:  "bg-red-100 text-red-700",
 };
 const STATUS_TH: Record<string, string> = {
   available: "พร้อมใช้",
   reserved:  "จอง",
   used:      "ใช้แล้ว",
+  disposed:  "ตัดจำหน่าย",
 };
 
 const EMPTY_FORM = { width_bin: "90", length_cm: "", mat_type: "16B", source_job: "", note: "" };
@@ -45,15 +52,22 @@ export default function RemnantsPage() {
   const [saving, setSaving] = useState(false);
   const [reports, setReports] = useState<RemnantReport[]>([]);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [costSummary, setCostSummary] = useState<CostSummary>({ availableValue: 0, reservedValue: 0, reusedValue: 0, disposedValue: 0 });
+  const [rateDrafts, setRateDrafts] = useState<Record<string, string>>({});
 
   const fetch = useCallback(async () => {
     setLoading(true);
-    const [stockResult, reportResult] = await Promise.all([
+    const [stockResult, reportResult, costResult] = await Promise.all([
       supabase.from("remnant_stock").select("*").order("created_at", { ascending: false }),
       supabase.rpc("list_remnant_reports_staff"),
+      supabase.rpc("get_remnant_cost_dashboard"),
     ]);
     if (stockResult.error) toast.error(stockResult.error.message); else setItems(stockResult.data ?? []);
     if (reportResult.error) toast.error(`โหลดคิวตรวจรับเศษไม่สำเร็จ: ${reportResult.error.message}`); else setReports((reportResult.data ?? []) as RemnantReport[]);
+    if (costResult.error) toast.error(`โหลดต้นทุนเศษไม่สำเร็จ: ${costResult.error.message}`); else {
+      const value = costResult.data as { rates?: CostRate[]; summary?: CostSummary };
+      const rates = value?.rates ?? []; setRateDrafts(Object.fromEntries(rates.map((rate) => [rate.matType, String(rate.costPerSqm ?? 0)]))); setCostSummary(value?.summary ?? { availableValue: 0, reservedValue: 0, reusedValue: 0, disposedValue: 0 });
+    }
     setLoading(false);
   }, []);
 
@@ -89,15 +103,10 @@ export default function RemnantsPage() {
       toast.error("กรุณากรอกความยาว"); return;
     }
     setSaving(true);
-    const payload: Record<string, unknown> = {
-      width_bin: Number(form.width_bin),
-      length_cm: Number(form.length_cm),
-      mat_type:  form.mat_type,
-    };
-    if (form.source_job.trim()) payload.source_job = form.source_job.trim();
-    if (form.note.trim())       payload.note = form.note.trim();
-
-    const { error } = await supabase.from("remnant_stock").insert(payload);
+    const { error } = await supabase.rpc("create_manual_remnant_with_cost", {
+      p_width_bin: Number(form.width_bin), p_length_cm: Number(form.length_cm), p_mat_type: form.mat_type,
+      p_source_job: form.source_job.trim() || null, p_note: form.note.trim() || null,
+    });
     if (error) toast.error(floorErrorMessage(error));
     else {
       toast.success("บันทึกเศษแล้ว");
@@ -109,19 +118,25 @@ export default function RemnantsPage() {
   }
 
   async function markUsed(id: string) {
-    const { error } = await supabase
-      .from("remnant_stock")
-      .update({ status: "used" })
-      .eq("id", id);
+    const jobNo = window.prompt("ระบุเลขงานที่นำเศษไปใช้ (เว้นว่างได้ หากยังไม่ทราบ)");
+    if (jobNo === null) return;
+    const { error } = await supabase.rpc("mark_remnant_used_with_cost", { p_remnant_id: id, p_job_no: jobNo.trim() || null });
     if (error) toast.error(floorErrorMessage(error));
-    else { toast.success("บันทึกว่าใช้แล้ว"); fetch(); }
+    else { toast.success("บันทึกการนำเศษกลับใช้และต้นทุนแล้ว"); fetch(); }
   }
 
-  async function deleteRemnant(id: string) {
-    if (!confirm("ลบรายการนี้?")) return;
-    const { error } = await supabase.from("remnant_stock").delete().eq("id", id);
-    if (error) toast.error(floorErrorMessage(error));
-    else { toast.success("ลบแล้ว"); fetch(); }
+  async function disposeRemnant(id: string) {
+    const reason = window.prompt("ระบุเหตุผลการตัดจำหน่าย เช่น เสียหาย / เล็กเกินใช้");
+    if (!reason?.trim()) return;
+    const { error } = await supabase.rpc("dispose_remnant_with_cost", { p_remnant_id: id, p_reason: reason.trim() });
+    if (error) toast.error(floorErrorMessage(error)); else { toast.success("ตัดจำหน่ายและบันทึกต้นทุนแล้ว"); fetch(); }
+  }
+
+  async function saveRate(matType: string) {
+    const value = Number(rateDrafts[matType]);
+    if (!Number.isFinite(value) || value < 0) { toast.error("กรุณาระบุต้นทุนต่อตารางเมตรเป็นศูนย์หรือจำนวนบวก"); return; }
+    setSaving(true); const { error } = await supabase.rpc("set_remnant_cost_rate", { p_mat_type: matType, p_cost_per_sqm: value }); setSaving(false);
+    if (error) toast.error(floorErrorMessage(error)); else { toast.success(`บันทึกต้นทุน ${matType} แล้ว`); fetch(); }
   }
 
   async function reviewReport(id: string, decision: "accept" | "reject") {
@@ -166,6 +181,11 @@ export default function RemnantsPage() {
           {report.notes?<div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">หมายเหตุ: {report.notes}</div>:null}
           <div className="mt-3 flex gap-2"><button disabled={reviewingId===report.id} onClick={()=>void reviewReport(report.id,"accept")} className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">ตรวจรับเข้าสต็อก</button><button disabled={reviewingId===report.id} onClick={()=>void reviewReport(report.id,"reject")} className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-600 disabled:opacity-50">ส่งกลับแก้ไข</button></div>
         </article>)}</div>:<div className="mt-4 rounded-xl border border-dashed border-amber-200 bg-white/70 px-4 py-6 text-center text-sm text-amber-700">ไม่มีเศษรอตรวจรับ</div>}
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold text-violet-950">💰 ควบคุมต้นทุนเศษ</h2><p className="mt-0.5 text-xs text-violet-700">มูลค่าคำนวณจากพื้นที่จริง × ต้นทุนต่อตารางเมตร ณ วันที่คลังตรวจรับ</p></div><div className="grid grid-cols-2 gap-2 text-right sm:grid-cols-4"><div><div className="text-[10px] text-violet-600">พร้อมใช้</div><div className="text-sm font-bold text-violet-950">฿{Number(costSummary.availableValue).toLocaleString(undefined,{maximumFractionDigits:2})}</div></div><div><div className="text-[10px] text-violet-600">จอง</div><div className="text-sm font-bold text-violet-950">฿{Number(costSummary.reservedValue).toLocaleString(undefined,{maximumFractionDigits:2})}</div></div><div><div className="text-[10px] text-violet-600">นำกลับใช้</div><div className="text-sm font-bold text-emerald-700">฿{Number(costSummary.reusedValue).toLocaleString(undefined,{maximumFractionDigits:2})}</div></div><div><div className="text-[10px] text-violet-600">ตัดจำหน่าย</div><div className="text-sm font-bold text-red-700">฿{Number(costSummary.disposedValue).toLocaleString(undefined,{maximumFractionDigits:2})}</div></div></div></div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{MAT_TYPES.map((matType) => <label key={matType} className="rounded-xl border border-violet-200 bg-white p-3 text-xs font-medium text-slate-700">{matType}<span className="ml-1 text-slate-400">บาท/ตร.ม.</span><div className="mt-2 flex gap-2"><input type="number" min="0" step="0.01" value={rateDrafts[matType] ?? "0"} onChange={(event) => setRateDrafts((current) => ({ ...current, [matType]: event.target.value }))} className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-sm" /><button type="button" disabled={saving} onClick={() => void saveRate(matType)} className="rounded-lg border border-violet-200 px-2 py-1.5 text-xs font-semibold text-violet-700 disabled:opacity-50">บันทึก</button></div></label>)}</div>
       </section>
 
       {/* Summary chips */}
@@ -237,6 +257,7 @@ export default function RemnantsPage() {
           <option value="available">พร้อมใช้</option>
           <option value="reserved">จอง</option>
           <option value="used">ใช้แล้ว</option>
+          <option value="disposed">ตัดจำหน่าย</option>
           <option value="all">ทั้งหมด</option>
         </select>
         <button onClick={fetch} className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm hover:bg-slate-50">
@@ -262,6 +283,7 @@ export default function RemnantsPage() {
                 <th className="px-4 py-3 text-left font-medium text-slate-600">ยาว (cm)</th>
                 <th className="px-4 py-3 text-left font-medium text-slate-600">ประเภท</th>
                 <th className="px-4 py-3 text-left font-medium text-slate-600">สถานะ</th>
+                <th className="px-4 py-3 text-right font-medium text-slate-600">มูลค่า</th>
                 <th className="px-4 py-3 text-left font-medium text-slate-600">จอง / งานต้นทาง</th>
                 <th className="px-4 py-3 text-left font-medium text-slate-600">หมายเหตุ</th>
                 <th className="px-4 py-3 text-left font-medium text-slate-600">วันที่</th>
@@ -287,8 +309,10 @@ export default function RemnantsPage() {
                       {STATUS_TH[r.status]}
                     </span>
                   </td>
+                  <td className="px-4 py-3 text-right text-xs font-semibold text-violet-800">฿{((Number(r.width_bin) * Number(r.length_cm) / 10000) * Number(r.unit_cost_per_sqm ?? 0)).toLocaleString(undefined,{maximumFractionDigits:2})}<div className="mt-0.5 text-[10px] font-normal text-slate-400">฿{Number(r.unit_cost_per_sqm ?? 0).toLocaleString()}/ตร.ม.</div></td>
                   <td className="px-4 py-3 text-xs text-slate-500">
                     {r.reserved_for && <div className="font-medium text-amber-700">🔒 {r.reserved_for}</div>}
+                    {r.used_for_job && <div className="font-medium text-emerald-700">ใช้กับ: {r.used_for_job}</div>}
                     {r.source_job   && <div className="text-slate-400">จาก: {r.source_job}</div>}
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-500 max-w-[160px] truncate">{r.note ?? "—"}</td>
@@ -305,14 +329,7 @@ export default function RemnantsPage() {
                           ✓ ใช้แล้ว
                         </button>
                       )}
-                      {r.status !== "reserved" && (
-                        <button
-                          onClick={() => deleteRemnant(r.id)}
-                          className="px-2 py-1 rounded text-xs bg-red-50 hover:bg-red-100 text-red-500"
-                        >
-                          ลบ
-                        </button>
-                      )}
+                      {(r.status === "available" || r.status === "reserved") && <button onClick={() => void disposeRemnant(r.id)} className="px-2 py-1 rounded text-xs bg-red-50 hover:bg-red-100 text-red-500">ตัดจำหน่าย</button>}
                     </div>
                   </td>
                 </tr>

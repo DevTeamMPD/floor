@@ -36,7 +36,12 @@ const EXPERIMENTAL_NAV: NavItem[] = [
   { href: "/ncr", icon: "🔴", label: "NCR", roles: ["admin", "head_technician"] },
 ];
 
-const MOBILE_NAV = ["/home", "/operations", "/orders", "/appointments"];
+const MOBILE_NAV_BY_ROLE: Partial<Record<StaffRole, string[]>> = {
+  sales: ["/sales-queue", "/orders", "/tech-queue", "/appointments"],
+  head_technician: ["/operations", "/orders", "/appointments", "/tech-queue"],
+  warehouse: ["/warehouse", "/orders", "/remnants", "/appointments"],
+};
+const DEFAULT_MOBILE_NAV = ["/home", "/operations", "/orders", "/appointments"];
 
 function NavLink({ item, active, onClick }: { item: NavItem; active: boolean; onClick?: () => void }) {
   return <Link href={item.href} onClick={onClick} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${active ? "bg-blue-600 font-medium text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}>
@@ -55,8 +60,9 @@ export default function Sidebar({ staff }: { staff: StaffProfile }) {
   const core = useMemo(() => CORE_NAV.filter(canSee), [canSee]);
   const experimental = useMemo(() => EXPERIMENTAL_NAV.filter(canSee), [canSee]);
   const mobile = useMemo(() => {
-    return MOBILE_NAV.map((href) => [...core, ...experimental].find((item) => item.href === href)).filter((item): item is NavItem => Boolean(item));
-  }, [core, experimental]);
+    const destinations = MOBILE_NAV_BY_ROLE[staff.role] ?? DEFAULT_MOBILE_NAV;
+    return destinations.map((href) => [...core, ...experimental].find((item) => item.href === href)).filter((item): item is NavItem => Boolean(item));
+  }, [core, experimental, staff.role]);
 
   function active(item: NavItem) { return path === item.href || path.startsWith(item.href + "/"); }
   async function signOut() {
@@ -81,17 +87,17 @@ export default function Sidebar({ staff }: { staff: StaffProfile }) {
 
   return <>
     <aside className="fixed left-0 top-0 hidden h-screen w-[252px] flex-col bg-slate-950 md:flex">
-      <div className="px-5 pb-4 pt-6"><div className="text-lg font-bold tracking-tight text-white">MPD FloorNow</div><div className="mt-0.5 text-xs text-slate-400">ศูนย์กลางงานติดตั้งพื้น</div></div>
+      <div className="px-5 pb-4 pt-5"><div className="flex items-center gap-2"><img src="/lendi-engineering-logo.png" alt="LENDI Engineering" className="h-10 w-10 rounded-lg bg-white object-contain p-0.5" /><div><div className="text-base font-bold tracking-tight text-white">LENDI Engineering</div><div className="mt-0.5 text-[10px] text-slate-400">Technical Solutions</div></div></div></div>
       <div className="flex-1 overflow-y-auto px-2 pb-4">{navigation}</div>{profile}
     </aside>
     <header className="fixed left-0 right-0 top-0 z-40 flex h-14 items-center justify-between bg-slate-950 px-4 md:hidden">
-      <div><div className="font-bold text-white">MPD FloorNow</div><div className="text-[10px] text-slate-400">{ROLE_LABELS[staff.role]}</div></div>
+      <div className="flex items-center gap-2"><img src="/lendi-engineering-logo.png" alt="LENDI" className="h-8 w-8 rounded bg-white object-contain p-0.5" /><div><div className="font-bold text-white">LENDI Engineering</div><div className="text-[10px] text-slate-400">{ROLE_LABELS[staff.role]}</div></div></div>
       <button onClick={() => setMenuOpen(true)} aria-label="เมนู" className="rounded-lg p-2 text-white hover:bg-white/10">☰</button>
     </header>
     {menuOpen ? <div className="fixed inset-0 z-50 flex md:hidden" onClick={() => setMenuOpen(false)}>
       <div className="absolute inset-0 bg-black/60" />
       <div className="relative z-10 flex h-full w-80 max-w-[88vw] flex-col bg-slate-950 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 pb-4 pt-5"><div><div className="text-lg font-bold text-white">MPD FloorNow</div><div className="text-xs text-slate-400">ข้อมูลร่วมกันทุกฝ่าย · สิทธิ์ดำเนินงานตามหน้าที่</div></div><button onClick={() => setMenuOpen(false)} className="p-2 text-slate-300">×</button></div>
+        <div className="flex items-center justify-between px-5 pb-4 pt-5"><div className="flex items-center gap-2"><img src="/lendi-engineering-logo.png" alt="LENDI" className="h-10 w-10 rounded-lg bg-white object-contain p-0.5" /><div><div className="text-lg font-bold text-white">LENDI Engineering</div><div className="text-xs text-slate-400">Your Trusted Partner in Technical Solutions.</div></div></div><button onClick={() => setMenuOpen(false)} className="p-2 text-slate-300">×</button></div>
         <div className="flex-1 overflow-y-auto px-2 pb-4">{navigation}</div>{profile}
       </div>
     </div> : null}

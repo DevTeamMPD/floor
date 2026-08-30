@@ -85,6 +85,18 @@ function fmtTime(iso: string) {
   return new Date(iso).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
 }
 
+function getMonthCalendarDays(month: Date): Date[] {
+  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1);
+  const lastDay = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+  const start = new Date(firstDay);
+  start.setDate(firstDay.getDate() - firstDay.getDay());
+  const end = new Date(lastDay);
+  end.setDate(lastDay.getDate() + (6 - lastDay.getDay()));
+  const days: Date[] = [];
+  for (const cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) days.push(new Date(cursor));
+  return days;
+}
+
 function hoursBetween(start: string, end: string) {
   return Math.max(0, (new Date(end).getTime() - new Date(start).getTime()) / 3_600_000);
 }
@@ -123,12 +135,15 @@ export default function AppointmentsPage() {
   const [assignments, setAssignments] = useState<TechnicianAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [weekOffset, setWeekOffset] = useState(0);
+  const [selectedLoadDate, setSelectedLoadDate] = useState(() => new Date());
+  const [loadView, setLoadView] = useState<'day' | 'month'>('month');
   const [staffRole, setStaffRole] = useState<string | null>(null);
 
   // Modals
   const [showCreate, setShowCreate] = useState(false);
   const [showTechs, setShowTechs] = useState(false);
   const [showIndividuals, setShowIndividuals] = useState(false);
+  const [showPendingAlerts, setShowPendingAlerts] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Create appointment form
@@ -202,6 +217,69 @@ export default function AppointmentsPage() {
       }
     });
   });
+  const teamWorkloads = useMemo(() => techs.filter((team) => team.is_active).map((team) => {
+    const teamAppointments = weekAppts.filter((appointment) => appointment.tech_id === team.id);
+    const teamTechnicians = weeklyTechnicians.filter((technician) => technician.team_id === team.id);
+    const assignedTechnicianIds = new Set(activeAssignments
+      .filter((assignment) => teamAppointments.some((appointment) => appointment.id === assignment.appointment_id))
+      .map((assignment) => assignment.technician_id));
+    const hours = teamAppointments.reduce((sum, appointment) => sum + hoursBetween(appointment.slot_start, appointment.slot_end), 0);
+    const capacityHours = teamTechnicians.length * 5 * 8;
+    const unassigned = teamAppointments.filter((appointment) => appointment.job_id && !assignedAppointmentIds.has(appointment.id));
+    const conflicts = teamAppointments.filter((appointment) => conflictAppointmentIds.has(appointment.id));
+    return {
+      team,
+      jobs: teamAppointments.length,
+      hours,
+      capacityHours,
+      utilization: capacityHours ? Math.round((hours / capacityHours) * 100) : null,
+      members: teamTechnicians.length,
+      assignedMembers: assignedTechnicianIds.size,
+      unassigned: unassigned.length,
+      conflicts: conflicts.length,
+    };
+  }).sort((a, b) => b.hours - a.hours), [activeAssignments, assignedAppointmentIds, conflictAppointmentIds, techs, weekAppts, weeklyTechnicians]);
+  const selectedDayAppointments = appointments.filter((appointment) => appointment.status !== 'cancelled' && sameDay(selectedLoadDate, appointment.slot_start));
+  const selectedDayUnassigned = selectedDayAppointments.filter((appointment) => appointment.job_id && !assignedAppointmentIds.has(appointment.id));
+  const selectedDayLoads = weeklyTechnicians.map((technician) => {
+    const technicianAppointmentIds = new Set(activeAssignments.filter((assignment) => assignment.technician_id === technician.id).map((assignment) => assignment.appointment_id));
+    const jobsForDay = selectedDayAppointments.filter((appointment) => technicianAppointmentIds.has(appointment.id));
+    const hours = jobsForDay.reduce((sum, appointment) => sum + hoursBetween(appointment.slot_start, appointment.slot_end), 0);
+    return { technician, jobs: jobsForDay, hours };
+  }).sort((a, b) => b.hours - a.hours || a.technician.name.localeCompare(b.technician.name, 'th'));
+  const selectedMonthAppointments = appointments.filter((appointment) => {
+    if (appointment.status === 'cancelled') return false;
+    const date = new Date(appointment.slot_start);
+    return date.getFullYear() === selectedLoadDate.getFullYear() && date.getMonth() === selectedLoadDate.getMonth();
+  });
+  const selectedMonthUnassigned = selectedMonthAppointments.filter((appointment) => appointment.job_id && !assignedAppointmentIds.has(appointment.id));
+  const selectedMonthLoads = weeklyTechnicians.map((technician) => {
+    const technicianAppointmentIds = new Set(activeAssignments.filter((assignment) => assignment.technician_id === technician.id).map((assignment) => assignment.appointment_id));
+    const jobsForMonth = selectedMonthAppointments.filter((appointment) => technicianAppointmentIds.has(appointment.id));
+    const hours = jobsForMonth.reduce((sum, appointment) => sum + hoursBetween(appointment.slot_start, appointment.slot_end), 0);
+    const days = new Set(jobsForMonth.map((appointment) => new Date(appointment.slot_start).toLocaleDateString('en-CA'))).size;
+    return { technician, jobs: jobsForMonth, hours, days };
+  }).sort((a, b) => b.hours - a.hours || a.technician.name.localeCompare(b.technician.name, 'th'));
+  const selectedMonthTeamLoads = techs.filter((team) => team.is_active).map((team) => {
+    const teamAppointments = selectedMonthAppointments.filter((appointment) => appointment.tech_id === team.id);
+    const members = weeklyTechnicians.filter((technician) => technician.team_id === team.id).length;
+    const hours = teamAppointments.reduce((sum, appointment) => sum + hoursBetween(appointment.slot_start, appointment.slot_end), 0);
+    const unassigned = teamAppointments.filter((appointment) => appointment.job_id && !assignedAppointmentIds.has(appointment.id)).length;
+    return { team, jobs: teamAppointments.length, hours, members, unassigned };
+  }).sort((a, b) => b.hours - a.hours);
+  const monthCalendarDays = useMemo(() => getMonthCalendarDays(selectedLoadDate), [selectedLoadDate]);
+
+  function moveSelectedLoadDate(days: number) {
+    setSelectedLoadDate((current) => {
+      const next = new Date(current);
+      next.setDate(next.getDate() + days);
+      return next;
+    });
+  }
+
+  function moveSelectedLoadMonth(months: number) {
+    setSelectedLoadDate((current) => new Date(current.getFullYear(), current.getMonth() + months, 1));
+  }
 
   // --- Create Appointment ---
   async function createAppointment() {
@@ -358,6 +436,9 @@ export default function AppointmentsPage() {
           <p className="text-slate-500 text-sm mt-0.5">ดูงานรายบุคคล คิวชน และเวลางานรวมก่อนยืนยันคิว</p>
         </div>
         {canManage ? <div className="ml-auto flex items-center gap-2">
+          {pendingAppts.length ? <button onClick={() => setShowPendingAlerts(true)} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-800 hover:bg-amber-100">
+            🔔 รอยืนยัน ({pendingAppts.length})
+          </button> : null}
           <button onClick={() => setShowIndividuals(true)}
             className="px-3 py-1.5 text-sm border border-violet-200 rounded-lg text-violet-700 hover:bg-violet-50">
             👤 ช่าง / PIN
@@ -394,52 +475,79 @@ export default function AppointmentsPage() {
         ))}
       </div>
 
-      {/* Pending confirmation */}
-      {pendingAppts.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
-          <div className="text-sm font-medium text-amber-800 mb-3">⏳ รอยืนยัน ({pendingAppts.length} รายการ)</div>
-          <div className="space-y-2">
-            {pendingAppts.map((appt) => (
-              <div key={appt.id} className="flex items-center gap-3 bg-white rounded-lg px-3 py-2.5 border border-amber-100">
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">
-                    {appt.job?.customer_name ?? 'ไม่ระบุลูกค้า'}
-                    {appt.job && <span className="text-xs text-slate-400 ml-2">{appt.job.job_no}</span>}
-                    {appt.job && <span className={`text-[10px] px-1.5 py-0.5 rounded ml-2 ${appt.job.source === 'bbps' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{appt.job.source === 'bbps' ? 'BBPS' : 'ขายตรง'}</span>}
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    {fmtTime(appt.slot_start)} – {fmtTime(appt.slot_end)} · {appt.tech?.name ?? 'ไม่ระบุช่าง'}
-                  </div>
-                  {appt.job_id ? <TechnicianAssignmentButton
-                    appointmentId={appt.id} appointmentTeamId={appt.tech_id} jobNo={appt.job_id}
-                    teams={techs} technicians={technicians} assignments={assignments} onChanged={loadData}
-                  /> : null}
-                </div>
-                <select value={appt.tech_id ?? ''} onChange={(e) => reassignTeam(appt, e.target.value)}
-                  aria-label={`ย้ายทีมสำหรับ ${appt.job?.customer_name ?? appt.job_id ?? 'นัดหมาย'}`}
-                  className="border border-slate-200 rounded-lg px-2 py-1 text-xs bg-white max-w-32">
-                  <option value="">เลือกทีม</option>
-                  {techs.filter((t) => t.is_active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
-                {appt.job_id ? <Link href={`/orders/${encodeURIComponent(appt.job_id)}`}
-                  className="px-3 py-1 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shrink-0">
-                  เปิดใบสั่งงาน
-                </Link> : <button onClick={() => updateStatus(appt, 'confirmed')}
-                  className="px-3 py-1 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shrink-0">
-                  ✓ ยืนยันคิว
-                </button>}
-                <button onClick={() => cancelAppointment(appt)}
-                  className="px-3 py-1 text-xs bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 shrink-0">
-                  ยกเลิก
-                </button>
-              </div>
-            ))}
+      <section className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div><h2 className="text-base font-bold text-slate-900">โหลดงานช่าง</h2><p className="mt-0.5 text-xs text-slate-500">ดูโหลดของช่างรายวัน หรือภาพรวมตลอดทั้งเดือน</p></div>
+          <div className="flex flex-wrap items-center gap-2"><div className="flex rounded-lg bg-slate-100 p-1"><button type="button" onClick={() => setLoadView('day')} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${loadView === 'day' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>รายวัน</button><button type="button" onClick={() => setLoadView('month')} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${loadView === 'month' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>รายเดือน</button></div><button type="button" onClick={() => loadView === 'day' ? moveSelectedLoadDate(-1) : moveSelectedLoadMonth(-1)} className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50" aria-label="ช่วงก่อนหน้า">←</button><button type="button" onClick={() => setSelectedLoadDate(new Date())} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">{loadView === 'day' ? 'วันนี้' : 'เดือนนี้'}</button><button type="button" onClick={() => loadView === 'day' ? moveSelectedLoadDate(1) : moveSelectedLoadMonth(1)} className="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50" aria-label="ช่วงถัดไป">→</button></div>
+        </div>
+        <div className="border-b border-blue-100 bg-blue-50 px-5 py-3"><p className="font-semibold text-blue-950">{loadView === 'day' ? selectedLoadDate.toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : selectedLoadDate.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}</p><p className="mt-0.5 text-xs text-blue-700">{loadView === 'day' ? `มีคิว ${selectedDayAppointments.length} งาน · ยังไม่จ่ายช่าง ${selectedDayUnassigned.length} งาน` : `มีคิว ${selectedMonthAppointments.length} งาน · รวม ${selectedMonthAppointments.reduce((sum, appointment) => sum + hoursBetween(appointment.slot_start, appointment.slot_end), 0).toFixed(0)} ชม. · ยังไม่จ่ายช่าง ${selectedMonthUnassigned.length} งาน`}</p></div>
+        {loading ? <div className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-3">{[1, 2, 3].map((key) => <div key={key} className="h-36 animate-pulse rounded-xl bg-slate-100" />)}</div> : loadView === 'day' && selectedDayLoads.length ? <div className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-3">
+          {selectedDayLoads.map(({ technician, jobs: technicianJobs, hours }) => {
+            const overloaded = hours > 8;
+            const busy = hours > 0;
+            const state = overloaded ? "เกินกำลัง" : busy ? "มีงาน" : "ว่าง";
+            const stateClass = overloaded ? "bg-red-100 text-red-700" : busy ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700";
+            return <article key={technician.id} className={`rounded-xl border p-4 ${overloaded ? "border-red-200 bg-red-50" : busy ? "border-blue-200 bg-blue-50/50" : "border-emerald-200 bg-emerald-50/50"}`}>
+              <div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-900">{technician.name}{technician.is_team_lead ? " ★" : ""}</h3><p className="mt-0.5 text-xs text-slate-500">{techs.find((team) => team.id === technician.team_id)?.name || "ไม่ระบุทีม"}</p></div><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${stateClass}`}>{state}</span></div>
+              <div className="mt-3 flex items-baseline gap-2"><span className="text-2xl font-bold text-slate-900">{hours.toFixed(hours % 1 ? 1 : 0)} ชม.</span><span className="text-xs text-slate-500">{technicianJobs.length} งาน</span></div>
+              {technicianJobs.length ? <div className="mt-3 space-y-1.5 border-t border-slate-200/70 pt-3">{technicianJobs.map((appointment) => <Link key={appointment.id} href={appointment.job_id ? `/orders/${encodeURIComponent(appointment.job_id)}` : '#'} className="block rounded-lg bg-white px-2.5 py-2 text-xs text-slate-700 hover:bg-slate-50"><span className="font-semibold text-slate-900">{fmtTime(appointment.slot_start)} – {fmtTime(appointment.slot_end)}</span><span className="ml-2">{appointment.job?.customer_name || appointment.job_id || "นัดหมาย"}</span></Link>)}</div> : <p className="mt-3 border-t border-emerald-200 pt-3 text-xs text-emerald-700">พร้อมรับงานในวันดังกล่าว</p>}
+            </article>;
+          })}
+        </div> : loadView === 'month' ? <div className="grid gap-4 p-5 lg:grid-cols-[1.1fr_0.9fr]">
+          <article className="rounded-xl border border-amber-200 bg-amber-50 p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-amber-800">ต้องจัดการก่อน</p><h3 className="mt-1 text-2xl font-bold text-amber-950">{selectedMonthUnassigned.length} งานรอจ่ายช่าง</h3><p className="mt-1 text-xs text-amber-800">รวมงานที่ยังไม่มีรายชื่อช่างรับผิดชอบในเดือนนี้</p></div><span className="grid h-10 w-10 place-items-center rounded-full bg-white text-xl">⚠️</span></div>{selectedMonthUnassigned.length ? <div className="mt-4 space-y-2">{selectedMonthUnassigned.slice(0, 3).map((appointment) => <button type="button" key={appointment.id} onClick={() => setShowPendingAlerts(true)} className="flex w-full items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-left text-xs text-slate-700 hover:bg-amber-100"><span className="min-w-0 truncate"><strong>{fmtDate(new Date(appointment.slot_start))}</strong> · {appointment.job?.customer_name || appointment.job_id || 'นัดหมาย'}</span><span className="shrink-0 font-semibold text-amber-700">จัดช่าง →</span></button>)}{selectedMonthUnassigned.length > 3 ? <button type="button" onClick={() => setShowPendingAlerts(true)} className="text-xs font-semibold text-amber-800 hover:underline">ดูอีก {selectedMonthUnassigned.length - 3} งาน</button> : null}</div> : <div className="mt-4 rounded-lg bg-white px-3 py-3 text-sm font-medium text-emerald-700">✓ จ่ายช่างครบทุกงานในเดือนนี้</div>}</article>
+          <article className="rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-600">ภาพรวมทีม</p><div className="mt-3 space-y-3">{selectedMonthTeamLoads.map((workload) => { const attention = workload.unassigned > 0 || workload.members === 0; return <div key={workload.team.id} className="rounded-lg bg-white px-3 py-2.5"><div className="flex items-center justify-between gap-3"><div><p className="font-semibold text-slate-900">{workload.team.name}</p><p className="mt-0.5 text-xs text-slate-500">{workload.jobs} งาน · {workload.hours.toFixed(0)} ชม. · ช่าง {workload.members} คน</p></div><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${attention ? 'bg-amber-100 text-amber-800' : workload.jobs ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{attention ? 'ต้องจัดการ' : workload.jobs ? 'มีงาน' : 'พร้อม'}</span></div></div>; })}{!selectedMonthTeamLoads.length ? <p className="text-sm text-slate-400">ยังไม่มีทีมช่าง Active</p> : null}</div></article>
+        </div> : <div className="px-5 py-10 text-center text-sm text-slate-400">ยังไม่มีรายชื่อช่าง Active</div>}
+        {(loadView === 'day' ? selectedDayUnassigned.length : selectedMonthUnassigned.length) ? <div className="border-t border-amber-200 bg-amber-50 px-5 py-3 text-xs text-amber-900">⚠️ มี {loadView === 'day' ? selectedDayUnassigned.length : selectedMonthUnassigned.length} งานที่ยังไม่จ่ายช่าง — เปิด popup “รอยืนยัน” เพื่อจัดทีมและมอบหมายช่าง</div> : null}
+      </section>
+
+      {loadView === 'month' ? <section className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4"><div><h2 className="text-base font-bold text-slate-900">ปฏิทินคิวงาน</h2><p className="mt-0.5 text-xs text-slate-500">แตะวันที่เพื่อดูโหลดงานรายวันและรายชื่อช่างที่รับผิดชอบ</p></div><span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700">{selectedMonthAppointments.length} งานในเดือนนี้</span></div>
+        <div className="overflow-x-auto"><div className="min-w-[700px]"><div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">{DAY_TH.map((day, index) => <div key={`${day}-${index}`} className={`px-3 py-2 text-center text-xs font-semibold ${index === 0 ? 'text-red-500' : index === 6 ? 'text-blue-600' : 'text-slate-600'}`}>{day}</div>)}</div><div className="grid grid-cols-7">{monthCalendarDays.map((date) => {
+          const jobsForDate = selectedMonthAppointments.filter((appointment) => sameDay(date, appointment.slot_start));
+          const outsideMonth = date.getMonth() !== selectedLoadDate.getMonth();
+          const unassigned = jobsForDate.filter((appointment) => appointment.job_id && !assignedAppointmentIds.has(appointment.id)).length;
+          return <button type="button" key={date.toISOString()} onClick={() => { setSelectedLoadDate(date); setLoadView('day'); }} className={`min-h-32 border-b border-r border-slate-100 p-2 text-left transition hover:bg-blue-50 ${outsideMonth ? 'bg-slate-50/70 text-slate-400' : 'bg-white'} ${isToday(date) ? 'ring-2 ring-inset ring-blue-500' : ''}`}><div className="flex items-center justify-between"><span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-semibold ${isToday(date) ? 'bg-blue-600 text-white' : ''}`}>{date.getDate()}</span>{jobsForDate.length ? <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${unassigned ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-700'}`}>{jobsForDate.length} งาน</span> : null}</div><div className="mt-2 space-y-1">{jobsForDate.slice(0, 2).map((appointment) => <span key={appointment.id} className={`block truncate rounded px-1.5 py-1 text-[10px] font-medium ${appointment.status === 'proposed' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>{fmtTime(appointment.slot_start)} {appointment.job?.customer_name || appointment.job_id || 'นัดหมาย'}</span>)}{jobsForDate.length > 2 ? <span className="block px-1.5 text-[10px] font-semibold text-slate-500">+ อีก {jobsForDate.length - 2} งาน</span> : null}</div></button>;
+        })}</div></div></div>
+        <div className="border-t border-slate-100 bg-slate-50 px-5 py-3 text-xs text-slate-600"><strong>วิธีอ่าน:</strong> ป้ายสีน้ำเงิน = จ่ายช่างแล้ว · ป้ายสีเหลือง = ยังมีงานรอจ่ายช่าง · กดวันเพื่อดูรายชื่อและชั่วโมงของช่างในวันนั้น</div>
+      </section> : null}
+
+      {/* The operational overview is deliberately team-based, not a dense person-by-day calendar. */}
+      <section className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div>
+            <h2 className="text-base font-bold text-slate-900">สรุปทีมช่างสัปดาห์นี้</h2>
+            <p className="mt-0.5 text-xs text-slate-500">{fmtDate(weekStart)} – {fmtDate(weekEnd)} · ดูเฉพาะว่าทีมไหนพร้อม และทีมไหนต้องจัดการ</p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-[11px]">
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">กำลังการทำงาน = ช่าง Active × 8 ชม. × 5 วัน</span>
+            <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-800">ต้องจัดการ: {unassignedWeekAppts.length + conflictAppointmentIds.size} จุด</span>
           </div>
         </div>
-      )}
+        {loading ? <div className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-3">{[1, 2, 3].map((key) => <div key={key} className="h-40 animate-pulse rounded-xl bg-slate-100" />)}</div> : teamWorkloads.length ? <div className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-3">
+          {teamWorkloads.map((workload) => {
+            const overloaded = workload.utilization !== null && workload.utilization > 85;
+            const needsAttention = workload.unassigned > 0 || workload.conflicts > 0 || workload.members === 0;
+            const tone = workload.members === 0 ? "border-red-200 bg-red-50" : needsAttention ? "border-amber-200 bg-amber-50" : overloaded ? "border-orange-200 bg-orange-50" : "border-emerald-200 bg-emerald-50";
+            const label = workload.members === 0 ? "ยังไม่มีช่าง Active" : workload.conflicts ? "มีคิวชน" : workload.unassigned ? "รอจ่ายช่าง" : overloaded ? "โหลดค่อนข้างสูง" : "พร้อมรับงาน";
+            const labelTone = workload.members === 0 || workload.conflicts ? "bg-red-100 text-red-700" : needsAttention || overloaded ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-700";
+            return <article key={workload.team.id} className={`rounded-xl border p-4 ${tone}`}>
+              <div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-900">{workload.team.name}</h3><p className="mt-0.5 text-xs text-slate-500">ช่าง Active {workload.members} คน · ถูกจ่ายงานแล้ว {workload.assignedMembers} คน</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${labelTone}`}>{label}</span></div>
+              <div className="mt-4 grid grid-cols-2 gap-2"><div><div className="text-xl font-bold text-slate-900">{workload.jobs}</div><div className="text-[11px] text-slate-500">งานในสัปดาห์นี้</div></div><div><div className="text-xl font-bold text-slate-900">{workload.hours.toFixed(workload.hours % 1 ? 1 : 0)} ชม.</div><div className="text-[11px] text-slate-500">เวลางานรวม</div></div></div>
+              <div className="mt-3 flex flex-wrap gap-2 text-[11px]">{workload.unassigned ? <span className="rounded bg-white px-2 py-1 font-medium text-amber-800">👤 รอจ่ายช่าง {workload.unassigned} งาน</span> : null}{workload.conflicts ? <span className="rounded bg-white px-2 py-1 font-medium text-red-700">⚠️ คิวชน {workload.conflicts} งาน</span> : null}{!workload.unassigned && !workload.conflicts && workload.members > 0 ? <span className="rounded bg-white px-2 py-1 text-emerald-700">✓ จ่ายช่างครบแล้ว</span> : null}</div>
+            </article>;
+          })}
+        </div> : <div className="px-5 py-10 text-center text-sm text-slate-400">ยังไม่มีทีมช่าง Active สำหรับคำนวณ Workload</div>}
+        <div className="border-t border-slate-100 bg-slate-50 px-5 py-3 text-xs text-slate-600"><strong>วิธีอ่าน:</strong> การ์ดสีเขียว = พร้อม, สีเหลือง = ต้องจัดช่าง, สีแดง = ต้องแก้คิวชนหรือยังไม่มีช่าง</div>
+      </section>
 
-      {/* Individual technician load board */}
-      <section className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+      {/* Retained in source only while the team validates the simpler workload view. */}
+      {false && <details className="group mb-6 rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 text-sm font-semibold text-slate-800 hover:bg-slate-50">
+          <span>ดูตารางละเอียดรายช่าง (ใช้เมื่อจำเป็นต้องเทียบเวลาในแต่ละวัน)</span>
+          <span className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-500 group-open:hidden">เปิดตาราง</span>
+          <span className="hidden rounded-lg border border-slate-200 px-2 py-1 text-xs font-medium text-slate-500 group-open:inline">ซ่อนตาราง</span>
+        </summary>
+      <section className="border-t border-slate-200">
         <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-100">
           <button onClick={() => setWeekOffset((o) => o - 1)}
             className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500">
@@ -491,86 +599,7 @@ export default function AppointmentsPage() {
           </div>
         )}
       </section>
-
-      {/* All appointments list (below calendar) */}
-      {!loading && appointments.filter((a) => a.status !== 'cancelled').length > 0 && (
-        <div className="mt-6 bg-white rounded-xl border border-slate-100 overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-b border-slate-100"><div><div className="font-semibold text-sm">รายการคิวทั้งหมด</div><div className="mt-0.5 text-xs text-slate-500">ใช้จัดทีม จ่ายช่าง และเปิดใบสั่งงานเมื่อจำเป็น</div></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">{appointments.filter((a) => a.status !== 'cancelled').length} งาน</span></div>
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                {['วันที่', 'เวลา', 'ช่าง', 'งาน / ลูกค้า', 'สถานะ', 'หมายเหตุ', ''].map((h) => (
-                  <th key={h} className="text-left px-4 py-2 text-xs font-medium text-slate-400">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {appointments
-                .filter((a) => a.status !== 'cancelled')
-                .map((appt) => {
-                  const cfg = STATUS_CONFIG[appt.status] ?? STATUS_CONFIG.proposed;
-                  return (
-                    <tr key={appt.id}>
-                      <td className="px-4 py-2 text-slate-600">
-                        {new Date(appt.slot_start).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit', timeZone: 'Asia/Bangkok' })}
-                      </td>
-                      <td className="px-4 py-2 text-slate-500 text-xs font-mono">
-                        {fmtTime(appt.slot_start)} – {fmtTime(appt.slot_end)}
-                      </td>
-                      <td className="px-4 py-2">{appt.tech?.name ?? <span className="text-slate-300">—</span>}</td>
-                      <td className="px-4 py-2">
-                        {appt.job ? (
-                          <div>
-                            <div className="font-medium">{appt.job.customer_name ?? appt.job.job_no}</div>
-                            <div className="text-xs text-slate-400 flex items-center gap-1.5">
-                              <span>{appt.job.job_no}</span>
-                              <span className={appt.job.source === 'bbps' ? 'text-amber-600' : 'text-blue-600'}>{appt.job.source === 'bbps' ? 'BBPS' : 'ขายตรง'}</span>
-                            </div>
-                            {appt.job.flag_note && <div className="text-xs text-amber-700 mt-0.5">แก้ไข: {appt.job.flag_note}</div>}
-                          </div>
-                        ) : <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className="px-4 py-2">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cfg.cls}`}>{cfg.label}</span>
-                      </td>
-                      <td className="px-4 py-2 text-xs text-slate-400">{appt.notes ?? '—'}</td>
-                      <td className="px-4 py-2">
-                        <div className="flex items-center gap-1">
-                          {appt.job_id ? <TechnicianAssignmentButton
-                            appointmentId={appt.id} appointmentTeamId={appt.tech_id} jobNo={appt.job_id}
-                            teams={techs} technicians={technicians} assignments={assignments} onChanged={loadData}
-                          /> : null}
-                          <select value={appt.tech_id ?? ''} onChange={(e) => reassignTeam(appt, e.target.value)}
-                            aria-label={`ย้ายทีมสำหรับ ${appt.job?.customer_name ?? appt.job_id ?? 'นัดหมาย'}`}
-                            className="border border-slate-200 rounded px-1.5 py-0.5 text-xs bg-white max-w-24">
-                            <option value="">ทีม</option>
-                            {techs.filter((t) => t.is_active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                          </select>
-                          {appt.status === 'proposed' && (appt.job_id ?
-                            <Link href={`/orders/${encodeURIComponent(appt.job_id)}`}
-                              aria-label="เปิดใบสั่งงานกลาง"
-                              className="px-2 py-0.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100">📋</Link>
-                            : <button onClick={() => updateStatus(appt, 'confirmed')}
-                              className="px-2 py-0.5 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100">✓</button>)}
-                          {appt.status === 'confirmed' && (
-                            <button onClick={() => updateStatus(appt, 'completed')}
-                              className="px-2 py-0.5 text-xs bg-emerald-50 text-emerald-700 rounded hover:bg-emerald-100">
-                              ✓
-                            </button>
-                          )}
-                          <button onClick={() => cancelAppointment(appt)}
-                            className="px-2 py-0.5 text-xs bg-slate-50 text-slate-400 rounded hover:bg-slate-100">
-                            ✕
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      </details>}
 
       <TechnicianManager
         open={showIndividuals}
@@ -579,6 +608,26 @@ export default function AppointmentsPage() {
         onClose={() => setShowIndividuals(false)}
         onChanged={loadData}
       />
+
+      {showPendingAlerts && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-3 sm:items-center sm:p-5" onClick={() => setShowPendingAlerts(false)}>
+          <section className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" role="dialog" aria-modal="true" aria-label="คิวที่รอยืนยัน" onClick={(event) => event.stopPropagation()}>
+            <header className="flex items-start justify-between gap-4 border-b border-amber-200 bg-amber-50 px-5 py-4">
+              <div><p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Workload alerts</p><h2 className="mt-1 text-lg font-bold text-slate-900">รอยืนยัน {pendingAppts.length} รายการ</h2><p className="mt-1 text-xs text-amber-800">จัดช่างให้ครบ แล้วเปิดใบสั่งงานเพื่อยืนยันส่งต่อ</p></div>
+              <button type="button" onClick={() => setShowPendingAlerts(false)} className="grid h-9 w-9 place-items-center rounded-full text-xl text-slate-500 hover:bg-white" aria-label="ปิดรายการแจ้งเตือน">×</button>
+            </header>
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
+              {pendingAppts.map((appt) => <article key={appt.id} className="rounded-xl border border-amber-200 bg-white p-3 sm:p-4">
+                <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                  <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">{appt.job?.customer_name ?? "ไม่ระบุลูกค้า"}</h3>{appt.job && <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${appt.job.source === "bbps" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>{appt.job.source === "bbps" ? "BBPS" : "ขายตรง"}</span>}</div><p className="mt-1 text-xs text-slate-500">{appt.job?.job_no ?? "ไม่มีเลขใบงาน"} · {fmtTime(appt.slot_start)} – {fmtTime(appt.slot_end)} · {appt.tech?.name ?? "ยังไม่ระบุทีม"}</p>{appt.job_id ? <div className="mt-2"><TechnicianAssignmentButton appointmentId={appt.id} appointmentTeamId={appt.tech_id} jobNo={appt.job_id} teams={techs} technicians={technicians} assignments={assignments} onChanged={loadData} /></div> : null}</div>
+                  <div className="flex shrink-0 gap-2"><select value={appt.tech_id ?? ""} onChange={(event) => reassignTeam(appt, event.target.value)} aria-label={`ย้ายทีมสำหรับ ${appt.job?.customer_name ?? appt.job_id ?? "นัดหมาย"}`} className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs"><option value="">เลือกทีม</option>{techs.filter((team) => team.is_active).map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select>{appt.job_id ? <Link href={`/orders/${encodeURIComponent(appt.job_id)}`} onClick={() => setShowPendingAlerts(false)} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700">เปิดใบสั่งงาน</Link> : <button onClick={() => updateStatus(appt, "confirmed")} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700">ยืนยันคิว</button>}</div>
+                </div>
+              </article>)}
+            </div>
+            <footer className="border-t border-slate-100 bg-slate-50 px-5 py-3 text-right"><button type="button" onClick={() => setShowPendingAlerts(false)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700">ปิด</button></footer>
+          </section>
+        </div>
+      )}
 
       {/* ===== CREATE APPOINTMENT MODAL ===== */}
       {showCreate && (

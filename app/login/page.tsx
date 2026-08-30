@@ -36,7 +36,7 @@ export default function LoginPage() {
         const { error: activationError } = await supabase.rpc("activate_floor_staff_account");
         if (activationError) {
           await supabase.auth.signOut();
-          setError(activationError.message.includes("active HR employee") ? "ไม่พบบัญชีพนักงาน Active/Probation ที่เชื่อมกับอีเมลนี้ กรุณาติดต่อผู้ดูแลระบบ" : "บัญชีนี้ยังไม่พร้อมใช้งาน FloorNow");
+          setError(activationError.message.includes("active HR employee") ? "ไม่พบบัญชีพนักงาน Active/Probation ที่เชื่อมกับอีเมลนี้ กรุณาติดต่อผู้ดูแลระบบ" : "บัญชีนี้ยังไม่พร้อมใช้งาน LENDI Engineering");
           setBusy(false);
           return;
         }
@@ -75,11 +75,9 @@ export default function LoginPage() {
     setBusy(false);
   }
 
-  return <main className="min-h-screen bg-slate-950 px-4 py-10 grid place-items-center">
-    <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
-      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">MPD Group</div>
-      <h1 className="mt-2 text-2xl font-bold text-slate-950">FloorNow</h1>
-      <p className="mt-1 text-sm text-slate-500">ศูนย์กลางข้อมูลงานติดตั้งสำหรับพนักงานทุกฝ่าย</p>
+  return <main className="grid min-h-screen place-items-center bg-gradient-to-br from-[#1f242a] via-[#0f385d] to-[#06315c] px-4 py-10">
+    <div className="w-full max-w-md rounded-[28px] border border-white/70 bg-white p-6 shadow-2xl shadow-black/35 sm:p-8">
+      <div className="border-b border-slate-200 pb-5 text-center"><img src="/lendi-engineering-logo.png" alt="LENDI Engineering" className="mx-auto h-32 w-52 object-contain mix-blend-multiply" /><h1 className="mt-2 text-2xl font-bold tracking-tight text-[#303237]">LENDI Engineering</h1><p className="mt-2 text-sm font-semibold text-[#064B8E]">Your Trusted Partner in Technical Solutions.</p><p className="mt-1 text-xs text-slate-500">พันธมิตรที่ได้รับความไว้วางใจในทุกโซลูชันเทคนิค</p></div>
 
       <div className="mt-6 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
         <button onClick={() => setMode("login")} className={`rounded-lg px-3 py-2 text-sm font-medium ${mode === "login" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>เข้าสู่ระบบ</button>
@@ -101,7 +99,7 @@ export default function LoginPage() {
         </div>
         {error ? <div className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
         {message ? <div className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</div> : null}
-        <button disabled={busy} className="w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:opacity-50">{busy ? "กำลังดำเนินการ…" : mode === "login" ? "เข้าสู่ FloorNow" : needsBootstrap ? "สร้างบัญชี Admin คนแรก" : "เปิดใช้บัญชีที่ได้รับเชิญ"}</button>
+        <button disabled={busy} className="w-full rounded-xl bg-[#064B8E] px-4 py-3 font-semibold text-white hover:bg-[#003967] disabled:opacity-50">{busy ? "กำลังดำเนินการ…" : mode === "login" ? "เข้าสู่ระบบ LENDI" : needsBootstrap ? "สร้างบัญชี Admin คนแรก" : "เปิดใช้บัญชีที่ได้รับเชิญ"}</button>
       </form>
       <p className="mt-5 text-center text-xs leading-relaxed text-slate-400">พนักงาน Active/Probation ที่มีบัญชีเชื่อมกับ HR Master เข้าใช้งานได้ทันที ส่วนปุ่มดำเนินงานจะเปิดตามหน้าที่รับผิดชอบ</p>
     </div>

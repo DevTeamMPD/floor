@@ -2,9 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "MPD FloorNow",
-    short_name: "FloorNow",
-    description: "ระบบจัดการงานติดตั้งพื้นและแจ้งเตือนพนักงาน",
+    name: "LENDI Engineering",
+    short_name: "LENDI",
+    description: "Your Trusted Partner in Technical Solutions.",
     id: "/",
     start_url: "/",
     scope: "/",

@@ -35,7 +35,18 @@ export async function middleware(request: NextRequest) {
   );
   const { data: { user } } = await supabase.auth.getUser();
   const path = request.nextUrl.pathname;
-  const isPublic = PUBLIC_PREFIXES.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
+  // Local is a safe, isolated preview environment.  Let the team review every
+  // screen there without first creating a Supabase session; production keeps
+  // the normal sign-in and profile checks below.
+  const isLocalDevelopment = request.nextUrl.hostname === "localhost" || request.nextUrl.hostname === "127.0.0.1";
+  if (isLocalDevelopment) {
+    request.cookies.set("floor_local_demo", "1");
+    response = NextResponse.next({ request });
+    response.cookies.set("floor_local_demo", "1", { httpOnly: true, sameSite: "lax", path: "/" });
+  } else if (request.cookies.has("floor_local_demo")) {
+    response.cookies.delete("floor_local_demo");
+  }
+  const isPublic = isLocalDevelopment || PUBLIC_PREFIXES.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
   if (!user && !isPublic) {
     const login = request.nextUrl.clone();
     login.pathname = "/login";

@@ -1,6 +1,6 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { ipGenOrderNo } from "@/lib/utils";
@@ -8,6 +8,8 @@ import { floorActionError, floorErrorMessage } from "@/lib/floor-error-message";
 import { CUT_TYPES, WELD_TYPES, FINISH_TYPES, FLOOR_CONDITIONS, EMPTY_SURVEY, surveyHasData, type SurveyData } from "@/lib/survey";
 import { WORK_ORDER_STATUS_LABELS, workOrderEventLabel, workOrderStatusClass, type WorkOrderStatus } from "@/lib/work-orders";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
+import TicketChat from "@/components/tickets/ticket-chat";
+import LendiSkeleton from "@/components/brand/lendi-skeleton";
 
 interface Team { id: string; name: string }
 interface Appt {
@@ -25,6 +27,18 @@ interface JobDetail {
   bill_no: string | null; customer_name: string | null; customer_phone: string | null;
   address: string | null; location_url: string | null; product_name: string | null; survey_data: string | null;
   status: string | null; source: string | null; flag_note: string | null; raw_payload: unknown;
+  created_by_user_id: string | null;
+}
+interface SalesInfoRequest {
+  id: string;
+  notificationId: number | null;
+  title: string;
+  ticketOwnerName: string | null;
+  body: string | null;
+  job_no: string | null;
+  appointment_id: string | null;
+  read_at: string | null;
+  created_at: string;
 }
 interface DetailTechnician {
   id: string;
@@ -172,6 +186,14 @@ const QUEUE_DRAFT_KEY = "floornow:share-queue:draft:v1";
 const BOOKING_MIN_LEAD_DAYS = 3;
 const TEAM_B_MAX_LEAD_DAYS = 10;
 const UNRESTRICTED_BOOKING_EMAIL = "supakrit.k@mpdgroup.co";
+const DC_MEETING_MARKS: Record<string, string> = {
+  "2026-09-10": "09:00–12:00 Meeting พี่พั๊นกับทีม DC · รับคิวบ่ายไม่เกิน 15 ตร.ม.",
+  "2026-10-15": "09:00–12:00 Meeting พี่พั๊นกับทีม DC · รับคิวบ่ายไม่เกิน 15 ตร.ม.",
+  "2026-11-19": "09:00–12:00 Meeting พี่พั๊นกับทีม DC · รับคิวบ่ายไม่เกิน 15 ตร.ม.",
+  "2026-12-17": "09:00–12:00 Meeting พี่พั๊นกับทีม DC · รับคิวบ่ายไม่เกิน 15 ตร.ม.",
+};
+
+function dcMeetingMark(date: Date) { return DC_MEETING_MARKS[ymd(date)] ?? null; }
 
 function bookingDate(daysAhead: number) {
   const date = new Date();
@@ -272,13 +294,17 @@ export default function ShareQueuePage() {
   const [mMonth, setMMonth] = useState(now.getMonth());
   const [teams, setTeams] = useState<Team[]>([]);
   const [jobs, setJobs] = useState<Record<string, string>>({});
+  const [jobBookers, setJobBookers] = useState<Record<string, string>>({});
   const [appts, setAppts] = useState<Appt[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [queueUpdatedAt, setQueueUpdatedAt] = useState<string | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [bookingNotice, setBookingNotice] = useState<{ title: string; message: string } | null>(null);
   const [queueDraft, setQueueDraft] = useState<QueueDraft | null>(null);
   const [detail, setDetail] = useState<Appt | null>(null);
   const [detailJob, setDetailJob] = useState<JobDetail | null>(null);
+  const [detailCreatorName, setDetailCreatorName] = useState<string | null>(null);
   const [detailWorkOrder, setDetailWorkOrder] = useState<DetailWorkOrder | null>(null);
   const [detailWorkEvents, setDetailWorkEvents] = useState<DetailWorkEvent[]>([]);
   const [previewPhotos, setPreviewPhotos] = useState<PreviewPhoto[]>([]);
@@ -293,6 +319,10 @@ export default function ShareQueuePage() {
   const [customerSummary, setCustomerSummary] = useState<CustomerSummary>({ caption: "", photos: [] });
   const [customerSummarySaving, setCustomerSummarySaving] = useState(false);
   const [customerSummaryUploading, setCustomerSummaryUploading] = useState(false);
+  const [salesInfoRequests, setSalesInfoRequests] = useState<SalesInfoRequest[]>([]);
+  const [salesInboxOpen, setSalesInboxOpen] = useState(false);
+  const salesInboxInitialized = useRef(false);
+  const hasLoadedQueue = useRef(false);
 
   useEffect(() => {
     if (window.matchMedia("(max-width: 640px)").matches) setView("week");
@@ -314,15 +344,77 @@ export default function ShareQueuePage() {
     return () => { active = false; };
   }, [supabase]);
 
+  const loadSalesInfoRequests = useCallback(async () => {
+    // RLS limits floor_notifications to the logged-in recipient.  The event
+    // itself is created only for the direct-sales ticket owner, not every sale.
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setSalesInfoRequests([]); return; }
+    const [notificationResult, returnedResult] = await Promise.all([
+      supabase.from("floor_notifications")
+        .select("id,title,body,job_no,appointment_id,read_at,created_at")
+        .eq("event_type", "work_returned")
+        .order("created_at", { ascending: false }).limit(20),
+      // Fallback for a page opened after an earlier notification was read or
+      // for an older ticket: the ticket owner still sees any work awaiting data.
+      supabase.from("floor_work_orders")
+        .select("id,job_no,appointment_id,returned_reason,returned_at")
+        .eq("status", "returned_sales").eq("source_owner_user_id", user.id)
+        .order("returned_at", { ascending: false }).limit(20),
+    ]);
+    const rawNotifications = (notificationResult.data ?? []) as { id: number; title: string; body: string | null; job_no: string | null; appointment_id: string | null; read_at: string | null; created_at: string }[];
+    const returnedRows = (returnedResult.data ?? []) as { id: string; job_no: string; appointment_id: string | null; returned_reason: string | null; returned_at: string | null }[];
+    // A notification is an inbox item only while the corresponding bill is
+    // actually awaiting sales correction. Once saved and resubmitted it must
+    // disappear, so it cannot re-open Inbox on the next app visit.
+    const activeReturnedJobNos = new Set(returnedRows.map((row) => row.job_no));
+    const notifications = rawNotifications.filter((row) => Boolean(row.job_no && activeReturnedJobNos.has(row.job_no))).map((row) => ({
+      ...row, id: `notification-${row.id}`, notificationId: Number(row.id),
+    }));
+    const allJobNos = Array.from(new Set([...notifications.map((row) => row.job_no), ...returnedRows.map((row) => row.job_no)].filter(Boolean) as string[]));
+    const { data: requestedJobs } = allJobNos.length
+      ? await supabase.from("install_jobs").select("job_no,customer_name,created_by_user_id").in("job_no", allJobNos)
+      : { data: [] as { job_no: string; customer_name: string | null; created_by_user_id: string | null }[] };
+    const { data: ownerWorkOrders } = allJobNos.length
+      ? await supabase.from("floor_work_orders").select("job_no,source_owner_user_id").in("job_no", allJobNos)
+      : { data: [] as { job_no: string; source_owner_user_id: string | null }[] };
+    const jobByNo = new Map(((requestedJobs ?? []) as { job_no: string; customer_name: string | null; created_by_user_id: string | null }[]).map((job) => [job.job_no, job]));
+    const workOrderOwnerByJobNo = new Map(((ownerWorkOrders ?? []) as { job_no: string; source_owner_user_id: string | null }[]).map((workOrder) => [workOrder.job_no, workOrder.source_owner_user_id]));
+    const ticketOwnerIdFor = (jobNo: string | null) => jobNo ? jobByNo.get(jobNo)?.created_by_user_id || workOrderOwnerByJobNo.get(jobNo) || null : null;
+    const ownerIds = Array.from(new Set(allJobNos.map((jobNo) => ticketOwnerIdFor(jobNo)).filter(Boolean) as string[]));
+    const { data: owners } = ownerIds.length
+      ? await supabase.from("floor_staff_profiles").select("id,full_name").in("id", ownerIds)
+      : { data: [] as { id: string; full_name: string | null }[] };
+    const ownerNames = new Map(((owners ?? []) as { id: string; full_name: string | null }[]).map((owner) => [owner.id, owner.full_name]));
+    const ownerNameFor = (jobNo: string | null) => ownerNames.get(ticketOwnerIdFor(jobNo) ?? "") ?? null;
+    const notificationsWithOwner: SalesInfoRequest[] = notifications.map((row) => ({ ...row, ticketOwnerName: ownerNameFor(row.job_no) }));
+    const statusFallbacks: SalesInfoRequest[] = returnedRows.filter((row) => !notificationsWithOwner.some((item) => item.job_no === row.job_no)).map((row) => ({
+      id: `returned-${row.id}`, notificationId: null, job_no: row.job_no, appointment_id: row.appointment_id,
+      title: jobByNo.get(row.job_no)?.customer_name || "งานถูกส่งกลับให้แก้ไข", ticketOwnerName: ownerNameFor(row.job_no), body: row.returned_reason,
+      read_at: null, created_at: row.returned_at || new Date().toISOString(),
+    }));
+    const rows = [...statusFallbacks, ...notificationsWithOwner].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    setSalesInfoRequests(rows);
+    if (!salesInboxInitialized.current) {
+      salesInboxInitialized.current = true;
+      setSalesInboxOpen(rows.length > 0);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    void loadSalesInfoRequests();
+    const channel = supabase.channel("sales-info-request-inbox")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "floor_notifications" }, () => {
+        void loadSalesInfoRequests();
+      }).subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [loadSalesInfoRequests, supabase]);
+
   useEffect(() => {
     const draft = readQueueDraft();
     setQueueDraft(draft);
-    // A sales rep usually leaves this screen to check chat, maps, or a bill.
-    // Re-open a meaningful local draft on return so it never looks like it vanished.
-    if (draft) {
-      setForm(draft.form);
-      setShowSurvey(surveyHasData(draft.form.survey));
-    }
+    // Keep a meaningful local draft, but do not re-open its editing form on
+    // page launch.  The Inbox is allowed to surface a returned ticket; the
+    // sales user explicitly opens an unfinished bill through the “ร่าง” button.
   }, []);
 
   useEffect(() => {
@@ -384,29 +476,79 @@ export default function ShareQueuePage() {
   const teamName = useCallback((id: string | null) => teams.find((t) => t.id === id)?.name ?? "ทีม", [teams]);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    const isInitialLoad = !hasLoadedQueue.current;
+    if (isInitialLoad) setLoading(true);
+    else setRefreshing(true);
     const start = new Date(days[0]); start.setHours(0, 0, 0, 0);
     const end = new Date(days[days.length - 1]); end.setHours(23, 59, 59, 999);
-    const [{ data: tt }, { data: ap }] = await Promise.all([
-      supabase.from("tech_teams").select("id, name").eq("is_active", true).order("name"),
-      supabase.from("appointments").select("id, job_id, tech_id, slot_start, slot_end, status, notes, requirement, ext_ref")
-        .gte("slot_start", start.toISOString()).lte("slot_start", end.toISOString())
-        .neq("status", "cancelled").order("slot_start"),
-    ]);
-    setTeams((tt as Team[]) ?? []);
-    const apps = (ap as Appt[]) ?? [];
-    setAppts(apps);
-    const jobIds = Array.from(new Set(apps.map((a) => a.job_id).filter(Boolean))) as string[];
-    if (jobIds.length) {
-      const { data: js } = await supabase.from("install_jobs").select("job_no, customer_name").in("job_no", jobIds);
-      const jm: Record<string, string> = {};
-      (js ?? []).forEach((j: { job_no: string; customer_name: string | null }) => { jm[j.job_no] = j.customer_name ?? ""; });
-      setJobs(jm);
-    } else setJobs({});
-    setLoading(false);
+    try {
+      const [{ data: tt }, { data: ap }] = await Promise.all([
+        supabase.from("tech_teams").select("id, name").eq("is_active", true).order("name"),
+        supabase.from("appointments").select("id, job_id, tech_id, slot_start, slot_end, status, notes, requirement, ext_ref")
+          .gte("slot_start", start.toISOString()).lte("slot_start", end.toISOString())
+          .neq("status", "cancelled").order("slot_start"),
+      ]);
+      setTeams((tt as Team[]) ?? []);
+      const apps = (ap as Appt[]) ?? [];
+      setAppts(apps);
+      const jobIds = Array.from(new Set(apps.map((a) => a.job_id).filter(Boolean))) as string[];
+      if (jobIds.length) {
+        const [{ data: js }, { data: workOrders }] = await Promise.all([
+          supabase.from("install_jobs").select("job_no, customer_name, created_by_user_id").in("job_no", jobIds),
+          supabase.from("floor_work_orders").select("job_no, source_owner_user_id").in("job_no", jobIds),
+        ]);
+        const jm: Record<string, string> = {};
+        const ownerIdByJobNo: Record<string, string> = {};
+        (workOrders ?? []).forEach((order: { job_no: string; source_owner_user_id: string | null }) => {
+          if (order.source_owner_user_id) ownerIdByJobNo[order.job_no] = order.source_owner_user_id;
+        });
+        (js ?? []).forEach((j: { job_no: string; customer_name: string | null; created_by_user_id: string | null }) => {
+          jm[j.job_no] = j.customer_name ?? "";
+          if (j.created_by_user_id) ownerIdByJobNo[j.job_no] = j.created_by_user_id;
+        });
+        setJobs(jm);
+        const ownerIds = Array.from(new Set(Object.values(ownerIdByJobNo)));
+        const { data: ownerProfiles } = ownerIds.length
+          ? await supabase.from("floor_staff_profiles").select("id, full_name").in("id", ownerIds)
+          : { data: [] as { id: string; full_name: string | null }[] };
+        const ownerNameById = new Map(((ownerProfiles ?? []) as { id: string; full_name: string | null }[]).map((profile) => [profile.id, profile.full_name]));
+        const bookers: Record<string, string> = {};
+        Object.entries(ownerIdByJobNo).forEach(([jobNo, ownerId]) => {
+          const name = ownerNameById.get(ownerId);
+          if (name) bookers[jobNo] = name;
+        });
+        setJobBookers(bookers);
+      } else { setJobs({}); setJobBookers({}); }
+      hasLoadedQueue.current = true;
+    } finally {
+      if (isInitialLoad) setLoading(false);
+      else setRefreshing(false);
+    }
   }, [days, supabase]);
 
   useEffect(() => { load(); }, [load]);
+
+  // BBPS และผู้ใช้อีกคนอาจเปลี่ยนคิวขณะหน้านี้เปิดอยู่ จึงโหลดข้อมูลในช่วง
+  // วันที่ที่กำลังมองใหม่ทันทีเมื่อมีการเปลี่ยนแปลงจากฐานข้อมูล.
+  useEffect(() => {
+    let debounce: number | undefined;
+    const refreshQueue = () => {
+      if (debounce) window.clearTimeout(debounce);
+      debounce = window.setTimeout(() => {
+        void load();
+        setQueueUpdatedAt(new Date().toISOString());
+      }, 180);
+    };
+    const channel = supabase.channel("sales-queue-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "appointments" }, refreshQueue)
+      .on("postgres_changes", { event: "*", schema: "public", table: "install_jobs" }, refreshQueue)
+      .on("postgres_changes", { event: "*", schema: "public", table: "tech_teams" }, refreshQueue)
+      .subscribe();
+    return () => {
+      if (debounce) window.clearTimeout(debounce);
+      void supabase.removeChannel(channel);
+    };
+  }, [load, supabase]);
 
   const chipLabel = useCallback((a: Appt) => {
     if (a.job_id) return jobs[a.job_id] || a.job_id;
@@ -414,6 +556,7 @@ export default function ShareQueuePage() {
     if (!n) return "—";
     return n.split(/[·\n/]/)[0].trim() || n;
   }, [jobs]);
+  const bookingOwner = useCallback((a: Appt) => a.job_id ? jobBookers[a.job_id] || null : null, [jobBookers]);
 
   const teamColor = useCallback((id: string | null) => {
     const idx = teams.findIndex((t) => t.id === id);
@@ -426,10 +569,10 @@ export default function ShareQueuePage() {
   }, [teamColor]);
 
   async function openDetail(a: Appt) {
-    setDetail(a); setDetailJob(null); setDetailWorkOrder(null); setDetailWorkEvents([]); setPreviewPhotos([]); setDetailTechnicians([]); setDetailTechniciansLoading(true); setShowCustomerSummary(false); setCustomerSummary({ caption: "", photos: [] });
+    setDetail(a); setDetailJob(null); setDetailCreatorName(null); setDetailWorkOrder(null); setDetailWorkEvents([]); setPreviewPhotos([]); setDetailTechnicians([]); setDetailTechniciansLoading(true); setShowCustomerSummary(false); setCustomerSummary({ caption: "", photos: [] });
     const jobRequest = a.job_id
       ? supabase.from("install_jobs")
-        .select("bill_no, customer_name, customer_phone, address, location_url, product_name, survey_data, status, source, flag_note, raw_payload")
+        .select("bill_no, customer_name, customer_phone, address, location_url, product_name, survey_data, status, source, flag_note, raw_payload, created_by_user_id")
         .eq("job_no", a.job_id).maybeSingle()
       : Promise.resolve({ data: null });
     const [jobResult, assignmentResult, workOrderResult] = await Promise.all([
@@ -445,6 +588,10 @@ export default function ShareQueuePage() {
       const job = jobResult.data as JobDetail;
       setDetailJob(job);
       try { setCustomerSummary(customerSummaryOf({ ...EMPTY_SURVEY, ...JSON.parse(job.survey_data || "{}") })); } catch { setCustomerSummary({ caption: "", photos: [] }); }
+      if (job.created_by_user_id) {
+        const { data: creator } = await supabase.from("floor_staff_profiles").select("full_name").eq("id", job.created_by_user_id).maybeSingle();
+        setDetailCreatorName(creator?.full_name || null);
+      }
     }
     if (workOrderResult.data) {
       const workOrder = workOrderResult.data as DetailWorkOrder;
@@ -470,6 +617,18 @@ export default function ShareQueuePage() {
       }));
     }
     setDetailTechniciansLoading(false);
+  }
+
+  async function openSalesInfoRequest(request: SalesInfoRequest, mode: "view" | "edit" = "view") {
+    if (request.notificationId) await supabase.from("floor_notifications").update({ read_at: new Date().toISOString() }).eq("id", request.notificationId);
+    setSalesInfoRequests((rows) => rows.map((row) => row.id === request.id ? { ...row, read_at: row.read_at ?? new Date().toISOString() } : row));
+    const existing = request.appointment_id ? appts.find((appointment) => appointment.id === request.appointment_id) : undefined;
+    if (existing) { if (mode === "edit") await openEdit(existing); else await openDetail(existing); return; }
+    const query = request.appointment_id
+      ? supabase.from("appointments").select("id, job_id, tech_id, slot_start, slot_end, status, notes, requirement, ext_ref").eq("id", request.appointment_id).maybeSingle()
+      : supabase.from("appointments").select("id, job_id, tech_id, slot_start, slot_end, status, notes, requirement, ext_ref").eq("job_id", request.job_no ?? "").neq("status", "cancelled").order("slot_start", { ascending: false }).limit(1).maybeSingle();
+    const { data } = await query;
+    if (data) { if (mode === "edit") await openEdit(data as Appt); else await openDetail(data as Appt); }
   }
 
   function openAdd(date: Date) {
@@ -650,9 +809,28 @@ export default function ShareQueuePage() {
         const { error } = await supabase.from("appointments").insert(rows);
         if (error) throw error;
       }
+      // A direct-sales ticket returned by the head technician is ready for
+      // review again as soon as its corrected data has been saved.  Do not
+      // make sales save once and then perform a second, redundant send action.
+      let resubmittedToHead = false;
+      if (form.id && isCustomerJob && form.jobNo) {
+        const { data: returnedOrder, error: returnedOrderError } = await supabase.from("floor_work_orders")
+          .select("id").eq("job_no", form.jobNo).eq("status", "returned_sales")
+          .order("updated_at", { ascending: false }).limit(1).maybeSingle();
+        if (returnedOrderError) throw returnedOrderError;
+        if (returnedOrder?.id) {
+          const { error: resubmitError } = await supabase.rpc("resubmit_floor_work_order_v3", { p_work_order_id: returnedOrder.id });
+          if (resubmitError) throw resubmitError;
+          resubmittedToHead = true;
+        }
+      }
       clearQueueDraft();
       setForm(null);
       await load();
+      if (resubmittedToHead) {
+        await loadSalesInfoRequests();
+        alert("บันทึกข้อมูลและส่งกลับให้หัวหน้าช่างตรวจใหม่แล้ว");
+      }
     } catch (e: unknown) {
       alert(floorActionError("บันทึกคิว / เปิดบิล", e));
     }
@@ -834,6 +1012,7 @@ export default function ShareQueuePage() {
           </div>
           {canSell ? <div className="flex items-center gap-2">
             {queueDraft && <button type="button" onClick={restoreQueueDraft} className="inline-flex rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-medium text-amber-800 hover:bg-amber-100 sm:px-3">📝 ร่าง</button>}
+            <button type="button" onClick={() => setSalesInboxOpen(true)} className="relative inline-flex rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 sm:px-3">🔔 Inbox{salesInfoRequests.length ? ` (${salesInfoRequests.length})` : ""}</button>
             <button onClick={() => openAdd(new Date())} className="shrink-0 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-700">+ ลงคิว</button>
           </div> : <span className={`rounded-lg px-3 py-2 text-xs ${permissionError ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-500"}`}>{permissionError || (staffRole === null ? "กำลังตรวจสอบสิทธิ์" : "โหมดดูข้อมูล")}</span>}
         </div>
@@ -866,11 +1045,12 @@ export default function ShareQueuePage() {
           ))}
           <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-slate-200" />🏖️ วันหยุด</span>
           <span className="inline-flex items-center gap-1 text-slate-400"><span className="inline-block w-3 h-3 rounded border border-dashed border-slate-400" />รอยืนยัน (เส้นประ)</span>
-          <span className="inline-flex items-center gap-1 text-amber-700"><span className="inline-block h-3 w-3 rounded bg-amber-200" />ทีม B ยังไม่พร้อมจอง (เกิน {TEAM_B_MAX_LEAD_DAYS} วัน)</span>
+          <span className="inline-flex items-center gap-1 text-amber-700"><span className="inline-block h-3 w-3 rounded bg-amber-200" />ทีม B ยังไม่พร้อมจอง (เกิน {TEAM_B_MAX_LEAD_DAYS} วัน · ยกเว้นวันที่มีคิว BBPS แล้ว)</span>
+          {refreshing ? <span className="text-blue-700">◌ กำลังอัปเดตคิว…</span> : queueUpdatedAt ? <span className="text-emerald-700">● อัปเดตคิวล่าสุดแล้ว {new Date(queueUpdatedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })}</span> : null}
         </div>
 
         {loading ? (
-          <p className="text-slate-400 text-sm">กำลังโหลด…</p>
+          <LendiSkeleton label="กำลังโหลดคิวงานและ Inbox ของคุณ…" cards={view === "month" ? 7 : 4} />
         ) : view === "month" ? (
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="grid grid-cols-7 border-b bg-slate-50">
@@ -880,7 +1060,11 @@ export default function ShareQueuePage() {
               {monthDays.map((d) => {
                 const inMonth = d.getMonth() === mMonth;
                 const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
-                const teamBUnavailable = isTeamBBookingUnavailable(d, canBypassBookingRules);
+                // Show the planning warning to everyone; the Supakrit override
+                // only bypasses booking validation and must not hide the signal.
+                const teamBHasBbpsJob = dayAppts.some((appointment) => Boolean(appointment.ext_ref?.startsWith("bbps:")) && isTeamB(teams.find((team) => team.id === appointment.tech_id)));
+                const teamBUnavailable = isTeamBBookingUnavailable(d) && !teamBHasBbpsJob;
+                const meetingMark = dcMeetingMark(d);
                 return (
                   <div key={d.toISOString()} onClick={() => canSell && openAdd(d)} title={canSell ? "จิ้มเพื่อลงคิว" : "ดูคิวงาน"} className={`group min-h-[96px] border-b border-r border-slate-100 p-1 flex flex-col ${canSell ? "cursor-pointer hover:bg-blue-50/40" : ""} ${inMonth ? "" : "bg-slate-50/60"}`}>
                     <div className="flex items-center justify-between px-0.5">
@@ -888,11 +1072,13 @@ export default function ShareQueuePage() {
                       {canSell && <span className="text-[11px] text-slate-300 group-hover:text-blue-600 leading-none px-1">＋</span>}
                     </div>
                     <div className="mt-0.5 space-y-0.5 flex-1">
+                      {meetingMark && <div title={meetingMark} className="rounded border border-violet-200 bg-violet-50 px-1 py-0.5 text-[9px] leading-tight text-violet-800">📌 09:00–12:00 Meeting พี่พั๊น + ทีม DC<br />รับคิวบ่าย ≤15 ตร.ม.</div>}
                       {teamBUnavailable && <div className="rounded border border-amber-200 bg-amber-50 px-1 py-0.5 text-[9px] leading-tight text-amber-800">⏳ ทีม B · ยังไม่พร้อมจอง</div>}
                       {dayAppts.map((a) => (
                         <button key={a.id} onClick={(ev) => { ev.stopPropagation(); openDetail(a); }} className={`w-full text-left rounded px-1 py-0.5 text-[10px] leading-tight ${chipCls(a)} hover:brightness-95`}>
                           <span className="font-semibold">{isHoliday(a) ? "🏖️" : fmtTime(a.slot_start)}</span> {teamName(a.tech_id)}
                           <span className="block truncate opacity-80">{chipLabel(a)}</span>
+                          {bookingOwner(a) && <span className="block truncate text-[9px] opacity-70">ผู้จอง: {bookingOwner(a)}</span>}
                         </button>
                       ))}
                     </div>
@@ -905,7 +1091,9 @@ export default function ShareQueuePage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
             {week.map((d) => {
               const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
-                const teamBUnavailable = isTeamBBookingUnavailable(d, canBypassBookingRules);
+              const teamBHasBbpsJob = dayAppts.some((appointment) => Boolean(appointment.ext_ref?.startsWith("bbps:")) && isTeamB(teams.find((team) => team.id === appointment.tech_id)));
+              const teamBUnavailable = isTeamBBookingUnavailable(d) && !teamBHasBbpsJob;
+              const meetingMark = dcMeetingMark(d);
               return (
                 <div key={d.toISOString()} className={`bg-white rounded-xl border ${isToday(d) ? "border-blue-400 ring-1 ring-blue-300" : "border-slate-200"} overflow-hidden flex flex-col min-h-[140px]`}>
                   <div className={`px-2 py-1.5 text-center border-b ${isToday(d) ? "bg-blue-50" : "bg-slate-50"}`}>
@@ -913,6 +1101,7 @@ export default function ShareQueuePage() {
                     <div className="text-sm font-semibold text-slate-800">{d.getDate()}/{d.getMonth() + 1}</div>
                   </div>
                   <div className="p-1.5 space-y-1.5 flex-1">
+                    {meetingMark && <div title={meetingMark} className="rounded-lg border border-violet-200 bg-violet-50 px-1.5 py-1 text-[10px] leading-tight text-violet-800">📌 09:00–12:00 Meeting พี่พั๊น + ทีม DC<br />รับคิวบ่าย ≤15 ตร.ม.</div>}
                     {teamBUnavailable && <div className="rounded-lg border border-amber-200 bg-amber-50 px-1.5 py-1 text-[10px] leading-tight text-amber-800">⏳ ทีม B ยังไม่พร้อมจอง</div>}
                     {dayAppts.map((a) => {
                       const st = STATUS[a.status] ?? STATUS.proposed;
@@ -921,6 +1110,7 @@ export default function ShareQueuePage() {
                           <div className="text-xs font-semibold">{teamName(a.tech_id)}{isHoliday(a) ? " · 🏖️ วันหยุด" : ""}</div>
                           {!isHoliday(a) && <div className="text-[11px] opacity-70">{fmtTime(a.slot_start)}–{fmtTime(a.slot_end)}</div>}
                           <div className="text-[11px] opacity-80 truncate">{chipLabel(a)}</div>
+                          {bookingOwner(a) && <div className="text-[10px] opacity-70 truncate">ผู้จอง: {bookingOwner(a)}</div>}
                           <span className="inline-block mt-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-white/60">{st.label}</span>
                         </button>
                       );
@@ -934,6 +1124,20 @@ export default function ShareQueuePage() {
         )}
         <p className="text-[11px] text-slate-400 mt-4">ตารางนี้เชื่อมกับระบบ MPD แบบเรียลไทม์ · เปิดบิลที่นี่ = สร้างงานเข้า Pipeline</p>
       </main>
+
+      {salesInboxOpen && <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/55 p-0 sm:items-center sm:p-5" role="dialog" aria-modal="true" aria-labelledby="sales-inbox-title">
+        <button type="button" className="absolute inset-0 cursor-default" onClick={() => setSalesInboxOpen(false)} aria-label="ปิด Inbox" />
+        <section className="relative z-10 flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-t-3xl bg-amber-50 shadow-2xl sm:max-h-[88vh] sm:rounded-3xl">
+          <header className="flex shrink-0 items-start justify-between gap-4 border-b border-amber-200 bg-amber-50 px-5 py-4 sm:px-6">
+            <div><p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Inbox ฝ่ายขาย · เฉพาะตั๋วที่คุณเปิด</p><h2 id="sales-inbox-title" className="mt-1 text-xl font-bold text-amber-950">ต้องแก้ไข {salesInfoRequests.length} งาน</h2><p className="mt-1 text-sm text-amber-800">แก้ตามเหตุผลแล้วส่งกลับให้หัวหน้าช่างตรวจใหม่</p></div>
+            <button type="button" onClick={() => setSalesInboxOpen(false)} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-2xl text-amber-700 hover:bg-amber-100" aria-label="ปิด Inbox">×</button>
+          </header>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">{salesInfoRequests.map((request) => <article key={request.id} className="rounded-2xl border border-amber-300 bg-white p-4 sm:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="text-base font-semibold text-slate-950">{request.title}</h3><span className="rounded bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">ขายตรง</span>{!request.read_at && <span className="rounded bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">ใหม่</span>}</div><p className="mt-1 text-xs text-slate-500">{request.job_no ? `#${request.job_no}` : "ตั๋วที่คุณเปิด"} · ผู้เปิดตั๋ว: <b className="font-semibold text-slate-700">{request.ticketOwnerName || "ไม่ระบุ"}</b> · {new Date(request.created_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Bangkok" })}</p>{request.body && <p className="mt-3 inline-block rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-950"><b>เหตุผล:</b> {request.body}</p>}</div><div className="flex shrink-0 gap-2"><button type="button" onClick={() => { setSalesInboxOpen(false); void openSalesInfoRequest(request); }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">ดูงาน</button><button type="button" onClick={() => { setSalesInboxOpen(false); void openSalesInfoRequest(request, "edit"); }} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700">แก้ไขข้อมูล</button></div></div>
+          </article>)}{!salesInfoRequests.length && <div className="rounded-2xl border border-dashed border-amber-300 bg-white px-5 py-12 text-center text-sm text-amber-800">ตอนนี้ยังไม่มีตั๋วของคุณที่ช่างขอข้อมูลเพิ่มเติม</div>}</div>
+          <footer className="shrink-0 border-t border-amber-200 bg-white px-5 py-4 text-right"><button type="button" onClick={() => setSalesInboxOpen(false)} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">ปิด Inbox</button></footer>
+        </section>
+      </div>}
 
       {/* Detail modal */}
       {detail && (() => {
@@ -965,6 +1169,7 @@ export default function ShareQueuePage() {
                     <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
                       {detail.job_id && <span>เลขงาน <strong className="font-medium text-slate-700">{detail.job_id}</strong></span>}
                       {billNo && <span>เลขบิล <strong className="font-medium text-slate-700">{billNo}</strong></span>}
+                      {detailCreatorName && <span>ผู้เปิดตั๋ว <strong className="font-medium text-slate-700">{detailCreatorName}</strong></span>}
                     </div>
                     {detail.job_id ? <div className="mt-3 flex flex-wrap gap-2"><a href={`/orders/${encodeURIComponent(detail.job_id)}`} className="inline-flex rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">เปิดใบสั่งงานและสถานะการส่งต่อ</a><button type="button" onClick={() => setShowCustomerSummary(true)} className="inline-flex rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700">🖼️ รูปสรุปลูกค้า</button><button type="button" onClick={() => void copyCustomerStatusLink()} className="inline-flex rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-800 hover:bg-violet-100">🔗 คัดลอกลิงก์ลูกค้า</button></div> : null}
                   </div>
@@ -973,6 +1178,7 @@ export default function ShareQueuePage() {
               </header>
 
               <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-6">
+                {detail.job_id && <div className="mb-4"><TicketChat jobNo={detail.job_id} viewer="sales" viewerName={detailCreatorName || "ฝ่ายขาย"} /></div>}
                 <div className="grid gap-4 md:grid-cols-2">
                   <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
                     <h3 className="mb-4 text-sm font-semibold text-slate-900">📅 วัน เวลา และทีมรับผิดชอบ</h3>
@@ -1121,6 +1327,7 @@ export default function ShareQueuePage() {
                   </section>
 
                   {detailJob?.flag_note && <section className="rounded-2xl border border-amber-300 bg-amber-50 p-4 sm:p-5 md:col-span-2"><h3 className="text-sm font-semibold text-amber-800">⚠️ ข้อมูลที่ต้องแก้ไข</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-amber-900">{detailJob.flag_note}</p></section>}
+
                 </div>
               </div>
 
@@ -1145,9 +1352,8 @@ export default function ShareQueuePage() {
                   )}
                   {detail.status === "completed" && <p className="mr-auto text-xs text-emerald-700">สถานะเสร็จสิ้นถูกบันทึกจากใบงานติดตั้ง</p>}
                   {!canDecide && detail.status !== "completed" && <p className="mr-auto text-xs text-slate-500">หัวหน้าช่างหรือผู้ดูแลระบบเป็นผู้เปลี่ยนสถานะคิว</p>}
-                  {canDecide && detail.status === "proposed" && detail.job_id && <button onClick={() => sendBack(detail)} className="rounded-lg border border-amber-300 px-4 py-2.5 text-sm text-amber-700 hover:bg-amber-50">ส่งกลับแก้ไข</button>}
-                  {canSell && !detail.ext_ref?.startsWith("bbps:") && <button onClick={() => openEdit(detail)} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50">แก้ไข</button>}
-                  {canCancel && <button onClick={() => remove(detail)} className="rounded-lg border border-red-200 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50">ยกเลิกคิว</button>}
+                  {(canDecide && detail.status === "proposed" && detail.job_id) || (canSell && !detail.ext_ref?.startsWith("bbps:")) || canCancel ? <details className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 sm:hidden"><summary className="cursor-pointer text-center text-xs font-semibold text-slate-600">การดำเนินการเพิ่มเติม</summary><div className="mt-3 grid grid-cols-2 gap-2">{canDecide && detail.status === "proposed" && detail.job_id && <button onClick={() => sendBack(detail)} className="rounded-lg border border-amber-300 bg-white px-3 py-2.5 text-xs font-medium text-amber-700">ส่งกลับแก้ไข</button>}{canSell && !detail.ext_ref?.startsWith("bbps:") && <button onClick={() => openEdit(detail)} className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-xs font-medium text-slate-700">แก้ไข</button>}{canCancel && <button onClick={() => remove(detail)} className="rounded-lg border border-red-200 bg-white px-3 py-2.5 text-xs font-medium text-red-600">ยกเลิกคิว</button>}</div></details> : null}
+                  <div className="hidden items-center gap-2 sm:flex">{canDecide && detail.status === "proposed" && detail.job_id && <button onClick={() => sendBack(detail)} className="rounded-lg border border-amber-300 px-4 py-2.5 text-sm text-amber-700 hover:bg-amber-50">ส่งกลับแก้ไข</button>}{canSell && !detail.ext_ref?.startsWith("bbps:") && <button onClick={() => openEdit(detail)} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50">แก้ไข</button>}{canCancel && <button onClick={() => remove(detail)} className="rounded-lg border border-red-200 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50">ยกเลิกคิว</button>}</div>
                 </div>
               </footer>
             </aside>
