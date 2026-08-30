@@ -52,6 +52,7 @@ async function handle(req: Request) {
 
   try {
     let added = 0, removed = 0, warnings = 0, skipped = 0;
+    const clashes: string[] = [];
     const isRemoveEvent = event === "completed" || event === "deleted" || event === "cancelled";
     for (const j of jobs) {
       if (!j.id) continue;
@@ -63,10 +64,15 @@ async function handle(req: Request) {
         const r = await applyBbpsJob(supabase, j);
         added += r.added; removed += r.removed;
         if (r.skipped) skipped++;
+        // คิวชน = ไม่จองทับ แต่ต้องไม่เงียบ ทั้งใน log และในคำตอบที่ BBPS ได้รับ
+        for (const c of r.clashes) {
+          clashes.push(`${r.jobNo ?? j.id}@${c.date}`);
+          console.warn(`[webhook-bbps] clash job=${j.id} jobNo=${r.jobNo ?? "-"} date=${c.date} with=${c.withLabel} — ไม่จองทับ ติดธงไว้ที่ ticket แล้ว`);
+        }
       }
     }
-    console.log(`[webhook-bbps] event=${event} jobs=${jobs.length} added=${added} removed=${removed} skipped=${skipped} warnings=${warnings}`);
-    return NextResponse.json({ ok: true, event, jobs: jobs.length, added, removed, skipped, warnings, at: new Date().toISOString() });
+    console.log(`[webhook-bbps] event=${event} jobs=${jobs.length} added=${added} removed=${removed} skipped=${skipped} warnings=${warnings} clashes=${clashes.length}`);
+    return NextResponse.json({ ok: true, event, jobs: jobs.length, added, removed, skipped, warnings, clashes, at: new Date().toISOString() });
   } catch (e) {
     console.error("[webhook-bbps] error", e);
     const message = e instanceof Error

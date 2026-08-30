@@ -53,6 +53,77 @@ export function collectBlockDates(j: BbpsJob): string[] {
   return Array.from(set).sort();
 }
 
+// ---------------------------------------------------------------------------
+// กันคิวชน
+//
+// งาน BBPS ถูกจองให้ทีม B เต็มวัน 09:00-17:00 เสมอ และเดิมโค้ดนี้ insert/update
+// ลงตาราง appointments ตรง ๆ โดยไม่เช็คว่าทีม B ว่างหรือไม่  การเช็คคิวชนที่มีอยู่
+// อยู่ในหน้าจอลงคิวฝั่ง browser เท่านั้น (app/share/queue/page.tsx) ซึ่งงานที่ไหล
+// มาจาก BBPS ไม่เคยผ่าน  ผลคือเมื่อ 2026-08-20 มีงาน BBPS ถูกจองทับบล็อก
+// "วันหยุด" ของทีม B ไปแล้วจริง
+//
+// นโยบายเมื่อชน: ไม่จองทับ และไม่เงียบ — ข้ามวันนั้น แล้วติดธงไว้ที่ ticket
+// ให้คนตัดสินใจ (เลื่อนวัน / ย้ายทีม / ยกเลิกงานเดิม)
+// ---------------------------------------------------------------------------
+
+export const CLASH_FLAG_PREFIX = "คิวชนกับงานอื่น:";
+
+export interface ClashRow {
+  ext_ref?: string | null;
+  slot_start: string;
+  slot_end: string;
+  notes?: string | null;
+  job_id?: string | null;
+}
+
+export interface ClashInfo {
+  date: string;
+  withLabel: string;
+}
+
+function clashLabel(r: ClashRow): string {
+  const fromNotes = (r.notes || "").split(/[·\n/]/)[0].trim();
+  return fromNotes || (r.job_id || "").trim() || "งานอื่น";
+}
+
+/**
+ * หาว่าวันไหนในรายการที่ขอจองไปชนกับคิวที่ทีมถืออยู่แล้ว
+ * others ต้องกรองมาแล้วว่าเป็นทีมเดียวกัน ยังไม่ยกเลิก และไม่ใช่คิวของงานนี้เอง
+ * ชนขอบไม่ถือว่าซ้อน (จบ 09:00 แล้วเริ่ม 09:00 ต่อได้) ให้ตรงกับ tstzrange '[)' ที่ฐานข้อมูล
+ */
+export function findClashes(dates: string[], others: ClashRow[]): ClashInfo[] {
+  const out: ClashInfo[] = [];
+  for (const d of dates) {
+    const s = new Date(`${d}T${WORK_START}:00${BKK}`).getTime();
+    const e = new Date(`${d}T${WORK_END}:00${BKK}`).getTime();
+    const hit = others.find((r) => {
+      const rs = new Date(r.slot_start).getTime();
+      const re = new Date(r.slot_end).getTime();
+      return Number.isFinite(rs) && Number.isFinite(re) && s < re && e > rs;
+    });
+    if (hit) out.push({ date: d, withLabel: clashLabel(hit) });
+  }
+  return out;
+}
+
+export function formatClashNote(clashes: ClashInfo[]): string | null {
+  if (!clashes.length) return null;
+  return `${CLASH_FLAG_PREFIX} ${clashes.map((c) => `${c.date} (${c.withLabel})`).join(", ")}`;
+}
+
+/**
+ * ต่อ/ถอดข้อความคิวชนใน flag_note โดยไม่ทับธงเรื่องอื่น (เช่น "ข้อมูลไม่ครบ")
+ * sync ซ้ำด้วยผลลัพธ์เดิมต้องได้ค่าเดิม เพื่อไม่ให้ข้อความสะสมและไม่ log ซ้ำ
+ */
+export function mergeClashFlag(existing: string | null | undefined, clashNote: string | null): string | null {
+  const kept = (existing ?? "")
+    .split(" · ")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0 && !part.startsWith(CLASH_FLAG_PREFIX));
+  if (clashNote) kept.push(clashNote);
+  return kept.length ? kept.join(" · ") : null;
+}
+
 function jobNoFor(id: string) {
   return `BBPS-${id}`;
 }
@@ -193,22 +264,54 @@ export async function applyBbpsJob(supabase: SupabaseClient, j: BbpsJob) {
   const dates = collectBlockDates(j);
   // งานยังไม่มีวันติดตั้งที่เป็น ค.ศ. ถูกต้อง: ยังไม่สร้าง Ticket/คิว และรอ BBPS ส่งใหม่เมื่อข้อมูลครบ
   if (!dates.length) {
-    return { jobNo: null, added: 0, updated: 0, removed: 0, blocks: 0, skipped: true };
+    return { jobNo: null, added: 0, updated: 0, removed: 0, blocks: 0, skipped: true, clashes: [] as ClashInfo[] };
   }
   const jobNo = await upsertTicket(supabase, j, dates);
   const label = j.customerName || j.quoteNumber || "BBPS";
+  const refPrefix = `bbps:${j.id}:`;
 
   const { data: existing, error } = await supabase.from("appointments")
-    .select("id, ext_ref, tech_id, status, job_id").like("ext_ref", `bbps:${j.id}:%`);
+    .select("id, ext_ref, tech_id, status, job_id").like("ext_ref", `${refPrefix}%`);
   if (error) throw error;
 
   const byRef = new Map((existing ?? []).map((e) => [e.ext_ref as string, e]));
-  const desiredRefs = new Set(dates.map((d) => `bbps:${j.id}:${d}`));
-  const toInsert = [];
+  const desiredRefs = new Set(dates.map((d) => `${refPrefix}${d}`));
+
+  // ปล่อยคิววันที่ BBPS ไม่ได้ขอแล้วก่อน แล้วค่อยจองวันใหม่
+  // ถ้าจองก่อนปล่อย งานเดียวกันอาจไปชนคิวเก่าของตัวเองที่ฐานข้อมูล
+  const staleIds = (existing ?? [])
+    .filter((e) => !desiredRefs.has(e.ext_ref as string) && e.status !== "cancelled")
+    .map((e) => e.id);
+  if (staleIds.length) {
+    const { error: staleError } = await supabase.from("appointments")
+      .update({ status: "cancelled" }).in("id", staleIds);
+    if (staleError) throw staleError;
+  }
+
+  // คิวที่ทีม B ถืออยู่แล้วในช่วงวันเดียวกัน ไม่นับคิวของงานนี้เอง
+  // เทียบด้วย slot_start < ปลายช่วง และ slot_end > ต้นช่วง เพื่อให้เห็นคิวข้ามวัน
+  // ที่ "เริ่มก่อน" ช่วงนี้แต่ลากมาทับด้วย — เป็นช่องที่การเช็คฝั่ง browser มองไม่เห็น
+  const rangeStart = new Date(`${dates[0]}T00:00:00${BKK}`).toISOString();
+  const rangeEnd = new Date(`${dates[dates.length - 1]}T23:59:59${BKK}`).toISOString();
+  const { data: otherRows, error: othersError } = await supabase.from("appointments")
+    .select("id, ext_ref, slot_start, slot_end, notes, job_id")
+    .eq("tech_id", TEAM_B_ID)
+    .neq("status", "cancelled")
+    .lt("slot_start", rangeEnd)
+    .gt("slot_end", rangeStart);
+  if (othersError) throw othersError;
+  const others = ((otherRows ?? []) as ClashRow[]).filter((r) => !(r.ext_ref ?? "").startsWith(refPrefix));
+
+  const clashes = findClashes(dates, others);
+  const clashDates = new Set(clashes.map((c) => c.date));
+
+  const toInsert: Record<string, unknown>[] = [];
   let updated = 0;
 
   for (const d of dates) {
-    const extRef = `bbps:${j.id}:${d}`;
+    // ชน = ไม่แตะวันนั้นเลย ทั้งจองใหม่และแก้ของเดิม ปล่อยให้คนตัดสินใจก่อน
+    if (clashDates.has(d)) continue;
+    const extRef = `${refPrefix}${d}`;
     const current = byRef.get(extRef);
     const values = {
       slot_start: new Date(`${d}T${WORK_START}:00${BKK}`).toISOString(),
@@ -230,19 +333,43 @@ export async function applyBbpsJob(supabase: SupabaseClient, j: BbpsJob) {
     }
   }
 
+  let added = 0;
   if (toInsert.length) {
     const { error: insertError } = await supabase.from("appointments").insert(toInsert);
-    if (insertError) throw insertError;
+    if (!insertError) {
+      added = toInsert.length;
+    } else if (insertError.code === "23P01") {
+      // 23P01 = exclusion constraint กันคิวชนที่ฐานข้อมูล (ด่านสุดท้าย)
+      // เกิดได้เมื่อมีคนจองแทรกหลังจากเราเช็คไปแล้ว — ลองทีละแถว
+      // เพื่อไม่ให้วันที่ยังว่างตกไปพร้อมกับวันที่ชน
+      for (const row of toInsert) {
+        const { error: rowError } = await supabase.from("appointments").insert(row);
+        if (!rowError) { added++; continue; }
+        if (rowError.code !== "23P01") throw rowError;
+        clashes.push({ date: String(row.ext_ref).slice(refPrefix.length), withLabel: "งานที่จองแทรกเข้ามาระหว่างซิงก์" });
+      }
+    } else {
+      throw insertError;
+    }
   }
 
-  const staleIds = (existing ?? [])
-    .filter((e) => !desiredRefs.has(e.ext_ref as string) && e.status !== "cancelled")
-    .map((e) => e.id);
-  if (staleIds.length) {
-    const { error: staleError } = await supabase.from("appointments")
-      .update({ status: "cancelled" }).in("id", staleIds);
-    if (staleError) throw staleError;
+  clashes.sort((a, b) => a.date.localeCompare(b.date));
+
+  // ติดธงไว้ที่ ticket ให้คนเห็น แทนที่จะจองทับเงียบ ๆ
+  const { data: ticketRow, error: ticketError } = await supabase
+    .from("install_jobs").select("flag_note").eq("job_no", jobNo).maybeSingle();
+  if (ticketError) throw ticketError;
+  const previousFlag = (ticketRow?.flag_note as string | null) ?? null;
+  const nextFlag = mergeClashFlag(previousFlag, formatClashNote(clashes));
+  if (nextFlag !== previousFlag) {
+    const { error: flagError } = await supabase.from("install_jobs").update({
+      flag_note: nextFlag,
+      ...(clashes.length ? { waiting_on: "หัวหน้าช่าง", waiting_since: new Date().toISOString() } : {}),
+      updated_at: new Date().toISOString(),
+    }).eq("job_no", jobNo);
+    if (flagError) throw flagError;
+    await writeActivity(supabase, jobNo, "sync", "flag_note", previousFlag, nextFlag);
   }
 
-  return { jobNo, added: toInsert.length, updated, removed: staleIds.length, blocks: dates.length, skipped: false };
+  return { jobNo, added, updated, removed: staleIds.length, blocks: dates.length, skipped: false, clashes };
 }
