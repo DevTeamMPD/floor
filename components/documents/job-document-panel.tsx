@@ -76,7 +76,7 @@ export default function JobDocumentPanel({ jobNo }: { jobNo: string }) {
     } finally { setLoading(false); }
   }, [jobNo]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void (async () => { await fetch("/api/documents/process", { method: "POST" }).catch(() => null); await load(); })(); }, [load]);
   useEffect(() => { setDocumentType(selectedStage.types[0]?.value ?? "other"); }, [selectedStage]);
 
   async function upload() {

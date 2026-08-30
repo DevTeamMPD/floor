@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { processDocumentGenerationJobs } from "@/lib/documents/generation-worker";
+import { getCurrentStaff } from "@/lib/staff-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,8 +11,7 @@ function authorized(request: Request) {
   return Boolean(secret && request.headers.get("authorization") === `Bearer ${secret}`);
 }
 
-async function runWorker(request: Request) {
-  if (!authorized(request)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+async function executeWorker() {
   try {
     return NextResponse.json(await processDocumentGenerationJobs());
   } catch (cause) {
@@ -20,5 +20,15 @@ async function runWorker(request: Request) {
   }
 }
 
-export const GET = runWorker;
-export const POST = runWorker;
+export async function GET(request: Request) {
+  if (!authorized(request)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  return executeWorker();
+}
+
+export async function POST(request: Request) {
+  if (!authorized(request)) {
+    const staff = await getCurrentStaff();
+    if (!staff) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  return executeWorker();
+}

@@ -6,7 +6,7 @@
 
 1. ผู้ใช้ทำงานเดิมตามปกติ เช่น ยืนยันใบสั่งงาน ปิดคลัง บันทึกติดตั้ง ลูกค้าเซ็น รายงานเศษ ประเมินหลังการขาย หรือปิดงาน
 2. Database trigger เพิ่มรายการลง `floor_document_generation_jobs` ภายใน transaction เดิม โดย trigger ครอบ error เพื่อไม่ทำให้งานหลักของผู้ใช้ล้ม
-3. Vercel Cron เรียก `/api/documents/process` ทุก 5 นาที พร้อม `CRON_SECRET`
+3. เมื่อพนักงานเปิดแท็บเอกสารหรือศูนย์เอกสาร ระบบเรียก worker ทันที; Vercel Cron รายวัน 01:15 น. เป็น safety net พร้อม `CRON_SECRET` (ทีมใช้แผน Hobby ซึ่งไม่รองรับ cron ทุก 5 นาที)
 4. Worker claim งานทีละรายการ, snapshot ข้อมูลจริง, render HTML ภาษาไทย และ upload ไป SharePoint
 5. Microsoft Graph แปลง HTML เป็น PDF แล้วเก็บ PDF เป็นไฟล์ทางการในทะเบียน `floor_job_documents`
 6. ระบบ auto-approve เฟส 1 และ mark revision ก่อนหน้าเป็น `superseded`

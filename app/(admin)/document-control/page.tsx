@@ -19,7 +19,7 @@ export default function DocumentControlPage() {
   const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
     setLoading(true); setError("");
-    try { const response = await fetch("/api/documents/health", { cache: "no-store" }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error); setData(payload); }
+    try { await fetch("/api/documents/process", { method: "POST" }).catch(() => null); const response = await fetch("/api/documents/health", { cache: "no-store" }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error); setData(payload); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "โหลดข้อมูลไม่สำเร็จ"); }
     finally { setLoading(false); }
   }, []);
