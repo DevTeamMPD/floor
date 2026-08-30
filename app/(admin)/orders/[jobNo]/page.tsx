@@ -4,6 +4,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "r
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 import { createClient } from "@/lib/supabase/client";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import TechnicianAssignmentButton from "@/components/appointments/technician-assignment";
@@ -165,29 +166,29 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
     if (unknownSkus.size && !window.confirm(`พบ SKU ที่ไม่มีในคลัง:\n• ${Array.from(unknownSkus).join("\n• ")}\n\nยืนยันใช้เป็นข้อยกเว้นหรือไม่? ระบบจะบันทึกว่าเป็น SKU นอกคลัง`)) return;
     const exceptionNote = unknownSkus.size ? `อนุมัติข้อยกเว้น SKU นอกคลัง: ${Array.from(unknownSkus).join(", ")}` : null;
     setSaving(true); const { error } = await supabase.rpc("confirm_floor_work_order_v2", { p_work_order_id: order.id, p_items: rpcItems(unknownSkus), p_note: [note.trim(), exceptionNote].filter(Boolean).join("\n") || null }); setSaving(false);
-    if (error) toast.error(error.message); else { toast.success("ยืนยันใบสั่งงานและส่งให้คลังแล้ว"); void refreshAfterChange(); }
+    if (error) toast.error(floorErrorMessage(error)); else { toast.success("ยืนยันใบสั่งงานและส่งให้คลังแล้ว"); void refreshAfterChange(); }
   }
   async function returnOrder() {
     if (!order) return; const reason = window.prompt(job?.source === "bbps" ? "ระบุข้อมูลที่ต้องให้ BBPS แก้ไข" : "ระบุข้อมูลที่ต้องให้ฝ่ายขายแก้ไข");
     if (!reason?.trim()) return; setSaving(true); const { error } = await supabase.rpc("return_floor_work_order_v3", { p_work_order_id: order.id, p_reason: reason.trim() }); setSaving(false);
-    if (error) toast.error(error.message); else { toast.success(job?.source === "bbps" ? "ส่งกลับ BBPS แล้ว" : "ส่งกลับฝ่ายขายแล้ว"); void refreshAfterChange(); }
+    if (error) toast.error(floorErrorMessage(error)); else { toast.success(job?.source === "bbps" ? "ส่งกลับ BBPS แล้ว" : "ส่งกลับฝ่ายขายแล้ว"); void refreshAfterChange(); }
   }
   async function acceptWarehouse() {
     if (!order) return; setSaving(true); const { error } = await supabase.rpc("accept_floor_warehouse_order_v2", { p_work_order_id: order.id }); setSaving(false);
-    if (error) toast.error(error.message); else { toast.success("รับงานเตรียมสินค้าแล้ว"); void refreshAfterChange(); }
+    if (error) toast.error(floorErrorMessage(error)); else { toast.success("รับงานเตรียมสินค้าแล้ว"); void refreshAfterChange(); }
   }
   async function completeWarehouse() {
     if (!order) return; if (items.some((item) => !isFreeformNote(item) && (item.actualQty === "" || Number(item.actualQty) < 0))) { toast.error("กรอกจำนวนหยิบจริงให้ครบทุกบรรทัด"); return; } if (!warehouseFiles.length) { toast.error("ต้องแนบรูปสินค้าที่เตรียมเสร็จอย่างน้อย 1 รูป"); return; }
     setSaving(true); const paths: string[] = [];
-    for (let index = 0; index < warehouseFiles.length; index++) { const file = warehouseFiles[index].file; const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-"); const path = `work-orders/${order.id}/warehouse/${Date.now()}-${index}-${safe}`; const { error } = await supabase.storage.from("job-photos").upload(path, file); if (error) { toast.error(error.message); setSaving(false); return; } paths.push(path); }
+    for (let index = 0; index < warehouseFiles.length; index++) { const file = warehouseFiles[index].file; const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-"); const path = `work-orders/${order.id}/warehouse/${Date.now()}-${index}-${safe}`; const { error } = await supabase.storage.from("job-photos").upload(path, file); if (error) { toast.error(floorErrorMessage(error)); setSaving(false); return; } paths.push(path); }
     const actual = items.map((item) => ({ id: item.id, actualQty: isFreeformNote(item) ? 0 : Number(item.actualQty) }));
     const { error } = await supabase.rpc("complete_floor_warehouse_order_v2", { p_work_order_id: order.id, p_actual_items: actual, p_photo_paths: paths, p_note: note.trim() || null }); setSaving(false);
-    if (error) toast.error(error.message); else { toast.success("เตรียมสินค้าเสร็จและย้ายไปรอติดตั้งแล้ว"); clearWarehouseFiles(); void refreshAfterChange(); }
+    if (error) toast.error(floorErrorMessage(error)); else { toast.success("เตรียมสินค้าเสร็จและย้ายไปรอติดตั้งแล้ว"); clearWarehouseFiles(); void refreshAfterChange(); }
   }
   async function copyLink(token: string) { await navigator.clipboard.writeText(`${window.location.origin}/work/${token}`); toast.success("คัดลอกลิงก์ช่างแล้ว"); }
   async function copyExternalLink() { if (!order?.external_share_token) return; await navigator.clipboard.writeText(`${window.location.origin}/status/${order.external_share_token}`); toast.success("คัดลอกลิงก์ภายนอกแล้ว"); }
-  async function rotateExternalLink() { if (!order || !window.confirm("ลิงก์เดิมจะเปิดไม่ได้ทันที ต้องการสร้างลิงก์ใหม่หรือไม่?")) return; setSaving(true); const { error } = await supabase.rpc("rotate_floor_external_share_v3", { p_work_order_id: order.id }); setSaving(false); if (error) toast.error(error.message); else { toast.success("สร้างลิงก์ใหม่แล้ว"); void refreshAfterChange(); } }
-  async function toggleExternalLink() { if (!order) return; setSaving(true); const { error } = await supabase.rpc("set_floor_external_share_enabled_v3", { p_work_order_id: order.id, p_enabled: !order.external_share_enabled }); setSaving(false); if (error) toast.error(error.message); else { toast.success(order.external_share_enabled ? "ปิดลิงก์ภายนอกแล้ว" : "เปิดลิงก์ภายนอกแล้ว"); void refreshAfterChange(); } }
+  async function rotateExternalLink() { if (!order || !window.confirm("ลิงก์เดิมจะเปิดไม่ได้ทันที ต้องการสร้างลิงก์ใหม่หรือไม่?")) return; setSaving(true); const { error } = await supabase.rpc("rotate_floor_external_share_v3", { p_work_order_id: order.id }); setSaving(false); if (error) toast.error(floorErrorMessage(error)); else { toast.success("สร้างลิงก์ใหม่แล้ว"); void refreshAfterChange(); } }
+  async function toggleExternalLink() { if (!order) return; setSaving(true); const { error } = await supabase.rpc("set_floor_external_share_enabled_v3", { p_work_order_id: order.id, p_enabled: !order.external_share_enabled }); setSaving(false); if (error) toast.error(floorErrorMessage(error)); else { toast.success(order.external_share_enabled ? "ปิดลิงก์ภายนอกแล้ว" : "เปิดลิงก์ภายนอกแล้ว"); void refreshAfterChange(); } }
 
   if (loading) return <div className="py-20 text-center text-slate-400">กำลังโหลดใบสั่งงาน…</div>;
   if (!job || !appointment || !order) return <div className="rounded-2xl border bg-white p-10 text-center text-slate-500">ไม่พบใบสั่งงานสำหรับงานนี้</div>;

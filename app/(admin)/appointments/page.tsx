@@ -297,7 +297,7 @@ export default function AppointmentsPage() {
       status: 'proposed',
     });
     setSaving(false);
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(floorErrorMessage(error)); return; }
     toast.success('สร้างนัดหมายเรียบร้อย');
     setShowCreate(false);
     setForm(emptyForm);
@@ -324,7 +324,7 @@ export default function AppointmentsPage() {
     const { error } = appt.job_id && newStatus === 'confirmed'
       ? await update.eq('job_id', appt.job_id).neq('status', 'cancelled')
       : await update.eq('id', appt.id);
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(floorErrorMessage(error)); return; }
     if (appt.job_id && newStatus === 'confirmed') {
       const { error: jobError } = await supabase.from('install_jobs').update({
         status: 'ยืนยันคิวแล้ว', waiting_on: 'ไม่ได้ค้าง', waiting_since: null,
@@ -343,7 +343,7 @@ export default function AppointmentsPage() {
   async function cancelAppointment(appt: Appointment) {
     if (!canManage) { toast.error('บัญชีนี้ดูข้อมูลได้ แต่ไม่มีสิทธิ์ยกเลิกคิว'); return; }
     const { error } = await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', appt.id);
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(floorErrorMessage(error)); return; }
     if (appt.job_id) {
       const { count } = await supabase.from('appointments')
         .select('id', { count: 'exact', head: true }).eq('job_id', appt.job_id).neq('status', 'cancelled');
@@ -374,7 +374,7 @@ export default function AppointmentsPage() {
     const { error } = await supabase.from('appointments').update({
       tech_id: techId, status: 'proposed', confirmed_at: null,
     }).eq('id', appt.id);
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(floorErrorMessage(error)); return; }
     const { error: revokeError } = await supabase.from('appointment_technicians').update({
       is_active: false, is_lead: false, revoked_at: new Date().toISOString(),
     }).eq('appointment_id', appt.id).eq('is_active', true);
@@ -404,7 +404,7 @@ export default function AppointmentsPage() {
         phone: techForm.phone.trim() || null,
         notes: techForm.notes.trim() || null,
       }).eq('id', editTech.id);
-      if (error) { setSaving(false); toast.error(error.message); return; }
+      if (error) { setSaving(false); toast.error(floorErrorMessage(error)); return; }
       toast.success('แก้ไขทีมช่างเรียบร้อย');
     } else {
       const { error } = await supabase.from('tech_teams').insert({
@@ -412,7 +412,7 @@ export default function AppointmentsPage() {
         phone: techForm.phone.trim() || null,
         notes: techForm.notes.trim() || null,
       });
-      if (error) { setSaving(false); toast.error(error.message); return; }
+      if (error) { setSaving(false); toast.error(floorErrorMessage(error)); return; }
       toast.success('เพิ่มทีมช่างเรียบร้อย');
     }
     setSaving(false);
@@ -423,7 +423,7 @@ export default function AppointmentsPage() {
 
   async function toggleTechActive(tech: TechTeam) {
     const { error } = await supabase.from('tech_teams').update({ is_active: !tech.is_active }).eq('id', tech.id);
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(floorErrorMessage(error)); return; }
     loadData();
   }
 

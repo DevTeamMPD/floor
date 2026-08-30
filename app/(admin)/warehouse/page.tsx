@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 import { createClient } from "@/lib/supabase/client";
 import { WORK_ORDER_STATUS_LABELS, type WorkOrder, type WorkOrderItem, workOrderStatusClass } from "@/lib/work-orders";
 import TicketChatMock from "@/components/tickets/ticket-chat-mock";
@@ -32,7 +33,7 @@ export default function WarehouseWorkspacePage() {
       setCanAct(true); setLoading(false); return;
     }
     setLoading(true); const { data: orderRows, error } = await supabase.from("floor_work_orders").select("*").in("status", ["warehouse_waiting", "warehouse_preparing", "ready_to_install"]).order("updated_at");
-    if (error) { toast.error(error.message); setLoading(false); return; }
+    if (error) { toast.error(floorErrorMessage(error)); setLoading(false); return; }
     const rows = (orderRows ?? []) as WorkOrder[]; setOrders(rows);
     const { data: { user } } = await supabase.auth.getUser();
     const [jobResult, apptResult, staffResult, itemResult, profileResult] = await Promise.all([
@@ -48,7 +49,7 @@ export default function WarehouseWorkspacePage() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { warehouseFilesRef.current = warehouseFiles; }, [warehouseFiles]);
   useEffect(() => () => { warehouseFilesRef.current.forEach((item) => URL.revokeObjectURL(item.url)); }, []);
-  async function accept(id: string) { if (!canAct) { toast.error("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; } if (isLocalDemo) { setOrders((rows) => rows.map((order) => order.id === id ? { ...order, status: "warehouse_preparing", warehouse_assignee_id: "demo-warehouse", warehouse_accepted_at: new Date().toISOString() } : order)); toast.success("รับงานแล้ว (ข้อมูลจำลอง)"); return; } setSaving(id); const { error } = await supabase.rpc("accept_floor_warehouse_order_v2", { p_work_order_id: id }); setSaving(null); if (error) toast.error(error.message); else { toast.success("รับงานแล้ว"); void load(); } }
+  async function accept(id: string) { if (!canAct) { toast.error("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; } if (isLocalDemo) { setOrders((rows) => rows.map((order) => order.id === id ? { ...order, status: "warehouse_preparing", warehouse_assignee_id: "demo-warehouse", warehouse_accepted_at: new Date().toISOString() } : order)); toast.success("รับงานแล้ว (ข้อมูลจำลอง)"); return; } setSaving(id); const { error } = await supabase.rpc("accept_floor_warehouse_order_v2", { p_work_order_id: id }); setSaving(null); if (error) toast.error(floorErrorMessage(error)); else { toast.success("รับงานแล้ว"); void load(); } }
   function openPlan(id: string) {
     const orderItems = items.filter((item) => item.work_order_id === id);
     setActualQty(Object.fromEntries(orderItems.map((item) => [item.id, String(item.actual_qty ?? item.planned_qty)])));
@@ -72,10 +73,10 @@ export default function WarehouseWorkspacePage() {
       clearWarehouseFiles(); setPlanOrderId(null); toast.success("บันทึกจำนวนและรูปแล้ว · ย้ายงานไปรอติดตั้ง (ข้อมูลจำลอง)"); return;
     }
     setSaving(planOrder.id); const paths: string[] = [];
-    for (let index = 0; index < warehouseFiles.length; index++) { const file = warehouseFiles[index].file; const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-"); const path = `work-orders/${planOrder.id}/warehouse/${Date.now()}-${index}-${safe}`; const { error } = await supabase.storage.from("job-photos").upload(path, file); if (error) { toast.error(error.message); setSaving(null); return; } paths.push(path); }
+    for (let index = 0; index < warehouseFiles.length; index++) { const file = warehouseFiles[index].file; const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-"); const path = `work-orders/${planOrder.id}/warehouse/${Date.now()}-${index}-${safe}`; const { error } = await supabase.storage.from("job-photos").upload(path, file); if (error) { toast.error(floorErrorMessage(error)); setSaving(null); return; } paths.push(path); }
     const { error } = await supabase.rpc("complete_floor_warehouse_order_v2", { p_work_order_id: planOrder.id, p_actual_items: planItems.map((item) => ({ id: item.id, actualQty: Number(actualQty[item.id]) })), p_photo_paths: paths, p_note: warehouseNote.trim() || null });
     setSaving(null);
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(floorErrorMessage(error)); return; }
     toast.success("บันทึกจำนวนและรูปแล้ว · ย้ายงานไปรอติดตั้ง"); clearWarehouseFiles(); setPlanOrderId(null); void load();
   }
   const columns = ["warehouse_waiting", "warehouse_preparing", "ready_to_install"] as const;

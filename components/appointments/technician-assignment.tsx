@@ -65,7 +65,7 @@ export default function TechnicianAssignmentButton({ appointmentId, appointmentT
     if (removed.length) {
       const { error } = await supabase.from("appointment_technicians")
         .update({ is_active: false, revoked_at: now, is_lead: false }).in("id", removed);
-      if (error) { toast.error(error.message); setSaving(false); return; }
+      if (error) { toast.error(floorErrorMessage(error)); setSaving(false); return; }
     }
     if (jobNo) {
       const names = selected.map((id) => technicians.find((t) => t.id === id)?.name).filter((x): x is string => Boolean(x));

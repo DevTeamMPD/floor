@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 
 interface Supplier {
   id: string;
@@ -157,7 +158,7 @@ export default function PurchaseOrdersPage() {
       payment_terms: supForm.payment_terms.trim() || null,
     });
     setSaving(false);
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(floorErrorMessage(error)); return; }
     toast.success('เพิ่ม Supplier เรียบร้อย');
     setShowAddSupplier(false);
     setSupForm({ name: '', contact_name: '', phone: '', lead_time_days: '', payment_terms: '' });

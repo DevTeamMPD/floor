@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 import { createClient } from "@/lib/supabase/client";
 import { ROLE_LABELS, STAFF_ROLES, type StaffProfile, type StaffRole } from "@/lib/staff";
 
@@ -40,21 +41,21 @@ export default function StaffPage() {
     event.preventDefault(); setSaving(true);
     const { error } = await supabase.rpc("invite_floor_staff", { p_email: email.trim(), p_full_name: fullName.trim(), p_role: role });
     setSaving(false);
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(floorErrorMessage(error)); return; }
     toast.success("สร้างคำเชิญแล้ว ส่งลิงก์หน้า Login ให้พนักงานเปิดใช้บัญชี");
     setEmail(""); setFullName(""); setRole("sales"); void load();
   }
 
   async function updateProfile(id: string, patch: Partial<Pick<StaffProfile, "role" | "is_active">>) {
     const { error } = await supabase.from("floor_staff_profiles").update({ ...patch, role_source: "manual", updated_at: new Date().toISOString() }).eq("id", id);
-    if (error) toast.error(error.message); else { toast.success("บันทึกเป็นสิทธิ์กำหนดเองแล้ว"); void load(); }
+    if (error) toast.error(floorErrorMessage(error)); else { toast.success("บันทึกเป็นสิทธิ์กำหนดเองแล้ว"); void load(); }
   }
 
   async function syncEmployeeMaster() {
     setSaving(true);
     const { data, error } = await supabase.rpc("sync_floor_staff_from_employee_master");
     setSaving(false);
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(floorErrorMessage(error)); return; }
     const result = data as { upserted?: number; deactivated?: number } | null;
     toast.success(`Sync สำเร็จ: อัปเดต ${result?.upserted ?? 0} บัญชี · ปิด ${result?.deactivated ?? 0} บัญชี`);
     void load();
