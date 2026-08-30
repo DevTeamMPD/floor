@@ -442,11 +442,14 @@ export default function ShareQueuePage() {
   const canBypassBookingRules = staffEmail === UNRESTRICTED_BOOKING_EMAIL;
   const selectedFormTeam = form ? teams.find((team) => team.id === form.tech_id) : undefined;
   const selectedFormRuleError = form ? bookingRuleError(form, selectedFormTeam, canBypassBookingRules) : null;
-  const availableFormTeams = form ? teams.filter((team) => {
-    if (canBypassBookingRules || form.id || !isTeamB(team)) return true;
+  // ทีมที่เลือกไม่ได้ต้องยัง "เห็น" อยู่พร้อมเหตุผล  ถ้าเอาออกจากรายการเฉย ๆ
+  // ผู้ใช้จะเจอปฏิทินที่กดวันนั้นได้ แต่ทีม B หายไปจาก dropdown โดยไม่มีคำอธิบาย
+  const formTeamOptions: { team: Team; disabledReason: string | null }[] = teams.map((team) => {
+    if (!form || canBypassBookingRules || form.id || !isTeamB(team)) return { team, disabledReason: null };
     const max = bookingDate(TEAM_B_MAX_LEAD_DAYS);
-    return (!form.date || form.date <= max) && (!form.endDate || form.endDate <= max);
-  }) : teams;
+    const beyondMax = (Boolean(form.date) && form.date > max) || (Boolean(form.endDate) && form.endDate > max);
+    return { team, disabledReason: beyondMax ? `จองล่วงหน้าได้ไม่เกิน ${TEAM_B_MAX_LEAD_DAYS} วัน` : null };
+  });
 
   function clearQueueDraft() {
     window.localStorage.removeItem(QUEUE_DRAFT_KEY);
@@ -735,7 +738,9 @@ export default function ShareQueuePage() {
       const { data: existRows } = await supabase.from("appointments")
         .select("id, slot_start, slot_end, notes, job_id")
         .eq("tech_id", form.tech_id).neq("status", "cancelled")
-        .gte("slot_start", rangeStart).lte("slot_start", rangeEnd);
+        // เทียบแบบซ้อนทับจริง: เริ่มก่อนปลายช่วง และจบหลังต้นช่วง
+        // เดิมกรองด้วย slot_start ในช่วงเท่านั้น คิวข้ามวันที่เริ่มก่อนช่วงนี้แล้วลากมาทับจึงมองไม่เห็น
+        .lt("slot_start", rangeEnd).gt("slot_end", rangeStart);
       const existing = (existRows as { id: string; slot_start: string; slot_end: string; notes: string | null; job_id: string | null }[] | null) ?? [];
       const clashes: string[] = [];
       for (const d of dates) {
@@ -1429,7 +1434,7 @@ export default function ShareQueuePage() {
                     if (message) setBookingNotice({ title: "ทีมนี้ยังรับคิววันดังกล่าวไม่ได้", message });
                   }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white">
                     <option value="">— เลือกทีมช่าง —</option>
-                    {availableFormTeams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    {formTeamOptions.map(({ team: t, disabledReason }) => <option key={t.id} value={t.id} disabled={Boolean(disabledReason)}>{t.name}{disabledReason ? ` — ${disabledReason}` : ""}</option>)}
                   </select>
                   <p className="mt-1 text-[11px] text-slate-500">{canBypassBookingRules ? "✓ บัญชีนี้ได้รับสิทธิ์ลงคิวได้ทุกวันและทุกทีม" : `คลังต้องเตรียมสินค้า: ทุกทีมจองได้ตั้งแต่ ${BOOKING_MIN_LEAD_DAYS} วันล่วงหน้า${isTeamB(selectedFormTeam) ? ` · ทีม B เลือกได้ไม่เกิน ${TEAM_B_MAX_LEAD_DAYS} วันล่วงหน้า` : ""}`}</p>
                 </div>
