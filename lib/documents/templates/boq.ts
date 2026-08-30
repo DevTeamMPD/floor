@@ -1,0 +1,9 @@
+import { documentShell, field } from "@/lib/documents/templates/layout";
+import { displayText } from "@/lib/documents/render";
+import type { DocumentSourceSnapshot } from "@/lib/documents/types";
+
+export function renderBoqHtml(snapshot: DocumentSourceSnapshot, documentCode: string): string {
+  const itemRows = snapshot.items.map((item, index) => `<tr><td>${index + 1}</td><td>${displayText(item.category)}</td><td>${displayText(item.sku)}</td><td>${displayText(item.itemName)}</td><td>${displayText(item.specification)}</td><td class="number">${item.plannedQty}</td><td>${displayText(item.unit)}</td><td>${displayText(item.sourceType)}</td></tr>`).join("") || `<tr><td colspan="8">ไม่พบรายการ BOQ ที่ยืนยัน</td></tr>`;
+  const body = `<section class="grid">${field("เลขงาน", snapshot.jobNo)}${field("เลขบิล", snapshot.job.billNo)}${field("สินค้า", snapshot.job.productName)}${field("Revision อ้างอิง", snapshot.workOrder.revision)}${field("พื้นที่สำรวจ", snapshot.survey.areaSqm === null ? null : `${snapshot.survey.areaSqm} ตร.ม.`)}${field("สถานะใบสั่งงาน", snapshot.workOrder.status)}</section><h2>รายการ BOQ ที่อนุมัติในใบสั่งงาน</h2><table><thead><tr><th>#</th><th>หมวด</th><th>SKU</th><th>รายการ</th><th>Specification</th><th class="number">ปริมาณแผน</th><th>หน่วย</th><th>แหล่งที่มา</th></tr></thead><tbody>${itemRows}</tbody></table><div class="note">ปริมาณจริงและภาพรับของจะยืนยันใน Pick Confirmation (P2.4) เอกสารนี้จึงแสดงเฉพาะปริมาณแผนที่ยืนยันใน Work Order.</div><section class="signatures"><div class="signature">จัดทำ<br>__________________</div><div class="signature">ตรวจทาน<br>__________________</div><div class="signature">อนุมัติ<br>__________________</div><div class="signature">คลังรับทราบ<br>__________________</div></section>`;
+  return documentShell({ title: "บัญชีรายการวัสดุ / BOQ", documentCode, revision: snapshot.workOrder.revision, sourceUpdatedAt: snapshot.sourceUpdatedAt, body });
+}

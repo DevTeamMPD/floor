@@ -1,0 +1,10 @@
+import { documentShell, field } from "@/lib/documents/templates/layout";
+import { displayText, formatBkkDateTime } from "@/lib/documents/render";
+import type { DocumentSourceSnapshot } from "@/lib/documents/types";
+
+export function renderInstallationReportHtml(snapshot: DocumentSourceSnapshot, documentCode: string): string {
+  const evidence = snapshot.evidence.fieldCompletion;
+  const itemRows = snapshot.items.map((item, index) => `<tr><td>${index + 1}</td><td>${displayText(item.itemName)}</td><td>${displayText(item.specification)}</td><td class="number">${item.actualQty ?? item.plannedQty}</td><td>${displayText(item.unit)}</td><td>${displayText(item.note)}</td></tr>`).join("") || `<tr><td colspan="6">ไม่พบรายการติดตั้ง</td></tr>`;
+  const body = `<section class="grid">${field("เลขงาน", snapshot.jobNo)}${field("ลูกค้า", snapshot.job.customerName)}${field("สถานที่", snapshot.job.address)}${field("ทีมติดตั้ง", snapshot.appointment.teamName)}${field("ผู้บันทึกงาน", evidence?.actorName)}${field("ติดตั้งเสร็จ", formatBkkDateTime(evidence?.occurredAt ?? null))}</section><h2>รายการติดตั้งตามจริง</h2><table><thead><tr><th>#</th><th>รายการ</th><th>Specification</th><th class="number">ปริมาณจริง</th><th>หน่วย</th><th>หมายเหตุ</th></tr></thead><tbody>${itemRows}</tbody></table><h2>หลักฐานและบันทึกหน้างาน</h2><div class="note"><b>บันทึกช่าง:</b> ${displayText(evidence?.note)}<br><b>ภาพหลักฐานการติดตั้ง:</b> ${evidence?.photoPaths.length ?? 0} รูป (จัดเก็บในระบบหลักฐานของใบงาน)</div><section class="signatures"><div class="signature">หัวหน้าทีมช่าง<br>__________________</div><div class="signature">ผู้ตรวจงาน<br>__________________</div><div class="signature">ผู้แทนลูกค้า<br>__________________</div><div class="signature">ฝ่ายปฏิบัติการ<br>__________________</div></section>`;
+  return documentShell({ title: "รายงานการติดตั้ง / Installation Report", documentCode, revision: snapshot.workOrder.revision, sourceUpdatedAt: snapshot.sourceUpdatedAt, documentClass: "quality_record", body });
+}

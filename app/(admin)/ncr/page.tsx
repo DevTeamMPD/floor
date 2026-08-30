@@ -11,6 +11,8 @@ interface NcrReport {
   title: string;
   type: string;
   status: string;
+  severity: "critical" | "high" | "medium" | "low";
+  due_at: string | null;
   product_sku: string | null;
   quantity: number | null;
   description: string | null;
@@ -30,7 +32,8 @@ interface JobOption {
 const STAGES = [
   { key: "open",          label: "รับเรื่อง",   color: "border-red-300 bg-red-50",     badge: "bg-red-100 text-red-700",     dot: "bg-red-500" },
   { key: "investigating", label: "ตรวจสอบ",  color: "border-yellow-300 bg-yellow-50", badge: "bg-yellow-100 text-yellow-700", dot: "bg-yellow-500" },
-  { key: "approved",      label: "อนุมัติ",   color: "border-blue-300 bg-blue-50",   badge: "bg-blue-100 text-blue-700",   dot: "bg-blue-500" },
+  { key: "corrective_action", label: "แก้ไข", color: "border-blue-300 bg-blue-50", badge: "bg-blue-100 text-blue-700", dot: "bg-blue-500" },
+  { key: "verified",      label: "ตรวจยืนยัน", color: "border-violet-300 bg-violet-50", badge: "bg-violet-100 text-violet-700", dot: "bg-violet-500" },
   { key: "closed",        label: "ปิดเคลม",   color: "border-green-300 bg-green-50",  badge: "bg-green-100 text-green-700",  dot: "bg-green-500" },
 ] as const;
 
@@ -44,14 +47,16 @@ const TYPE_LABELS: Record<string, string> = {
 
 const NEXT_STAGE: Record<string, string> = {
   open: "investigating",
-  investigating: "approved",
-  approved: "closed",
+  investigating: "corrective_action",
+  corrective_action: "verified",
+  verified: "closed",
 };
 
 const NEXT_LABEL: Record<string, string> = {
   open: "ตรวจสอบ",
-  investigating: "อนุมัติ",
-  approved: "ปิดเคลม",
+  investigating: "เริ่มแก้ไข",
+  corrective_action: "ตรวจยืนยัน",
+  verified: "ปิดเคลม",
 };
 
 const EMPTY_FORM = {
@@ -63,6 +68,7 @@ const EMPTY_FORM = {
   description: "",
   estimated_value_thb: "",
   created_by: "",
+  severity: "medium",
 };
 
 /* ── Job combobox ──────────────────────────────────────────────── */
@@ -213,16 +219,16 @@ function NcrPageInner() {
     if (!form.job_no) { toast.error("กรุณาเลือกงานจากระบบ หรือเว้นว่างไว้ถ้าไม่เกี่ยวข้องกับงานใด"); return; }
     setSaving(true);
     try {
-      const { error } = await supabase.from("ncr_reports").insert({
-        job_no:               form.job_no || null,
-        title:                form.title.trim(),
-        type:                 form.type,
-        product_sku:          form.product_sku.trim() || null,
-        quantity:             form.quantity ? parseInt(form.quantity) : null,
-        description:          form.description.trim() || null,
-        estimated_value_thb:  form.estimated_value_thb ? parseFloat(form.estimated_value_thb) : null,
-        created_by:           form.created_by.trim() || null,
-        status: "open",
+      const { error } = await supabase.rpc("create_floor_ncr", {
+        p_job_no: form.job_no,
+        p_title: form.title.trim(),
+        p_type: form.type,
+        p_product_sku: form.product_sku.trim() || null,
+        p_quantity: form.quantity ? parseInt(form.quantity) : null,
+        p_description: form.description.trim() || null,
+        p_estimated_value_thb: form.estimated_value_thb ? parseFloat(form.estimated_value_thb) : null,
+        p_created_by: form.created_by.trim() || null,
+        p_severity: form.severity,
       });
       if (error) throw error;
       toast.success("สร้าง NCR แล้ว");
@@ -239,9 +245,7 @@ function NcrPageInner() {
   async function advanceStage(ncr: NcrReport) {
     const next = NEXT_STAGE[ncr.status];
     if (!next) return;
-    const patch: Record<string, unknown> = { status: next, updated_at: new Date().toISOString() };
-    if (next === "closed") patch.closed_at = new Date().toISOString();
-    const { error } = await supabase.from("ncr_reports").update(patch).eq("id", ncr.id);
+    const { error } = await supabase.rpc("advance_floor_ncr", { p_ncr_id: ncr.id, p_next_status: next });
     if (error) { toast.error(floorActionError("เลื่อนสถานะ", error)); return; }
     toast.success(`เลื่อนเป็น: ${NEXT_LABEL[ncr.status]}`);
     setSelected(null);
@@ -315,6 +319,16 @@ function NcrPageInner() {
                   {Object.entries(TYPE_LABELS).map(([k, v]) => (
                     <option key={k} value={k}>{v}</option>
                   ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-gray-700">ระดับความรุนแรง / SLA</label>
+                <select value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400">
+                  <option value="critical">Critical · 4 ชั่วโมง</option>
+                  <option value="high">High · 24 ชั่วโมง</option>
+                  <option value="medium">Medium · 7 วัน</option>
+                  <option value="low">Low · 14 วัน</option>
                 </select>
               </div>
 
