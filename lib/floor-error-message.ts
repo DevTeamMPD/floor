@@ -15,6 +15,13 @@ function rawError(error: unknown): string {
 export function floorErrorMessage(error: unknown, fallback = "ไม่ทราบสาเหตุ กรุณาลองใหม่ หรือติดต่อผู้ดูแลระบบ"): string {
   const message = rawError(error);
   const lower = message.toLowerCase();
+  const code = error && typeof error === "object" ? (error as ErrorShape).code : undefined;
+  // 23P01 = exclusion constraint กันคิวชนที่ฐานข้อมูล (appointments_no_overlap_per_team)
+  // เป็นด่านสุดท้ายที่ทำงานแม้การเช็คฝั่งหน้าจอจะผ่านไปแล้ว เช่น สองคนกดบันทึกพร้อมกัน
+  // ต้องบอกให้ชัดว่าชนคิว ไม่ใช่ตกไปที่ข้อความ "รูปแบบข้อมูลไม่ถูกต้อง"
+  if (code === "23P01" || lower.includes("exclusion constraint")) {
+    return "ทีมนี้มีคิวอยู่ในช่วงเวลาที่เลือกแล้ว อาจมีคนจองแทรกเข้ามาพอดี กรุณารีเฟรชแล้วเลือกเวลาหรือทีมอื่น";
+  }
   if (!message) return fallback;
   if (lower.includes("row-level security") || lower.includes("permission denied")) return "บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้ กรุณาเข้าสู่ระบบใหม่ หรือติดต่อผู้ดูแลระบบ";
   if (lower.includes("jwt expired") || lower.includes("not authenticated")) return "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่แล้วลองอีกครั้ง";
