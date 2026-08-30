@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { FloorTechnician } from "@/lib/technicians";
 import { personalWorkUrl } from "@/lib/technicians";
 
-interface Team { id: string; name: string }
+interface Team { id: string; name: string; is_active?: boolean }
 
 interface Props {
   open: boolean;
@@ -29,6 +29,8 @@ export default function TechnicianManager({ open, teams, technicians, onClose, o
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
   const [newLink, setNewLink] = useState<{ name: string; url: string; pin: string } | null>(null);
+  const activeTeams = teams.filter((team) => team.is_active !== false);
+  const activeTechnicians = technicians.filter((technician) => technician.is_active);
 
   if (!open) return null;
 
@@ -156,7 +158,7 @@ export default function TechnicianManager({ open, teams, technicians, onClose, o
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="ชื่อช่าง *" className="border rounded-lg px-3 py-2 text-sm" />
           <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="เบอร์โทร" className="border rounded-lg px-3 py-2 text-sm" />
           <select value={form.team_id} onChange={(e) => setForm({ ...form, team_id: e.target.value })} className="border rounded-lg px-3 py-2 text-sm bg-white">
-            <option value="">เลือกทีม *</option>{teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            <option value="">เลือกทีม *</option>{activeTeams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.is_team_lead} onChange={(e) => setForm({ ...form, is_team_lead: e.target.checked })} />หัวหน้าทีม</label>
           <div className="sm:col-span-2">
@@ -186,8 +188,8 @@ export default function TechnicianManager({ open, teams, technicians, onClose, o
         </div>
 
         <div className="divide-y">
-          {technicians.map((t) => (
-            <div key={t.id} className={`py-3 flex items-center gap-3 ${t.is_active ? "" : "opacity-50"}`}>
+          {activeTechnicians.map((t) => (
+            <div key={t.id} className="py-3 flex items-center gap-3">
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-sm truncate">{t.name}{t.is_team_lead ? " · หัวหน้าทีม" : ""}</div>
                 <div className="text-xs text-slate-500">{teams.find((x) => x.id === t.team_id)?.name ?? "ไม่ระบุทีม"}{t.phone ? ` · ${t.phone}` : ""}</div>
@@ -197,10 +199,10 @@ export default function TechnicianManager({ open, teams, technicians, onClose, o
               </div>
               <button onClick={() => edit(t)} className="text-xs text-blue-600">แก้ไข</button>
               <button onClick={() => rotateLink(t)} className="text-xs text-violet-600">สร้างลิงก์ใหม่</button>
-              <button onClick={() => toggle(t)} className="text-xs text-slate-500">{t.is_active ? "ปิดใช้" : "เปิดใช้"}</button>
+              <button onClick={() => toggle(t)} className="text-xs text-slate-500">ปิดใช้</button>
             </div>
           ))}
-          {!technicians.length ? <div className="py-6 text-center text-sm text-slate-400">ยังไม่มีรายชื่อช่าง</div> : null}
+          {!activeTechnicians.length ? <div className="py-6 text-center text-sm text-slate-400">ยังไม่มีรายชื่อช่างที่เปิดใช้งาน</div> : null}
         </div>
       </div>
     </div>
