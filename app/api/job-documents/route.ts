@@ -21,9 +21,14 @@ export async function GET(request: Request) {
   if (!staff) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบก่อน" }, { status: 401 });
   const jobNo = new URL(request.url).searchParams.get("jobNo")?.trim();
   if (!jobNo) return NextResponse.json({ error: "jobNo_required" }, { status: 400 });
-  const { data, error } = await serviceClient().from("floor_job_documents").select("id,job_no,document_code,document_type,document_class,workflow_stage,provider,provider_web_url,file_name,mime_type,file_size_bytes,version,status,change_summary,retention_until,review_due_at,effective_from,uploaded_by,approved_by,approved_at,created_at").eq("job_no", jobNo).order("created_at", { ascending: false });
+  const admin = serviceClient();
+  const [{ data, error }, { data: generationJobs, error: generationError }] = await Promise.all([
+    admin.from("floor_job_documents").select("id,job_no,document_code,document_type,document_class,workflow_stage,provider,provider_web_url,file_name,mime_type,file_size_bytes,version,status,change_summary,retention_until,review_due_at,effective_from,uploaded_by,approved_by,approved_at,is_system_generated,created_at").eq("job_no", jobNo).order("created_at", { ascending: false }),
+    admin.from("floor_document_generation_jobs").select("id,document_type,workflow_stage,status,source_event,requested_at").eq("job_no", jobNo).order("requested_at", { ascending: false }),
+  ]);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ documents: data ?? [], sharePointConfigured: isSharePointConfigured() });
+  if (generationError) return NextResponse.json({ error: generationError.message }, { status: 500 });
+  return NextResponse.json({ documents: data ?? [], generationJobs: generationJobs ?? [], sharePointConfigured: isSharePointConfigured() });
 }
 
 export async function POST(request: Request) {
