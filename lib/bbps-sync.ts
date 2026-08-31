@@ -500,10 +500,14 @@ async function syncWorkOrders(supabase: SupabaseClient, jobNo: string, j: BbpsJo
   try {
     const rows = parseBbpsWorkOrders(j);
     if (!rows.length) return;
+    // ตารางนี้ไม่มี trigger auto-update updated_at (ตั้งใจ ตามแพตเทิร์นของคลัง) จึงต้องเซ็ต
+    // synced_at/updated_at เองทุกครั้งที่ upsert ไม่งั้นตอน conflict ค่าเดิมจะค้าง ตอบไม่ได้ว่า
+    // sync ล่าสุดเมื่อไหร่
+    const now = new Date().toISOString();
     const { error } = await supabase
       .from("install_job_work_orders")
       .upsert(
-        rows.map((row) => ({ ...row, job_no: jobNo })),
+        rows.map((row) => ({ ...row, job_no: jobNo, synced_at: now, updated_at: now })),
         { onConflict: "external_work_order_id" },
       );
     if (error) {

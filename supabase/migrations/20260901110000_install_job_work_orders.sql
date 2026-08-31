@@ -88,6 +88,31 @@ create policy install_job_work_orders_active_staff_read on public.install_job_wo
 -- ใช้ jsonb_array_elements + on conflict do nothing เพื่อให้รันซ้ำได้ไม่พัง
 -- ข้ามใบสั่งงานที่ไม่มี id (ไม่มี natural key ให้ upsert อ้างอิงในอนาคต) และไม่เก็บวันที่ปี พ.ศ. (> 2100) ตรง ๆ
 -- เพื่อไม่ให้ค่าเพี้ยนเข้าไปในคอลัมน์ date (ตามแพตเทิร์น isCEDate ใน lib/bbps-sync.ts)
+
+-- helper สำหรับแปลงข้อความวันที่จาก BBPS ให้เป็น date อย่างปลอดภัย ใช้เฉพาะตอน backfill นี้
+-- แล้ว drop ทิ้งทันทีหลังใช้เสร็จ (ไม่ใช่ของถาวรของระบบ ไม่ใช่ส่วนหนึ่งของสคีมาที่ตั้งใจเก็บไว้)
+--
+-- เหตุผลที่ต้องมี: regex ข้างล่างตรวจได้แค่ "รูปแบบ" YYYY-MM-DD แต่ตรวจไม่ได้ว่าเป็นวันที่ที่มีอยู่จริง
+-- (เช่น "2026-02-30" หรือ "2026-13-01" รูปแบบถูกแต่ไม่มีอยู่จริง) ถ้า cast ::date ตรง ๆ แล้วเจอค่าแบบนี้
+-- แม้แถวเดียว Postgres จะ throw ทันที และเพราะทั้งไฟล์นี้อยู่ใน begin...commit เดียวกัน การสร้างตาราง
+-- ทั้งก้อนที่ทำไปก่อนหน้าจะ roll back ไปด้วย ฟังก์ชันนี้ครอบ exception ไว้ให้คืน null แทนการ throw
+-- เพื่อให้ backfill เดินต่อได้เสมอ แถวที่วันที่เสียจะได้ null ในคอลัมน์นั้น ไม่ใช่ทำให้ทั้ง migration ล้ม
+create or replace function public._install_job_work_orders_backfill_safe_date(s text) returns date
+language plpgsql as $$
+begin
+  if s is null or s !~ '^\d{4}-\d{2}-\d{2}' then
+    return null;
+  end if;
+  if split_part(s, '-', 1)::integer > 2100 then
+    return null; -- ปี พ.ศ. ไม่แปลงอัตโนมัติ ตาม isCEDate ฝั่ง lib/bbps-sync.ts
+  end if;
+  return s::date;
+exception when others then
+  -- รูปแบบตัวอักษรถูก (YYYY-MM-DD) แต่ไม่ใช่วันที่ที่มีอยู่จริง (เช่น 30 ก.พ.) หรือ cast ล้มเหลวด้วยเหตุอื่น
+  return null;
+end;
+$$;
+
 insert into public.install_job_work_orders (
   job_no, external_work_order_id, seq, install_start, install_end,
   location_address, location_map_link, contact_name, contact_phone, manpower, materials,
@@ -101,18 +126,8 @@ select
   j.job_no,
   (wo->>'id')::uuid,
   nullif(wo->>'seq', '')::integer,
-  case
-    when (wo->>'install_start') ~ '^\d{4}-\d{2}-\d{2}'
-      and split_part(wo->>'install_start', '-', 1)::integer <= 2100
-    then (wo->>'install_start')::date
-    else null
-  end,
-  case
-    when (wo->>'install_end') ~ '^\d{4}-\d{2}-\d{2}'
-      and split_part(wo->>'install_end', '-', 1)::integer <= 2100
-    then (wo->>'install_end')::date
-    else null
-  end,
+  public._install_job_work_orders_backfill_safe_date(wo->>'install_start'),
+  public._install_job_work_orders_backfill_safe_date(wo->>'install_end'),
   wo->>'location_address',
   wo->>'location_map_link',
   wo->>'contact_name',
@@ -140,9 +155,25 @@ select
   wo->>'acceptance_documents',
   wo->>'acceptance_signoff',
   wo->>'acceptance_followup',
-  -- design_images/site_photos ในต้นทางอาจเป็น array หรือ null — ทนทั้งสองแบบ, ไม่ใช่ array ให้ถือเป็น []
-  case when jsonb_typeof(wo->'design_images') = 'array' then wo->'design_images' else '[]'::jsonb end,
-  case when jsonb_typeof(wo->'site_photos') = 'array' then wo->'site_photos' else '[]'::jsonb end,
+  -- design_images/site_photos ในต้นทางอาจเป็น array (มี element ที่ไม่ใช่ string ปนมาได้) หรือ null
+  -- กรองเฉพาะ element ที่เป็น string ให้ตรงกับ stringArray() ใน lib/bbps-sync.ts (parseBbpsWorkOrders)
+  -- ทุกประการ — ไม่งั้นแถวที่ backfill สร้างกับแถวที่ syncWorkOrders เขียนตอน sync จริงจะมีรูปร่างไม่ตรงกัน
+  case
+    when jsonb_typeof(wo->'design_images') = 'array' then
+      coalesce(
+        (select jsonb_agg(elem) from jsonb_array_elements(wo->'design_images') elem where jsonb_typeof(elem) = 'string'),
+        '[]'::jsonb
+      )
+    else '[]'::jsonb
+  end,
+  case
+    when jsonb_typeof(wo->'site_photos') = 'array' then
+      coalesce(
+        (select jsonb_agg(elem) from jsonb_array_elements(wo->'site_photos') elem where jsonb_typeof(elem) = 'string'),
+        '[]'::jsonb
+      )
+    else '[]'::jsonb
+  end,
   wo
 from public.install_jobs j,
   lateral jsonb_array_elements(j.raw_payload -> 'workOrders') as wo
@@ -151,6 +182,9 @@ where j.source = 'bbps'
   and (wo->>'id') is not null
   and (wo->>'id') ~ '^[0-9a-fA-F-]{36}$'
 on conflict (external_work_order_id) do nothing;
+
+-- helper ใช้เฉพาะตอน backfill ข้างบน ไม่ใช่ของถาวรของระบบ — drop ทิ้งทันทีหลังใช้เสร็จ
+drop function if exists public._install_job_work_orders_backfill_safe_date(text);
 
 notify pgrst, 'reload schema';
 
