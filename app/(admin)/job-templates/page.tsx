@@ -125,6 +125,11 @@ const ACTION_LABELS: Record<string, string> = {
   new_version: "สร้างฉบับร่างใหม่ (แก้จากที่ใช้งานอยู่)",
   activate: "เปิดใช้งาน",
   copy: "คัดลอกจากแม่แบบอื่น",
+  // action ที่ฝั่งฐานข้อมูลเขียนเองต้องมีคำแปลไทยครบทุกตัว ไม่งั้นหน้าประวัติจะโผล่คำอังกฤษดิบ
+  // ('seed' มาจาก 20260901130000_seed_floor_qc_template.sql, 'retire' มาจาก activate_* ที่บันทึก
+  // การปลดระวางเวอร์ชันเดิมตาม ISO 7.5)
+  seed: "ตั้งค่าเริ่มต้นจากระบบ",
+  retire: "ปลดระวางเวอร์ชันนี้",
 };
 
 const FORK_NOTICE = "เวอร์ชันนี้กำลังใช้งานอยู่ — งานที่ตรวจรับไปแล้วยึดเกณฑ์รุ่นนี้เสมอ (ISO 7.5) ถ้ากดบันทึก ระบบจะสร้างฉบับร่างใหม่ให้อัตโนมัติ ไม่ทับของเดิม แล้วต้องกด “เปิดใช้งานเวอร์ชันนี้” อีกครั้งเพื่อให้ฉบับร่างมีผลจริง";
@@ -228,8 +233,11 @@ export default function JobTemplatesPage() {
   async function loadRole() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setRole(null); setRoleChecked(true); return; }
-    const { data } = await supabase.from("floor_staff_profiles").select("role").eq("id", user.id).maybeSingle();
-    setRole((data?.role as StaffRole | undefined) ?? null);
+    // ต้องดู is_active ด้วย ไม่ใช่แค่ role — RPC ทุกตัวเช็ค `is_active and role in (...)` อยู่แล้ว
+    // ถ้าหน้าจอเช็คแค่ role พนักงานที่ถูกปิดใช้งานจะเห็นปุ่มแก้ไขครบ กดแล้วเพิ่งโดนปฏิเสธ
+    // (ปลอดภัยอยู่ แต่ทำให้เข้าใจผิดว่ายังมีสิทธิ์)
+    const { data } = await supabase.from("floor_staff_profiles").select("role,is_active").eq("id", user.id).maybeSingle();
+    setRole(data?.is_active ? ((data.role as StaffRole | undefined) ?? null) : null);
     setRoleChecked(true);
   }
 
@@ -304,8 +312,20 @@ export default function JobTemplatesPage() {
   }
 
   async function selectJobType(id: string) {
-    setSelectedJobTypeId(id);
     setTab("checklist");
+    // ไม่มีประเภทงานให้เลือก (ลบตัวสุดท้ายทิ้ง / ยังไม่เคยสร้าง) — ต้องล้างหน้าจอ ไม่ใช่ยิง query ด้วย
+    // สตริงว่าง เพราะ .eq("job_type_id", "") จะกลายเป็น invalid input syntax for type uuid
+    // แล้วขึ้น toast แดงทั้งที่ผู้ใช้ยังไม่ได้ทำอะไรผิด
+    if (!id) {
+      setSelectedJobTypeId("");
+      setClTemplates([]);
+      setPrTemplates([]);
+      setRevisions([]);
+      await selectChecklistVersion(null, []);
+      await selectPrepVersion(null, []);
+      return;
+    }
+    setSelectedJobTypeId(id);
     await loadTemplatesForJobType(id);
   }
 
@@ -354,13 +374,12 @@ export default function JobTemplatesPage() {
     const other = jobTypesSorted[idx + direction];
     if (!other) return;
     setSavingJobTypeOrder(jt.id);
-    const [r1, r2] = await Promise.all([
-      supabase.rpc("save_job_type", { p_id: jt.id, p_code: jt.code, p_name: jt.name, p_task_field: jt.task_field, p_is_active: jt.is_active, p_sort_order: other.sort_order }),
-      supabase.rpc("save_job_type", { p_id: other.id, p_code: other.code, p_name: other.name, p_task_field: other.task_field, p_is_active: other.is_active, p_sort_order: jt.sort_order }),
-    ]);
+    // การสลับลำดับเป็นการกระทำเดียวในสายตาผู้ใช้ จึงต้องสำเร็จหรือล้มทั้งคู่
+    // เดิมยิง save_job_type สองครั้งด้วย Promise.all ซึ่งเป็นคนละทรานแซกชัน ถ้าตัวหนึ่งล้ม
+    // จะเหลือ sort_order ซ้ำกันสองแถวถาวรโดยไม่มีอะไรคอยแก้ให้
+    const { error } = await supabase.rpc("swap_job_type_sort_order", { p_id_a: jt.id, p_id_b: other.id });
     setSavingJobTypeOrder(null);
-    const err = r1.error ?? r2.error;
-    if (err) { toast.error(floorErrorMessage(err)); return; }
+    if (error) { toast.error(floorErrorMessage(error)); return; }
     await loadJobTypes();
   }
 
@@ -610,11 +629,32 @@ export default function JobTemplatesPage() {
                 <textarea disabled={!clEditable} value={clNotes} onChange={(e) => setClNotes(e.target.value)} rows={2} placeholder="เช่น ใช้กับงานปูพื้นกระเบื้องยางทุกรุ่น" className={`${INPUT_CLS} mt-1`} />
               </div>
 
+              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                รหัส (QC01, QC02, …) คือตัวระบุถาวรของเกณฑ์แต่ละข้อ ผลตรวจรับของงานที่ผ่านมาถูกบันทึกด้วยรหัสนี้
+                จึงมีผลต่างกันสองแบบ:
+                <span className="font-medium text-slate-700"> แก้ข้อความในข้อเดิม</span> = ยังเป็นเกณฑ์ข้อเดิม
+                รหัสไม่เปลี่ยน สถิติเก่าจะนับรวมกับข้อความใหม่ ·
+                <span className="font-medium text-slate-700"> ลบแล้วเพิ่มใหม่</span> = เป็นเกณฑ์คนละข้อ
+                ระบบจะออกรหัสใหม่ให้ และรหัสเดิมจะไม่ถูกนำกลับมาใช้ซ้ำอีก
+                {" "}ถ้าจะเปลี่ยนความหมายของข้อนั้นไปเลย ให้ลบแล้วเพิ่มใหม่ อย่าแก้ทับข้อความเดิม
+              </div>
+
               <div className="mt-3 space-y-3">
                 {clItems.map((item, idx) => (
                   <div key={item.key} className="rounded-xl border border-slate-200 bg-white p-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-slate-400">ข้อที่ {idx + 1}</span>
+                      <span className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-400">
+                        ข้อที่ {idx + 1}
+                        {item.code ? (
+                          <span className="rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-600" title="รหัสถาวรของเกณฑ์ข้อนี้ ใช้อ้างอิงในผลตรวจรับย้อนหลัง">
+                            {item.code}
+                          </span>
+                        ) : (
+                          <span className="rounded border border-dashed border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700">
+                            ข้อใหม่ · ระบบจะออกรหัสให้ตอนบันทึก
+                          </span>
+                        )}
+                      </span>
                       {clEditable ? (
                         <div className="flex gap-1">
                           <button aria-label="เลื่อนขึ้น" disabled={idx === 0} onClick={() => moveChecklistItem(item.key, -1)} className={ICON_BTN}>▲</button>
@@ -828,6 +868,14 @@ export default function JobTemplatesPage() {
                 {jobTypesSorted.map((jt) => <option key={jt.id} value={jt.id}>{jt.name}{jt.id === selectedJobTypeId ? " (ประเภทงานนี้)" : ""}</option>)}
               </select>
             </div>
+            {copyDialog.kind === "checklist" && copyDialog.targetJobTypeId && copyDialog.targetJobTypeId !== selectedJobTypeId ? (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                คัดลอกข้ามประเภทงาน ระบบจะออกรหัสเกณฑ์ (QC…) ชุดใหม่ให้ทุกข้อ ต่อจากรหัสสูงสุดของประเภทงานปลายทาง
+                เพราะรหัสเดียวกันในประเภทงานปลายทางอาจถูกใช้กับเกณฑ์คนละข้อไปแล้ว ถ้ายกรหัสเดิมมาทั้งดุ้น
+                รายงานผลตรวจรับย้อนหลังของประเภทงานนั้นจะรวมเกณฑ์คนละเรื่องเข้าด้วยกัน
+                (รหัสเดิม↔รหัสใหม่ถูกบันทึกไว้ในประวัติการแก้ไขแล้ว)
+              </div>
+            ) : null}
             <div className="mt-6 flex justify-end gap-3">
               <button disabled={copying} onClick={() => setCopyDialog(null)} className={SECONDARY_BTN}>ยกเลิก</button>
               <button disabled={copying} onClick={() => void confirmCopy()} className={PRIMARY_BTN}>{copying ? "กำลังคัดลอก…" : "คัดลอก"}</button>
