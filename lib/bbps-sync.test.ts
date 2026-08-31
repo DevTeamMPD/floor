@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   collectBlockDates,
   jobHasYearWarning,
@@ -7,6 +7,7 @@ import {
   mergeClashFlag,
   buildClashNotice,
   parseBbpsWorkOrders,
+  syncWorkOrders,
   CLASH_FLAG_PREFIX,
   type BbpsJob,
   type ClashRow,
@@ -204,6 +205,9 @@ describe("buildClashNotice", () => {
 // แค่ seq/start/end ที่เหลือถูกทิ้งดิบไว้ใน install_jobs.raw_payload ไม่มีใครอ่าน
 // parseBbpsWorkOrders เป็นฟังก์ชันบริสุทธิ์ที่แปลง workOrders ดิบให้เป็นแถวพร้อมเขียนลง
 // install_job_work_orders — ไม่แตะฐานข้อมูล
+const WO_ID_1 = "11111111-1111-4111-8111-111111111111";
+const WO_ID_2 = "22222222-2222-4222-8222-222222222222";
+
 describe("parseBbpsWorkOrders", () => {
   // ตัวอย่างจริงจากข้อมูล production (ตัดข้อมูลลูกค้าออก) — ครบทุกฟิลด์ที่ BBPS ส่งมา
   const fullOrder = {
@@ -297,7 +301,7 @@ describe("parseBbpsWorkOrders", () => {
   it("design_images / site_photos เป็น null → คืน [] ไม่ใช่ null", () => {
     const rows = parseBbpsWorkOrders({
       id: "job-1",
-      workOrders: [{ id: "wo-1", seq: 1, design_images: null, site_photos: null } as never],
+      workOrders: [{ id: WO_ID_1, seq: 1, design_images: null, site_photos: null } as never],
     });
     expect(rows[0].design_images).toEqual([]);
     expect(rows[0].site_photos).toEqual([]);
@@ -306,7 +310,7 @@ describe("parseBbpsWorkOrders", () => {
   it("design_images เป็น array → คงค่าไว้", () => {
     const rows = parseBbpsWorkOrders({
       id: "job-1",
-      workOrders: [{ id: "wo-1", seq: 1, design_images: ["a.jpg", "b.jpg"], site_photos: [] } as never],
+      workOrders: [{ id: WO_ID_1, seq: 1, design_images: ["a.jpg", "b.jpg"], site_photos: [] } as never],
     });
     expect(rows[0].design_images).toEqual(["a.jpg", "b.jpg"]);
   });
@@ -315,7 +319,7 @@ describe("parseBbpsWorkOrders", () => {
   it("install_start/install_end เป็นปี พ.ศ. (>2100) → คืน null ไม่ใช่ค่าเพี้ยน", () => {
     const rows = parseBbpsWorkOrders({
       id: "job-1",
-      workOrders: [{ id: "wo-1", seq: 1, install_start: "2569-08-24", install_end: "2569-08-24" } as never],
+      workOrders: [{ id: WO_ID_1, seq: 1, install_start: "2569-08-24", install_end: "2569-08-24" } as never],
     });
     expect(rows[0].install_start).toBeNull();
     expect(rows[0].install_end).toBeNull();
@@ -324,7 +328,7 @@ describe("parseBbpsWorkOrders", () => {
   it("install_start/install_end ปี ค.ศ. ปกติ → เก็บค่าไว้", () => {
     const rows = parseBbpsWorkOrders({
       id: "job-1",
-      workOrders: [{ id: "wo-1", seq: 1, install_start: "2026-09-01", install_end: "2026-09-02" } as never],
+      workOrders: [{ id: WO_ID_1, seq: 1, install_start: "2026-09-01", install_end: "2026-09-02" } as never],
     });
     expect(rows[0].install_start).toBe("2026-09-01");
     expect(rows[0].install_end).toBe("2026-09-02");
@@ -335,21 +339,114 @@ describe("parseBbpsWorkOrders", () => {
       id: "job-1",
       workOrders: [
         { seq: 1, install_start: "2026-09-01" } as never, // ไม่มี id
-        { id: "wo-2", seq: 2, install_start: "2026-09-02" } as never,
+        { id: WO_ID_2, seq: 2, install_start: "2026-09-02" } as never,
       ],
     });
     expect(rows).toHaveLength(1);
-    expect(rows[0].external_work_order_id).toBe("wo-2");
+    expect(rows[0].external_work_order_id).toBe(WO_ID_2);
   });
 
   it("หลายใบสั่งงานในงานเดียว → แปลงครบทุกใบ เรียงตามลำดับเดิม", () => {
     const rows = parseBbpsWorkOrders({
       id: "job-1",
       workOrders: [
-        { id: "wo-1", seq: 1 } as never,
-        { id: "wo-2", seq: 2 } as never,
+        { id: WO_ID_1, seq: 1 } as never,
+        { id: WO_ID_2, seq: 2 } as never,
       ],
     });
-    expect(rows.map((r) => r.external_work_order_id)).toEqual(["wo-1", "wo-2"]);
+    expect(rows.map((r) => r.external_work_order_id)).toEqual([WO_ID_1, WO_ID_2]);
+  });
+});
+
+// final review ข้อ 6: backfill ใน migration กรอง id ที่ไม่ใช่ uuid ทิ้ง แต่โค้ด runtime เดิมเช็คแค่ว่า
+// "มี id ไหม" ทั้งที่ external_work_order_id เป็นคอลัมน์ uuid — id เพี้ยนใบเดียวทำให้ทั้ง batch ตาย 22P02
+// แล้วถูกกลืนด้วย console.warn ใบสั่งงานของงานนั้นจึงหายทั้งชุดแบบเงียบ ๆ
+describe("parseBbpsWorkOrders — กติกา uuid ต้องตรงกับฝั่ง migration", () => {
+  it("id ไม่ใช่ uuid → ข้ามเฉพาะใบนั้น ใบที่เหลือยังถูกแปลงครบ", () => {
+    const rows = parseBbpsWorkOrders({
+      id: "job-1",
+      workOrders: [
+        { id: "wo-1", seq: 1 } as never,
+        { id: "12345", seq: 2 } as never,
+        { id: WO_ID_2, seq: 3 } as never,
+      ],
+    });
+    expect(rows.map((r) => r.external_work_order_id)).toEqual([WO_ID_2]);
+  });
+
+  it("uuid ตัวพิมพ์ใหญ่ → รับได้ (Postgres รับ)", () => {
+    const rows = parseBbpsWorkOrders({ id: "job-1", workOrders: [{ id: WO_ID_1.toUpperCase(), seq: 1 } as never] });
+    expect(rows).toHaveLength(1);
+  });
+
+  it("uuid ที่ความยาวถูกแต่รูปแบบผิด (ไม่มีขีด) → ข้าม", () => {
+    const rows = parseBbpsWorkOrders({ id: "job-1", workOrders: [{ id: WO_ID_1.replace(/-/g, ""), seq: 1 } as never] });
+    expect(rows).toEqual([]);
+  });
+});
+
+// final review ข้อ 5: syncWorkOrders ต้อง "ลู่เข้าหา payload" ไม่ใช่แค่ upsert ทับ
+// ถ้า BBPS ลบใบ seq=1 แล้วสร้างใบใหม่ seq=1 แถวเก่าต้องถูกลบก่อน ไม่งั้น sync ของงานนั้นตายถาวร
+describe("syncWorkOrders", () => {
+  type Call = { op: string; table: string; or?: string; eq?: Record<string, unknown>; rows?: unknown[] };
+
+  function fakeSupabase(calls: Call[], opts: { deleteError?: string; upsertError?: string; explode?: boolean } = {}) {
+    return {
+      from(table: string) {
+        if (opts.explode) throw new Error("client พัง");
+        return {
+          delete() {
+            const call: Call = { op: "delete", table, eq: {} };
+            const q = {
+              eq(col: string, val: unknown) { call.eq![col] = val; return q; },
+              or(expr: string) { call.or = expr; return q; },
+              then(resolve: (v: { error: { message: string } | null }) => unknown) {
+                calls.push(call);
+                return Promise.resolve({ error: opts.deleteError ? { message: opts.deleteError } : null }).then(resolve);
+              },
+            };
+            return q;
+          },
+          upsert(rows: unknown[]) {
+            calls.push({ op: "upsert", table, rows });
+            return Promise.resolve({ error: opts.upsertError ? { message: opts.upsertError } : null });
+          },
+        };
+      },
+    } as never;
+  }
+
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("ลบใบที่ไม่อยู่ใน payload ก่อน แล้วค่อย upsert (ลำดับสำคัญ: seq ที่ถูกใช้ซ้ำต้องไม่ชนของเก่า)", async () => {
+    const calls: Call[] = [];
+    await syncWorkOrders(fakeSupabase(calls), "JOB-001", { id: "job-1", workOrders: [{ id: WO_ID_2, seq: 1 } as never] });
+    expect(calls.map((c) => c.op)).toEqual(["delete", "upsert"]);
+    expect(calls[0].eq).toEqual({ job_no: "JOB-001" });
+    expect(calls[0].or).toContain(WO_ID_2);
+    expect(calls[0].or).toContain("external_work_order_id.is.null");
+    expect((calls[1].rows as { job_no: string }[])[0].job_no).toBe("JOB-001");
+  });
+
+  it("payload ไม่มีใบสั่งงานที่ใช้ได้เลย → ไม่ลบของเดิมทิ้ง (ไม่รู้สถานะจริง ห้ามเดา)", async () => {
+    const calls: Call[] = [];
+    await syncWorkOrders(fakeSupabase(calls), "JOB-001", { id: "job-1", workOrders: null });
+    await syncWorkOrders(fakeSupabase(calls), "JOB-001", { id: "job-1", workOrders: [{ id: "ไม่ใช่ uuid" } as never] });
+    expect(calls).toEqual([]);
+  });
+
+  it("ลบล้มเหลว → ไม่ throw และยัง upsert ต่อ (การจองคิวหลักสำเร็จไปแล้ว ห้ามทำให้ webhook เป็น 500)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const calls: Call[] = [];
+    await expect(syncWorkOrders(fakeSupabase(calls, { deleteError: "boom" }), "JOB-001",
+      { id: "job-1", workOrders: [{ id: WO_ID_1, seq: 1 } as never] })).resolves.toBeUndefined();
+    expect(calls.map((c) => c.op)).toEqual(["delete", "upsert"]);
+  });
+
+  it("upsert ล้มเหลว / client พัง → ไม่ throw", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const job = { id: "job-1", workOrders: [{ id: WO_ID_1, seq: 1 } as never] };
+    await expect(syncWorkOrders(fakeSupabase([], { upsertError: "boom" }), "JOB-001", job)).resolves.toBeUndefined();
+    await expect(syncWorkOrders(fakeSupabase([], { explode: true }), "JOB-001", job)).resolves.toBeUndefined();
   });
 });

@@ -130,16 +130,29 @@ function stringArray(v: unknown): string[] {
   return Array.isArray(v) ? (v as unknown[]).filter((x): x is string => typeof x === "string") : [];
 }
 
+// install_job_work_orders.external_work_order_id เป็นคอลัมน์ uuid ถ้าส่ง string ที่ไม่ใช่ uuid ลงไป
+// Postgres จะ error 22P02 ทั้ง batch (ไม่ใช่แค่แถวนั้น) แล้ว syncWorkOrders ที่ห้าม throw จะกลืน error
+// ทิ้งไป → ใบสั่งงานของงานนั้นหายทั้งชุดแบบเงียบ ๆ เพราะใบเดียวที่ id เพี้ยน
+// backfill ใน supabase/migrations/20260901110000_install_job_work_orders.sql กรองด้วยกติกาเดียวกันนี้อยู่แล้ว
+// สองด่านต้องใช้กติกาเดียวกัน ไม่งั้นข้อมูลที่ backfill ข้ามไป จะไหลกลับเข้ามาทาง sync แทน
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function uuidOrNull(v: unknown): string | null {
+  const s = textOrNull(v);
+  return s && UUID_RE.test(s) ? s : null;
+}
+
 // แปลง workOrders ดิบ (37 ฟิลด์ต่อใบตามที่ BBPS ส่งมาจริง) ให้เป็นแถวพร้อมเขียนลง
 // public.install_job_work_orders — ฟังก์ชันบริสุทธิ์ ไม่แตะฐานข้อมูล ไม่ throw
-// ใบสั่งงานที่ไม่มี id (ไม่มี natural key ให้ upsert ซ้ำได้) จะถูกข้ามไปทั้งใบ ไม่ทำให้ทั้งชุดพัง
+// ใบสั่งงานที่ id ว่างหรือไม่ใช่ uuid (ไม่มี natural key ที่เขียนลงคอลัมน์ uuid ได้) จะถูกข้ามไปทั้งใบ
+// ข้ามเฉพาะใบนั้น ใบที่เหลือในชุดเดียวกันยังถูกเขียนตามปกติ
 export function parseBbpsWorkOrders(job: BbpsJob): BbpsWorkOrderRow[] {
   const orders = job.workOrders ?? [];
   const rows: BbpsWorkOrderRow[] = [];
   for (const order of orders) {
     if (!order || typeof order !== "object") continue;
-    const externalId = textOrNull(order.id);
-    if (!externalId) continue; // ไม่มี id -> ข้ามรายการนี้ (เลือกทางนี้แทน throw หรือคืน id เป็น null)
+    const externalId = uuidOrNull(order.id);
+    if (!externalId) continue; // ไม่มี id / id ไม่ใช่ uuid -> ข้ามใบนี้ (ดีกว่าปล่อยให้ทั้ง batch ตายด้วย 22P02)
     rows.push({
       external_work_order_id: externalId,
       seq: typeof order.seq === "number" ? order.seq : null,
@@ -490,16 +503,41 @@ export async function closeBbpsJob(supabase: SupabaseClient, j: BbpsJob, event: 
 }
 
 /**
- * เขียนใบสั่งงานย่อย (37 ฟิลด์ที่ BBPS ส่งมา) ลง install_job_work_orders
+ * เขียนใบสั่งงานย่อย (37 ฟิลด์ที่ BBPS ส่งมา) ลง install_job_work_orders ให้ "ลู่เข้าหา payload เสมอ"
  *
  * ห้าม throw: ตอนเรียกจุดนี้ การจองคิวหลัก (upsertTicket) สำเร็จไปแล้ว ถ้าขั้นนี้ล้มเหลวแล้วโยน error
  * ออกไป BBPS จะเห็นเป็น 500 แล้วส่งซ้ำทั้งชุดโดยไม่จำเป็น (แพตเทิร์นเดียวกับ notifyBbpsClash ด้านบน)
- * onConflict ที่ external_work_order_id ทำให้ sync ซ้ำแล้วอัปเดตแถวเดิมแทนสร้างซ้ำ
+ *
+ * แต่ "ห้าม throw" ทำให้ความผิดพลาดที่ค้างถาวรอันตรายเป็นพิเศษ เพราะไม่มีใครเห็น: เดิม sync ทำแค่ upsert
+ * ด้วย onConflict = external_work_order_id และไม่เคยลบแถวที่ BBPS ลบทิ้งไปแล้ว พอ BBPS ลบใบ seq=1
+ * แล้วสร้างใบใหม่ seq=1 (id ใหม่) แถวเก่าจึงค้างอยู่และไปชน unique (job_no, seq) ซึ่งไม่ใช่ conflict target
+ * → 23505 ถูกกลืนด้วย console.warn ทุกครั้ง งานนั้นหยุดอัปเดตใบสั่งงานถาวรโดยไม่มีสัญญาณอะไรเลย
+ *
+ * จึง reconcile ทั้งชุดต่อ job_no: ลบแถวที่ไม่มีอยู่ใน payload อีกแล้วก่อน upsert
+ * (คู่กับการถอด unique (job_no, seq) ใน 20260901150500_install_job_work_orders_seq_constraint.sql)
+ *
+ * ความระมัดระวัง: จะลบก็ต่อเมื่อ payload มีใบสั่งงานที่ใช้ได้อย่างน้อย 1 ใบเท่านั้น — ถ้า BBPS ไม่ได้ส่ง
+ * workOrders มาเลย หรือส่งมาแต่ id เพี้ยนทั้งหมด แปลว่าเราไม่รู้สถานะจริง ห้ามลบของเดิมทิ้งเด็ดขาด
  */
-async function syncWorkOrders(supabase: SupabaseClient, jobNo: string, j: BbpsJob): Promise<void> {
+// export เพื่อให้เทสต์เรียกตรงได้ — พฤติกรรม "ห้าม throw" กับลำดับ reconcile-ก่อน-upsert เป็นสัญญาที่
+// ต้องมีเทสต์คุ้ม ไม่ใช่รายละเอียดภายในที่เปลี่ยนได้ตามใจ (ของเดิมพังเงียบมาแล้วเพราะไม่มีใครเห็น)
+export async function syncWorkOrders(supabase: SupabaseClient, jobNo: string, j: BbpsJob): Promise<void> {
   try {
     const rows = parseBbpsWorkOrders(j);
     if (!rows.length) return;
+    const keepIds = rows.map((row) => row.external_work_order_id);
+
+    // ลบใบสั่งงานของงานนี้ที่ไม่อยู่ใน payload แล้ว (BBPS ลบทิ้ง) รวมถึงแถวเก่าที่ไม่มี external id
+    // ซึ่งไม่มีทางถูก upsert ทับได้เลย — ทำก่อน upsert เสมอ เพื่อให้ seq ที่ถูกนำกลับมาใช้ใหม่ไม่ชนของเก่า
+    const { error: deleteError } = await supabase
+      .from("install_job_work_orders")
+      .delete()
+      .eq("job_no", jobNo)
+      .or(`external_work_order_id.is.null,external_work_order_id.not.in.(${keepIds.join(",")})`);
+    if (deleteError) {
+      console.warn("[bbps-sync] work order reconcile failed", deleteError.message);
+    }
+
     // ตารางนี้ไม่มี trigger auto-update updated_at (ตั้งใจ ตามแพตเทิร์นของคลัง) จึงต้องเซ็ต
     // synced_at/updated_at เองทุกครั้งที่ upsert ไม่งั้นตอน conflict ค่าเดิมจะค้าง ตอบไม่ได้ว่า
     // sync ล่าสุดเมื่อไหร่
