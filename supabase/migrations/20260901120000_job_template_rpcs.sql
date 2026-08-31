@@ -90,6 +90,7 @@ declare
   v_idx integer := 0;
   v_action text;
   v_item_count integer;
+  v_dup_codes text;
 begin
   select * into v_actor from public.floor_staff_profiles
   where id = (select auth.uid()) and is_active and role in ('admin', 'head_technician');
@@ -101,6 +102,19 @@ begin
     raise exception 'ต้องมีรายการเกณฑ์ตรวจรับอย่างน้อย 1 รายการ';
   end if;
 
+  -- กัน code ซ้ำกันเองใน p_items ก่อนชน unique constraint (template_id, code) ของ DB ตรง ๆ
+  -- เพราะ error ดิบของ Postgres อ่านไม่รู้เรื่องบนมือถือ ขัดกับเป้าหมายที่หัวหน้าช่างต้องแก้แม่แบบเองได้
+  select string_agg(distinct dup.code_val, ', ') into v_dup_codes
+  from (
+    select btrim(coalesce(elem->>'code', '')) as code_val
+    from jsonb_array_elements(p_items) as elem
+    group by btrim(coalesce(elem->>'code', ''))
+    having count(*) > 1
+  ) dup;
+  if v_dup_codes is not null then
+    raise exception 'มี code ซ้ำกันในรายการที่ส่งมา: %', v_dup_codes;
+  end if;
+
   if p_template_id is null then
     -- สร้างแม่แบบใหม่ทั้งชุด: version = max(version ของ job_type นั้น) + 1 (ถ้ายังไม่มีเลยใช้ 1)
     if p_job_type_id is null then
@@ -110,6 +124,10 @@ begin
       raise exception 'ไม่พบประเภทงาน id=%', p_job_type_id;
     end if;
     v_effective_job_type_id := p_job_type_id;
+
+    -- ล็อกระดับ job_type กันสองคนกดบันทึกพร้อมกันแล้วคำนวณ version ชนกัน (unique (job_type_id, version))
+    -- ใช้ key เดียวกับสาขา active->new_version ด้านล่างและ copy_job_template เพื่อให้ล็อกกันเองทั้งหมด
+    perform pg_advisory_xact_lock(hashtextextended('job_checklist_template_version:' || v_effective_job_type_id::text, 0));
 
     select coalesce(max(version), 0) + 1 into v_version
     from public.job_checklist_templates where job_type_id = v_effective_job_type_id;
@@ -144,6 +162,9 @@ begin
       -- ห้ามแก้แม่แบบ active ในที่: ใบสั่งงานที่ตรวจรับไปแล้วต้องยึดเกณฑ์ "รุ่นที่ใช้ ณ ตอนนั้น"
       -- การแก้แม่แบบวันนี้ต้องไม่ย้อนไปเปลี่ยนเกณฑ์ของงานที่ตรวจไปแล้ว (ISO 7.5 การควบคุมเอกสาร)
       -- จึงต้องสร้าง version ใหม่เป็น draft แทน แล้วให้หัวหน้าช่าง activate เองอีกครั้งเมื่อพร้อม
+      -- ล็อกระดับ job_type กันชนกับอีกคนที่กำลังบันทึก/คัดลอกแม่แบบของ job_type เดียวกันพร้อมกัน
+      perform pg_advisory_xact_lock(hashtextextended('job_checklist_template_version:' || v_effective_job_type_id::text, 0));
+
       select coalesce(max(version), 0) + 1 into v_version
       from public.job_checklist_templates where job_type_id = v_effective_job_type_id;
 
@@ -230,9 +251,12 @@ begin
     raise exception 'เปิดใช้งานได้เฉพาะแม่แบบสถานะ draft เท่านั้น (สถานะปัจจุบัน: %)', v_tpl.status;
   end if;
 
-  select count(*) into v_item_count from public.job_checklist_template_items where template_id = p_template_id;
+  -- นับเฉพาะ item ที่ is_active = true เท่านั้น เพราะถ้านับ item ที่ปิดใช้งานด้วยจะเปิดใช้งานแม่แบบที่
+  -- ออกมาว่างเปล่าได้ ทำให้ด่านบังคับติ๊กครบก่อนปิดงาน (ISO 8.6) กลายเป็นด่านที่ผ่านฟรีโดยไม่มีใครรู้ตัว
+  select count(*) into v_item_count from public.job_checklist_template_items
+  where template_id = p_template_id and is_active;
   if v_item_count = 0 then
-    raise exception 'แม่แบบต้องมีรายการเกณฑ์ตรวจรับอย่างน้อย 1 รายการก่อนเปิดใช้งาน';
+    raise exception 'แม่แบบต้องมีรายการเกณฑ์ตรวจรับที่เปิดใช้งาน (is_active) อย่างน้อย 1 รายการก่อนเปิดใช้งาน';
   end if;
 
   -- ปลดระวางแม่แบบ active เดิมของ job_type เดียวกัน — ให้มี active ได้ทีละ 1 เวอร์ชันต่อ job_type เสมอ
@@ -294,6 +318,10 @@ begin
     end if;
     v_effective_job_type_id := p_job_type_id;
 
+    -- ล็อกระดับ job_type กันสองคนกดบันทึกพร้อมกันแล้วคำนวณ version ชนกัน (unique (job_type_id, version))
+    -- ใช้ key เดียวกับสาขา active->new_version ด้านล่างและ copy_job_template เพื่อให้ล็อกกันเองทั้งหมด
+    perform pg_advisory_xact_lock(hashtextextended('job_prep_template_version:' || v_effective_job_type_id::text, 0));
+
     select coalesce(max(version), 0) + 1 into v_version
     from public.job_prep_templates where job_type_id = v_effective_job_type_id;
 
@@ -324,6 +352,9 @@ begin
     elsif v_tpl.status = 'active' then
       -- ห้ามแก้แม่แบบ active ในที่ ด้วยเหตุผลเดียวกับแม่แบบเกณฑ์ตรวจรับ (ISO 7.5 การควบคุมเอกสาร):
       -- งานที่เตรียมของไปแล้วต้องยึดรายการเตรียมของ "รุ่นที่ใช้ ณ ตอนนั้น" จึงต้องสร้าง version ใหม่เป็น draft
+      -- ล็อกระดับ job_type กันชนกับอีกคนที่กำลังบันทึก/คัดลอกแม่แบบของ job_type เดียวกันพร้อมกัน
+      perform pg_advisory_xact_lock(hashtextextended('job_prep_template_version:' || v_effective_job_type_id::text, 0));
+
       select coalesce(max(version), 0) + 1 into v_version
       from public.job_prep_templates where job_type_id = v_effective_job_type_id;
 
@@ -354,6 +385,9 @@ begin
     end if;
     if coalesce((v_item->>'calc_qty')::numeric, 0) <= 0 then
       raise exception 'รายการที่ % : calc_qty ต้องมากกว่า 0', v_idx;
+    end if;
+    if coalesce((v_item->>'waste_pct')::numeric, 0) < 0 or coalesce((v_item->>'waste_pct')::numeric, 0) > 100 then
+      raise exception 'รายการที่ % : waste_pct ต้องอยู่ระหว่าง 0-100', v_idx;
     end if;
 
     v_material_id := nullif(v_item->>'material_id', '')::uuid;
@@ -478,6 +512,9 @@ begin
       raise exception 'ไม่พบประเภทงานปลายทาง id=%', v_target_job_type_id;
     end if;
 
+    -- ล็อกด้วย key เดียวกับ save_job_checklist_template กันชนกับการบันทึก/คัดลอกพร้อมกันของ job_type เดียวกัน
+    perform pg_advisory_xact_lock(hashtextextended('job_checklist_template_version:' || v_target_job_type_id::text, 0));
+
     select coalesce(max(version), 0) + 1 into v_version
     from public.job_checklist_templates where job_type_id = v_target_job_type_id;
 
@@ -508,6 +545,9 @@ begin
     if not exists (select 1 from public.job_types where id = v_target_job_type_id) then
       raise exception 'ไม่พบประเภทงานปลายทาง id=%', v_target_job_type_id;
     end if;
+
+    -- ล็อกด้วย key เดียวกับ save_job_prep_template กันชนกับการบันทึก/คัดลอกพร้อมกันของ job_type เดียวกัน
+    perform pg_advisory_xact_lock(hashtextextended('job_prep_template_version:' || v_target_job_type_id::text, 0));
 
     select coalesce(max(version), 0) + 1 into v_version
     from public.job_prep_templates where job_type_id = v_target_job_type_id;
