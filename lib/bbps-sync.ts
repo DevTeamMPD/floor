@@ -7,7 +7,88 @@ const BKK = "+07:00";
 const WORK_START = "09:00";
 const WORK_END = "17:00";
 
-export interface BbpsWorkOrder { seq?: number; start?: string | null; end?: string | null }
+// ใบสั่งงานย่อยจาก BBPS — ฝั่ง BBPS ส่งมาครบ 37 ฟิลด์ต่อใบเสมอ (to_jsonb(w) ยัดทั้งแถวลง payload)
+// แต่เดิมที่นี่อ่านไปใช้แค่ seq/start/end คงฟิลด์เดิมสามตัวไว้ก่อนเพราะโค้ดเก่าพึ่งพาอยู่
+// (collectBlockDates, jobHasYearWarning) แล้วต่อท้ายด้วยฟิลด์ที่เหลือทั้งหมด — ทุกฟิลด์ optional/nullable
+// เพราะ BBPS ส่งค่า null มาได้เสมอเมื่อยังไม่กรอกข้อมูลหัวข้อนั้น
+export interface BbpsWorkOrder {
+  seq?: number;
+  start?: string | null;
+  end?: string | null;
+  id?: string | null;
+  install_start?: string | null;
+  install_end?: string | null;
+  location_address?: string | null;
+  location_map_link?: string | null;
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  manpower?: string | null;
+  materials?: string | null;
+  task_details?: string | null;
+  task_ball_pit?: string | null;
+  task_workshop_set?: string | null;
+  task_gym?: string | null;
+  task_floor?: string | null;
+  task_other?: string | null;
+  constraint_access_time?: string | null;
+  constraint_logistics?: string | null;
+  constraint_work_area?: string | null;
+  constraint_obstacles?: string | null;
+  constraint_ground?: string | null;
+  constraint_utilities?: string | null;
+  constraint_noise_dust?: string | null;
+  constraint_weather?: string | null;
+  constraint_site_authority?: string | null;
+  acceptance_criteria?: string | null;
+  acceptance_photos?: string | null;
+  acceptance_quality_check?: string | null;
+  acceptance_documents?: string | null;
+  acceptance_signoff?: string | null;
+  acceptance_followup?: string | null;
+  design_images?: string[] | null;
+  site_photos?: string[] | null;
+}
+
+// รูปแถวที่จะเขียนลง public.install_job_work_orders (ไม่มี job_no เพราะ parseBbpsWorkOrders
+// เป็นฟังก์ชันบริสุทธิ์ที่ไม่รู้จัก job_no จริง — job_no ผูกเพิ่มตอนเรียกใช้ใน applyBbpsJob
+// หลังจาก upsertTicket คืนค่ามาแล้วเท่านั้น)
+export interface BbpsWorkOrderRow {
+  external_work_order_id: string;
+  seq: number | null;
+  install_start: string | null;
+  install_end: string | null;
+  location_address: string | null;
+  location_map_link: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  manpower: string | null;
+  materials: string | null;
+  task_details: string | null;
+  task_ball_pit: string | null;
+  task_workshop_set: string | null;
+  task_gym: string | null;
+  task_floor: string | null;
+  task_other: string | null;
+  constraint_access_time: string | null;
+  constraint_logistics: string | null;
+  constraint_work_area: string | null;
+  constraint_obstacles: string | null;
+  constraint_ground: string | null;
+  constraint_utilities: string | null;
+  constraint_noise_dust: string | null;
+  constraint_weather: string | null;
+  constraint_site_authority: string | null;
+  acceptance_criteria: string | null;
+  acceptance_photos: string | null;
+  acceptance_quality_check: string | null;
+  acceptance_documents: string | null;
+  acceptance_signoff: string | null;
+  acceptance_followup: string | null;
+  design_images: string[];
+  site_photos: string[];
+  raw: BbpsWorkOrder;
+}
+
 export interface BbpsJob {
   id: string;
   quoteNumber?: string | null;
@@ -32,6 +113,71 @@ function yearOf(s: string | null | undefined): number | null {
 function isCEDate(s: string | null | undefined): boolean {
   const y = yearOf(s);
   return y !== null && y <= 2100;
+}
+
+// แปลงวันที่จาก work order ให้เป็นค่าที่เขียนลงคอลัมน์ date ได้อย่างปลอดภัย
+// ปี พ.ศ. (>2100) ต้องคืน null ไม่ใช่ค่าเพี้ยน — ใช้ isCEDate ตัวเดิมซ้ำ (ไม่ควรมีตรรกะแปลงปีสองที่)
+function ceDateOrNull(s: string | null | undefined): string | null {
+  if (!isCEDate(s)) return null;
+  return s as string;
+}
+
+function textOrNull(v: unknown): string | null {
+  return typeof v === "string" ? v : null;
+}
+
+function stringArray(v: unknown): string[] {
+  return Array.isArray(v) ? (v as unknown[]).filter((x): x is string => typeof x === "string") : [];
+}
+
+// แปลง workOrders ดิบ (37 ฟิลด์ต่อใบตามที่ BBPS ส่งมาจริง) ให้เป็นแถวพร้อมเขียนลง
+// public.install_job_work_orders — ฟังก์ชันบริสุทธิ์ ไม่แตะฐานข้อมูล ไม่ throw
+// ใบสั่งงานที่ไม่มี id (ไม่มี natural key ให้ upsert ซ้ำได้) จะถูกข้ามไปทั้งใบ ไม่ทำให้ทั้งชุดพัง
+export function parseBbpsWorkOrders(job: BbpsJob): BbpsWorkOrderRow[] {
+  const orders = job.workOrders ?? [];
+  const rows: BbpsWorkOrderRow[] = [];
+  for (const order of orders) {
+    if (!order || typeof order !== "object") continue;
+    const externalId = textOrNull(order.id);
+    if (!externalId) continue; // ไม่มี id -> ข้ามรายการนี้ (เลือกทางนี้แทน throw หรือคืน id เป็น null)
+    rows.push({
+      external_work_order_id: externalId,
+      seq: typeof order.seq === "number" ? order.seq : null,
+      install_start: ceDateOrNull(order.install_start),
+      install_end: ceDateOrNull(order.install_end),
+      location_address: textOrNull(order.location_address),
+      location_map_link: textOrNull(order.location_map_link),
+      contact_name: textOrNull(order.contact_name),
+      contact_phone: textOrNull(order.contact_phone),
+      manpower: textOrNull(order.manpower),
+      materials: textOrNull(order.materials),
+      task_details: textOrNull(order.task_details),
+      task_ball_pit: textOrNull(order.task_ball_pit),
+      task_workshop_set: textOrNull(order.task_workshop_set),
+      task_gym: textOrNull(order.task_gym),
+      task_floor: textOrNull(order.task_floor),
+      task_other: textOrNull(order.task_other),
+      constraint_access_time: textOrNull(order.constraint_access_time),
+      constraint_logistics: textOrNull(order.constraint_logistics),
+      constraint_work_area: textOrNull(order.constraint_work_area),
+      constraint_obstacles: textOrNull(order.constraint_obstacles),
+      constraint_ground: textOrNull(order.constraint_ground),
+      constraint_utilities: textOrNull(order.constraint_utilities),
+      constraint_noise_dust: textOrNull(order.constraint_noise_dust),
+      constraint_weather: textOrNull(order.constraint_weather),
+      constraint_site_authority: textOrNull(order.constraint_site_authority),
+      acceptance_criteria: textOrNull(order.acceptance_criteria),
+      acceptance_photos: textOrNull(order.acceptance_photos),
+      acceptance_quality_check: textOrNull(order.acceptance_quality_check),
+      acceptance_documents: textOrNull(order.acceptance_documents),
+      acceptance_signoff: textOrNull(order.acceptance_signoff),
+      acceptance_followup: textOrNull(order.acceptance_followup),
+      design_images: stringArray(order.design_images),
+      site_photos: stringArray(order.site_photos),
+      raw: order,
+    });
+  }
+  return rows;
 }
 
 export function jobHasYearWarning(j: BbpsJob): boolean {
@@ -343,6 +489,31 @@ export async function closeBbpsJob(supabase: SupabaseClient, j: BbpsJob, event: 
   return (data ?? []).length;
 }
 
+/**
+ * เขียนใบสั่งงานย่อย (37 ฟิลด์ที่ BBPS ส่งมา) ลง install_job_work_orders
+ *
+ * ห้าม throw: ตอนเรียกจุดนี้ การจองคิวหลัก (upsertTicket) สำเร็จไปแล้ว ถ้าขั้นนี้ล้มเหลวแล้วโยน error
+ * ออกไป BBPS จะเห็นเป็น 500 แล้วส่งซ้ำทั้งชุดโดยไม่จำเป็น (แพตเทิร์นเดียวกับ notifyBbpsClash ด้านบน)
+ * onConflict ที่ external_work_order_id ทำให้ sync ซ้ำแล้วอัปเดตแถวเดิมแทนสร้างซ้ำ
+ */
+async function syncWorkOrders(supabase: SupabaseClient, jobNo: string, j: BbpsJob): Promise<void> {
+  try {
+    const rows = parseBbpsWorkOrders(j);
+    if (!rows.length) return;
+    const { error } = await supabase
+      .from("install_job_work_orders")
+      .upsert(
+        rows.map((row) => ({ ...row, job_no: jobNo })),
+        { onConflict: "external_work_order_id" },
+      );
+    if (error) {
+      console.warn("[bbps-sync] work order upsert failed", error.message);
+    }
+  } catch (e) {
+    console.warn("[bbps-sync] work order upsert failed", e instanceof Error ? e.message : String(e));
+  }
+}
+
 // สร้าง Ticket กลางและทำ Appointment ของ BBPS ให้ตรงกับวันล่าสุดแบบ idempotent
 export async function applyBbpsJob(supabase: SupabaseClient, j: BbpsJob) {
   const dates = collectBlockDates(j);
@@ -351,6 +522,7 @@ export async function applyBbpsJob(supabase: SupabaseClient, j: BbpsJob) {
     return { jobNo: null, added: 0, updated: 0, removed: 0, blocks: 0, skipped: true, clashes: [] as ClashInfo[] };
   }
   const jobNo = await upsertTicket(supabase, j, dates);
+  await syncWorkOrders(supabase, jobNo, j);
   const label = j.customerName || j.quoteNumber || "BBPS";
   const refPrefix = `bbps:${j.id}:`;
 

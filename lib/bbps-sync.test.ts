@@ -6,6 +6,7 @@ import {
   formatClashNote,
   mergeClashFlag,
   buildClashNotice,
+  parseBbpsWorkOrders,
   CLASH_FLAG_PREFIX,
   type BbpsJob,
   type ClashRow,
@@ -195,5 +196,160 @@ describe("buildClashNotice", () => {
 
   it("id ขึ้นต้นด้วย lendi- ตามรูปแบบที่ฝั่ง BBPS ใช้ตัดซ้ำ", () => {
     expect(buildClashNotice(jobNo, one)!.externalMessageId.startsWith("lendi-")).toBe(true);
+  });
+});
+
+
+// T2: BBPS ส่งใบสั่งงานมาครบ 37 ฟิลด์ต่อใบอยู่แล้ว (to_jsonb(w) ฝั่ง BBPS) แต่เดิมโค้ดนี้อ่านไปใช้
+// แค่ seq/start/end ที่เหลือถูกทิ้งดิบไว้ใน install_jobs.raw_payload ไม่มีใครอ่าน
+// parseBbpsWorkOrders เป็นฟังก์ชันบริสุทธิ์ที่แปลง workOrders ดิบให้เป็นแถวพร้อมเขียนลง
+// install_job_work_orders — ไม่แตะฐานข้อมูล
+describe("parseBbpsWorkOrders", () => {
+  // ตัวอย่างจริงจากข้อมูล production (ตัดข้อมูลลูกค้าออก) — ครบทุกฟิลด์ที่ BBPS ส่งมา
+  const fullOrder = {
+    id: "3afc28e2-ca6f-41e7-9e58-cac2df3ee0ee",
+    seq: 1,
+    start: "2026-08-24",
+    end: "2026-08-24",
+    install_start: "2026-08-24",
+    install_end: "2026-08-24",
+    location_address: "อยู่หลังปั๊ม",
+    location_map_link: "https://maps.app.goo.gl/ZGzMshQAvHzHweBSA",
+    contact_name: "คุณรุ่งนภา",
+    contact_phone: "0821592931",
+    manpower: "ช่าง 2 คน",
+    materials: "พื้น EVA 20 แผ่น",
+    task_details: "รายละเอียดงานรวม",
+    task_ball_pit: "Playspace 3 platform สีชมพูขาว",
+    task_workshop_set: "Set Basic 7 รายการ",
+    task_gym: "ขนาด 1.2*0.9 เมตร ยึดกับผนังห้อง",
+    task_floor: null,
+    task_other: null,
+    constraint_access_time: "ได้ตลอดเวลา นัด 09.30-10.00 ได้เลย",
+    constraint_logistics: null,
+    constraint_work_area: "วางหน้าร้านได้ หรือวางในร้านได้เลย",
+    constraint_obstacles: "ไม่มี",
+    constraint_ground: "พื้น eva",
+    constraint_utilities: "มีไฟ",
+    constraint_noise_dust: "ใช้เสียงได้",
+    constraint_weather: null,
+    constraint_site_authority: null,
+    acceptance_criteria: "เกณฑ์ตรวจรับรวม",
+    acceptance_photos: null,
+    acceptance_quality_check: null,
+    acceptance_documents: null,
+    acceptance_signoff: null,
+    acceptance_followup: null,
+    design_images: ["https://example.supabase.co/design/1.jpg"],
+    site_photos: ["https://example.supabase.co/site/1.jpg"],
+    created_at: "2026-08-17T13:22:02.499221+00:00",
+    updated_at: "2026-08-22T10:58:38.902481+00:00",
+  };
+
+  it("payload จริงที่มีครบทุกฟิลด์ → แปลงครบ ไม่ตกหล่น", () => {
+    const rows = parseBbpsWorkOrders({ id: "job-1", workOrders: [fullOrder] });
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    expect(row.external_work_order_id).toBe(fullOrder.id);
+    expect(row.seq).toBe(1);
+    expect(row.install_start).toBe("2026-08-24");
+    expect(row.install_end).toBe("2026-08-24");
+    expect(row.location_address).toBe(fullOrder.location_address);
+    expect(row.location_map_link).toBe(fullOrder.location_map_link);
+    expect(row.contact_name).toBe(fullOrder.contact_name);
+    expect(row.contact_phone).toBe(fullOrder.contact_phone);
+    expect(row.manpower).toBe(fullOrder.manpower);
+    expect(row.materials).toBe(fullOrder.materials);
+    expect(row.task_details).toBe(fullOrder.task_details);
+    expect(row.task_ball_pit).toBe(fullOrder.task_ball_pit);
+    expect(row.task_workshop_set).toBe(fullOrder.task_workshop_set);
+    expect(row.task_gym).toBe(fullOrder.task_gym);
+    expect(row.task_floor).toBeNull();
+    expect(row.task_other).toBeNull();
+    expect(row.constraint_access_time).toBe(fullOrder.constraint_access_time);
+    expect(row.constraint_logistics).toBeNull();
+    expect(row.constraint_work_area).toBe(fullOrder.constraint_work_area);
+    expect(row.constraint_obstacles).toBe(fullOrder.constraint_obstacles);
+    expect(row.constraint_ground).toBe(fullOrder.constraint_ground);
+    expect(row.constraint_utilities).toBe(fullOrder.constraint_utilities);
+    expect(row.constraint_noise_dust).toBe(fullOrder.constraint_noise_dust);
+    expect(row.constraint_weather).toBeNull();
+    expect(row.constraint_site_authority).toBeNull();
+    expect(row.acceptance_criteria).toBe(fullOrder.acceptance_criteria);
+    expect(row.acceptance_photos).toBeNull();
+    expect(row.acceptance_quality_check).toBeNull();
+    expect(row.acceptance_documents).toBeNull();
+    expect(row.acceptance_signoff).toBeNull();
+    expect(row.acceptance_followup).toBeNull();
+    expect(row.design_images).toEqual(["https://example.supabase.co/design/1.jpg"]);
+    expect(row.site_photos).toEqual(["https://example.supabase.co/site/1.jpg"]);
+    expect(row.raw).toEqual(fullOrder);
+  });
+
+  it("workOrders เป็น null → คืน [] ไม่ throw", () => {
+    expect(parseBbpsWorkOrders({ id: "job-1", workOrders: null })).toEqual([]);
+  });
+
+  it("ไม่มี workOrders เลย → คืน [] ไม่ throw", () => {
+    expect(parseBbpsWorkOrders({ id: "job-1" })).toEqual([]);
+  });
+
+  it("design_images / site_photos เป็น null → คืน [] ไม่ใช่ null", () => {
+    const rows = parseBbpsWorkOrders({
+      id: "job-1",
+      workOrders: [{ id: "wo-1", seq: 1, design_images: null, site_photos: null } as never],
+    });
+    expect(rows[0].design_images).toEqual([]);
+    expect(rows[0].site_photos).toEqual([]);
+  });
+
+  it("design_images เป็น array → คงค่าไว้", () => {
+    const rows = parseBbpsWorkOrders({
+      id: "job-1",
+      workOrders: [{ id: "wo-1", seq: 1, design_images: ["a.jpg", "b.jpg"], site_photos: [] } as never],
+    });
+    expect(rows[0].design_images).toEqual(["a.jpg", "b.jpg"]);
+  });
+
+  // ใช้ isCEDate ตัวเดิมใน lib/bbps-sync.ts ซ้ำ — ห้ามเก็บปี พ.ศ. ที่แปลงเป็นวันที่ผิดเพี้ยนลงคอลัมน์ date
+  it("install_start/install_end เป็นปี พ.ศ. (>2100) → คืน null ไม่ใช่ค่าเพี้ยน", () => {
+    const rows = parseBbpsWorkOrders({
+      id: "job-1",
+      workOrders: [{ id: "wo-1", seq: 1, install_start: "2569-08-24", install_end: "2569-08-24" } as never],
+    });
+    expect(rows[0].install_start).toBeNull();
+    expect(rows[0].install_end).toBeNull();
+  });
+
+  it("install_start/install_end ปี ค.ศ. ปกติ → เก็บค่าไว้", () => {
+    const rows = parseBbpsWorkOrders({
+      id: "job-1",
+      workOrders: [{ id: "wo-1", seq: 1, install_start: "2026-09-01", install_end: "2026-09-02" } as never],
+    });
+    expect(rows[0].install_start).toBe("2026-09-01");
+    expect(rows[0].install_end).toBe("2026-09-02");
+  });
+
+  it("work order ที่ไม่มี id → ข้ามรายการนั้น ไม่ทำให้ทั้งชุดพัง", () => {
+    const rows = parseBbpsWorkOrders({
+      id: "job-1",
+      workOrders: [
+        { seq: 1, install_start: "2026-09-01" } as never, // ไม่มี id
+        { id: "wo-2", seq: 2, install_start: "2026-09-02" } as never,
+      ],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].external_work_order_id).toBe("wo-2");
+  });
+
+  it("หลายใบสั่งงานในงานเดียว → แปลงครบทุกใบ เรียงตามลำดับเดิม", () => {
+    const rows = parseBbpsWorkOrders({
+      id: "job-1",
+      workOrders: [
+        { id: "wo-1", seq: 1 } as never,
+        { id: "wo-2", seq: 2 } as never,
+      ],
+    });
+    expect(rows.map((r) => r.external_work_order_id)).toEqual(["wo-1", "wo-2"]);
   });
 });
