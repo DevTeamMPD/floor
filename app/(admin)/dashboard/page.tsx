@@ -14,14 +14,22 @@ type SurveyResponse = {
   comment: string;
 };
 
+type SurveyQuestion = {
+  id: string;
+  order: number;
+  label: string;
+  shortLabel: string;
+};
+
 type ApiData = {
+  questions: SurveyQuestion[];
   responses: SurveyResponse[];
   updatedAt: string;
   sourceUrl: string;
   error?: string;
 };
 
-const DIMS = [
+const FALLBACK_DIMS = [
   { label: "ความพึงพอใจในการให้บริการ", short: "บริการ" },
   { label: "คุณภาพของงานติดตั้ง", short: "คุณภาพงาน" },
   { label: "ความเรียบร้อย/สะอาดหลังติดตั้ง", short: "ความเรียบร้อย" },
@@ -216,13 +224,19 @@ export default function DashboardPage() {
   }, [load, loadWaste]);
 
   const responses = useMemo(() => data?.responses ?? [], [data]);
+  const dimensions = useMemo(
+    () => data?.questions?.length
+      ? data.questions.map((question) => ({ label: question.shortLabel || question.label, short: question.shortLabel || question.label }))
+      : FALLBACK_DIMS,
+    [data]
+  );
 
   const dimAvg = useMemo(() => {
-    return DIMS.map((_, i) => {
+    return dimensions.map((_, i) => {
       const vals = responses.map((r) => r.scores[i]).filter((x): x is number => x !== null);
       return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
     });
-  }, [responses]);
+  }, [dimensions, responses]);
 
   const allScores = useMemo(
     () => responses.flatMap((r) => r.scores.filter((x): x is number => x !== null)),
@@ -329,7 +343,7 @@ export default function DashboardPage() {
           <div className="bg-white border border-slate-100 rounded-xl p-4 mb-5">
             <h2 className="text-sm font-semibold mb-3">คะแนนเฉลี่ยรายด้าน</h2>
             <div className="space-y-3">
-              {DIMS.map((d, i) => (
+              {dimensions.map((d, i) => (
                 <div key={i}>
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-slate-600">{d.label}</span>
@@ -441,7 +455,7 @@ export default function DashboardPage() {
                           s === null ? null : (
                             <span
                               key={j}
-                              title={DIMS[j].short}
+                              title={dimensions[j]?.short ?? `คำถาม ${j + 1}`}
                               className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold text-white"
                               style={{ background: SCORE_COLOR[s] }}
                             >
@@ -495,7 +509,7 @@ export default function DashboardPage() {
                     <th className="py-2 pr-2 font-medium">วันที่</th>
                     <th className="py-2 pr-2 font-medium">เลขบิล</th>
                     <th className="py-2 pr-2 font-medium">ลูกค้า</th>
-                    {DIMS.map((d, i) => (
+                    {dimensions.map((d, i) => (
                       <th key={i} className="py-2 px-1 font-medium text-center whitespace-nowrap">
                         {d.short}
                       </th>
