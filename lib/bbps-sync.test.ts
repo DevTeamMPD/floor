@@ -5,6 +5,7 @@ import {
   findClashes,
   formatClashNote,
   mergeClashFlag,
+  buildClashNotice,
   CLASH_FLAG_PREFIX,
   type BbpsJob,
   type ClashRow,
@@ -151,5 +152,48 @@ describe("formatClashNote", () => {
       { date: "2026-09-10", withLabel: "วันหยุด" },
       { date: "2026-09-11", withLabel: "งานคุณเอ" },
     ])).toBe(`${CLASH_FLAG_PREFIX} 2026-09-10 (วันหยุด), 2026-09-11 (งานคุณเอ)`);
+  });
+});
+
+describe("buildClashNotice", () => {
+  const jobNo = "BBPS-b8046f99-1699-47a2-8995-46e25295a083";
+  const one = [{ date: "2026-09-10", withLabel: "วันหยุด" }];
+
+  it("ไม่ชน -> null (ไม่ส่งข้อความรบกวน)", () => {
+    expect(buildClashNotice(jobNo, [])).toBeNull();
+  });
+
+  it("บอกวันที่ชนและชนกับอะไร ครบทุกวัน", () => {
+    const n = buildClashNotice(jobNo, [
+      { date: "2026-09-10", withLabel: "วันหยุด" },
+      { date: "2026-09-11", withLabel: "งานคุณเอ" },
+    ])!;
+    expect(n.body).toContain("2026-09-10 — ชนกับ วันหยุด");
+    expect(n.body).toContain("2026-09-11 — ชนกับ งานคุณเอ");
+    expect(n.body).toContain("ยังไม่ได้จองคิวให้");
+  });
+
+  it("ชุดวันที่ชนเดิม -> id เดิมทุกครั้ง (sync ซ้ำไม่ทำให้ BBPS ได้ข้อความซ้ำ)", () => {
+    // ต้องรอให้เวลาเดินจริงก่อนเรียกรอบสอง ไม่งั้นถ้า id ผูกกับเวลา เทสต์จะผ่านทั้งที่ผิด
+    const first = buildClashNotice(jobNo, one)!.externalMessageId;
+    const until = Date.now() + 5;
+    while (Date.now() < until) { /* ปล่อยให้นาฬิกาเดิน */ }
+    expect(buildClashNotice(jobNo, one)!.externalMessageId).toBe(first);
+  });
+
+  it("คนละงาน หรือคนละชุดวันที่ -> คนละ id", () => {
+    const a = buildClashNotice(jobNo, one)!.externalMessageId;
+    const b = buildClashNotice("BBPS-other", one)!.externalMessageId;
+    const c = buildClashNotice(jobNo, [{ date: "2026-09-12", withLabel: "วันหยุด" }])!.externalMessageId;
+    expect(new Set([a, b, c]).size).toBe(3);
+  });
+
+  it("id ไม่ยาวเกินจนใช้เป็น header ไม่ได้ แม้ชนหลายสิบวัน", () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ date: `2026-09-${String(i % 28 + 1).padStart(2, "0")}`, withLabel: "งานอื่น" }));
+    expect(buildClashNotice(jobNo, many)!.externalMessageId.length).toBeLessThan(40);
+  });
+
+  it("id ขึ้นต้นด้วย lendi- ตามรูปแบบที่ฝั่ง BBPS ใช้ตัดซ้ำ", () => {
+    expect(buildClashNotice(jobNo, one)!.externalMessageId.startsWith("lendi-")).toBe(true);
   });
 });
