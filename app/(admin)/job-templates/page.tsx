@@ -162,22 +162,6 @@ function moveByKey<T extends { key: string }>(items: T[], key: string, direction
   return next;
 }
 
-// code ต้องคงที่ข้ามเวลา/เวอร์ชัน (ผูกกับ job_acceptance_results.item_code สำหรับสถิติ ISO 9.1.3)
-// ข้อที่มี code อยู่แล้วจากฐานข้อมูล -> ใช้ค่าเดิมเสมอ ไม่ว่าจะถูกเลื่อนลำดับหรือย้ายตำแหน่งแค่ไหน
-// ข้อใหม่ที่ยังไม่มี code -> เดินหน้าต่อจากเลขสูงสุดของ QCnn ที่ "เคยมีอยู่ในแม่แบบนี้" เท่านั้น
-// ห้ามอิง sort_order/ตำแหน่งใน array เป็นที่มาของเลข เพราะจะวนกลับไปชนกับ code ของข้อที่เคยถูกลบไปแล้ว
-function assignChecklistCodes(items: ChecklistItemDraft[]): string[] {
-  let maxSeq = 0;
-  for (const item of items) {
-    const match = item.code ? /^QC(\d+)$/.exec(item.code) : null;
-    if (match) maxSeq = Math.max(maxSeq, parseInt(match[1], 10));
-  }
-  return items.map((item) => {
-    if (item.code) return item.code;
-    maxSeq += 1;
-    return `QC${String(maxSeq).padStart(2, "0")}`;
-  });
-}
 
 export default function JobTemplatesPage() {
   const supabase = useMemo(() => createClient(), []);
@@ -401,11 +385,13 @@ export default function JobTemplatesPage() {
       if (!item.label.trim()) { toast.error("กรุณากรอกชื่อรายการตรวจให้ครบทุกข้อ"); return; }
     }
     const wasActive = clTemplates.find((t) => t.id === clSelectedId)?.status === "active";
-    // code มาจาก assignChecklistCodes (คงค่าเดิมของข้อที่มีอยู่แล้ว, gen ใหม่เฉพาะข้อที่เพิ่งเพิ่ม)
+    // code: ข้อที่โหลดมาจากฐานข้อมูลมี item.code อยู่แล้ว -> ส่งค่าเดิมไปตรง ๆ
+    // ข้อใหม่ที่เพิ่งเพิ่มในฟอร์มยังไม่มี code -> ส่ง null ให้ RPC เป็นผู้กำหนดให้แทน เพราะฝั่งนี้
+    // มองเห็นแค่ item ของเวอร์ชันที่เปิดอยู่ ไม่เห็นเวอร์ชันอื่นของ job_type เดียวกัน และมีช่องที่สองคน
+    // กดบันทึกพร้อมกันแล้วได้ค่าเดียวกัน — จุดที่ตัดสินใจเรื่องนี้ได้ถูกต้องคือฝั่งฐานข้อมูลเท่านั้น
     // ส่วน sort_order ยังมาจากตำแหน่งใน array ตามเดิม — ลำดับการแสดงผลกับตัวระบุ (code) เป็นคนละเรื่องกัน
-    const codes = assignChecklistCodes(clItems);
     const payload = clItems.map((item, idx) => ({
-      code: codes[idx],
+      code: item.code ?? null,
       label: item.label.trim(),
       spec_text: item.spec_text.trim() || null,
       requires_photo: item.requires_photo,
