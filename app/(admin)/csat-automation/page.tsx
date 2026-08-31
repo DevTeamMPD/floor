@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 type QueueState = "waiting" | "due_today" | "overdue" | "completed" | "case_opened";
 type Priority = "urgent" | "high" | "normal";
@@ -37,8 +38,8 @@ const CSAT_QUESTIONS = [
   "ความสุภาพและการให้คำแนะนำจากทีมติดตั้ง",
 ];
 
-const now = new Date();
-const offset = (hours: number) => new Date(now.getTime() + hours * 60 * 60 * 1000).toISOString();
+const DEMO_ANCHOR = Date.UTC(2026, 7, 31, 18, 0, 0);
+const offset = (hours: number) => new Date(DEMO_ANCHOR + hours * 60 * 60 * 1000).toISOString();
 
 const DEMO_ROWS: CsatQueueItem[] = [
   { id: "csat-1", jobNo: "ORD-202608-8331", customer: "คุณสุภาวดี พรหมรักษา", signedAt: offset(-79), dueAt: offset(-7), state: "overdue", phone: "08X-XXX-9142", owner: "ยังไม่รับงาน", score: null, issue: null, priority: "urgent", afterSalesCase: null, ncrNo: null },
@@ -58,7 +59,7 @@ const STATE_LABEL: Record<QueueState, { label: string; cls: string }> = {
 };
 
 function fmt(value: string) {
-  return new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  return new Intl.DateTimeFormat("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
 function remaining(row: CsatQueueItem) {
@@ -74,24 +75,81 @@ function Stars({ score }: { score: number }) {
 }
 
 export default function CsatAutomationPage() {
+  const supabase = useMemo(() => createClient(), []);
   const [filter, setFilter] = useState<"action" | "low_score" | "all">("action");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<CsatQueueItem | null>(null);
+  const [queueRows, setQueueRows] = useState<CsatQueueItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [localPreview, setLocalPreview] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+      if (isLocal) {
+        if (active) { setLocalPreview(true); setQueueRows(DEMO_ROWS); setLoading(false); }
+        return;
+      }
+
+      const { data: followups, error } = await supabase
+        .from("floor_csat_followups")
+        .select("job_no,work_order_id,customer_signed_at,due_at,completed_at,evaluation_id")
+        .order("due_at", { ascending: true });
+      if (error) { if (active) setLoading(false); return; }
+      const jobNos = [...new Set((followups ?? []).map((row) => row.job_no))];
+      if (!jobNos.length) { if (active) { setQueueRows([]); setLoading(false); } return; }
+
+      const [jobsResult, evaluationsResult, casesResult, ncrResult] = await Promise.all([
+        supabase.from("install_jobs").select("job_no,customer_name,customer_phone").in("job_no", jobNos),
+        supabase.from("job_evaluations").select("id,job_no,satisfaction_score,issues_text").in("job_no", jobNos),
+        supabase.from("floor_after_sales_cases").select("case_no,job_no").in("job_no", jobNos).not("status", "eq", "closed"),
+        supabase.from("ncr_reports").select("id,job_no").in("job_no", jobNos).not("status", "eq", "closed"),
+      ]);
+      const jobs = new Map((jobsResult.data ?? []).map((row) => [row.job_no, row]));
+      const evaluations = new Map((evaluationsResult.data ?? []).map((row) => [row.job_no, row]));
+      const cases = new Map((casesResult.data ?? []).map((row) => [row.job_no, row.case_no]));
+      const ncrs = new Map((ncrResult.data ?? []).map((row) => [row.job_no, row.id]));
+      const nowMs = Date.now();
+      const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
+      const mapped: CsatQueueItem[] = (followups ?? []).map((followup) => {
+        const job = jobs.get(followup.job_no);
+        const evaluation = evaluations.get(followup.job_no);
+        const caseNo = cases.get(followup.job_no) ?? null;
+        const score = evaluation?.satisfaction_score ?? null;
+        const dueDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date(followup.due_at));
+        const state: QueueState = followup.completed_at
+          ? (caseNo ? "case_opened" : "completed")
+          : new Date(followup.due_at).getTime() < nowMs ? "overdue"
+          : dueDate === today ? "due_today" : "waiting";
+        return {
+          id: followup.work_order_id, jobNo: followup.job_no, customer: job?.customer_name ?? "ไม่ระบุชื่อลูกค้า",
+          signedAt: followup.customer_signed_at, dueAt: followup.due_at, state,
+          phone: job?.customer_phone ?? "—", owner: "CS Queue", score,
+          issue: evaluation?.issues_text ?? null, priority: state === "overdue" || (score !== null && score <= 2) ? "urgent" : state === "due_today" ? "high" : "normal",
+          afterSalesCase: caseNo, ncrNo: ncrs.get(followup.job_no) ?? null,
+        };
+      });
+      if (active) { setQueueRows(mapped); setLoading(false); }
+    };
+    void load();
+    return () => { active = false; };
+  }, [supabase]);
 
   const metrics = useMemo(() => ({
-    waiting: DEMO_ROWS.filter((row) => ["waiting", "due_today", "overdue"].includes(row.state)).length,
-    dueToday: DEMO_ROWS.filter((row) => row.state === "due_today").length,
-    overdue: DEMO_ROWS.filter((row) => row.state === "overdue").length,
-    lowScore: DEMO_ROWS.filter((row) => row.score !== null && row.score <= 2).length,
-    autoCases: DEMO_ROWS.filter((row) => row.afterSalesCase).length,
-  }), []);
+    waiting: queueRows.filter((row) => ["waiting", "due_today", "overdue"].includes(row.state)).length,
+    dueToday: queueRows.filter((row) => row.state === "due_today").length,
+    overdue: queueRows.filter((row) => row.state === "overdue").length,
+    lowScore: queueRows.filter((row) => row.score !== null && row.score <= 2).length,
+    autoCases: queueRows.filter((row) => row.afterSalesCase).length,
+  }), [queueRows]);
 
-  const rows = useMemo(() => DEMO_ROWS.filter((row) => {
+  const rows = useMemo(() => queueRows.filter((row) => {
     if (filter === "action" && !["due_today", "overdue"].includes(row.state)) return false;
     if (filter === "low_score" && !(row.score !== null && row.score <= 2)) return false;
     const needle = query.trim().toLowerCase();
     return !needle || [row.jobNo, row.customer, row.owner, row.afterSalesCase, row.ncrNo].some((value) => value?.toLowerCase().includes(needle));
-  }), [filter, query]);
+  }), [filter, query, queueRows]);
 
   return <div className="min-h-screen bg-slate-50 px-4 py-5 sm:px-6 lg:px-8">
     <div className="mx-auto max-w-7xl space-y-5">
@@ -100,7 +158,7 @@ export default function CsatAutomationPage() {
         <div className="flex flex-wrap gap-2"><a href="/after-sales" className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700">บริการหลังการขาย</a><a href="/ncr" className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700">NCR</a><button disabled className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white opacity-40">บันทึก CSAT</button></div>
       </header>
 
-      <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-800">Local preview — ใช้ข้อมูลจำลองและปิดการบันทึกทั้งหมด จึงไม่กระทบงานจริง</div>
+      {localPreview ? <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-800">Local preview — ใช้ข้อมูลจำลองและปิดการบันทึกทั้งหมด จึงไม่กระทบงานจริง</div> : <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">Production — แสดงคิวจริงจากลูกค้าที่เซ็นรับงานและครบกำหนดติดตามภายใน 3 วัน</div>}
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         {[
@@ -116,16 +174,16 @@ export default function CsatAutomationPage() {
         <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-4 lg:flex-row lg:items-center lg:justify-between"><div className="flex flex-wrap gap-2">
           <button onClick={() => setFilter("action")} className={`rounded-lg px-3 py-2 text-xs font-black ${filter === "action" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}>ต้องทำวันนี้ {metrics.dueToday + metrics.overdue}</button>
           <button onClick={() => setFilter("low_score")} className={`rounded-lg px-3 py-2 text-xs font-black ${filter === "low_score" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}>คะแนนต่ำ {metrics.lowScore}</button>
-          <button onClick={() => setFilter("all")} className={`rounded-lg px-3 py-2 text-xs font-black ${filter === "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}>ทั้งหมด {DEMO_ROWS.length}</button>
+          <button onClick={() => setFilter("all")} className={`rounded-lg px-3 py-2 text-xs font-black ${filter === "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}>ทั้งหมด {queueRows.length}</button>
         </div><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาใบงาน / ลูกค้า / เคส" className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 lg:w-80" /></div>
 
-        <div className="divide-y divide-slate-100">{rows.map((row) => <button key={row.id} onClick={() => setSelected(row)} className="grid w-full gap-3 px-4 py-4 text-left hover:bg-slate-50 lg:grid-cols-[1.2fr_.9fr_.65fr_.65fr_auto] lg:items-center">
+        <div className="divide-y divide-slate-100">{loading ? <div className="p-12 text-center text-sm text-slate-400">กำลังโหลดคิว CSAT…</div> : rows.map((row) => <button key={row.id} onClick={() => setSelected(row)} className="grid w-full gap-3 px-4 py-4 text-left hover:bg-slate-50 lg:grid-cols-[1.2fr_.9fr_.65fr_.65fr_auto] lg:items-center">
           <div><p className="font-black text-slate-900">{row.customer}</p><p className="mt-1 text-xs text-slate-500">{row.jobNo} · เซ็น {fmt(row.signedAt)}</p></div>
           <div><p className="text-xs font-bold text-slate-500">ผู้รับผิดชอบ</p><p className={`mt-1 text-sm font-bold ${row.owner === "ยังไม่รับงาน" ? "text-red-700" : "text-slate-800"}`}>{row.owner}</p></div>
           <div><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black ${STATE_LABEL[row.state].cls}`}>{STATE_LABEL[row.state].label}</span>{row.score !== null && <div className="mt-1 text-xs"><Stars score={row.score} /></div>}</div>
           <div><p className={`text-sm font-black ${row.state === "overdue" ? "text-red-700" : "text-slate-800"}`}>{remaining(row)}</p><p className="mt-1 text-xs text-slate-400">Due {fmt(row.dueAt)}</p></div>
           <div className="flex items-center justify-between gap-4 lg:justify-end"><span className="text-xs font-bold text-blue-600">{row.afterSalesCase || row.ncrNo || "ดูรายละเอียด"}</span><span className="text-xl text-slate-300">›</span></div>
-        </button>)}{rows.length === 0 && <div className="p-12 text-center text-sm text-slate-400">ไม่พบรายการตามตัวกรอง</div>}</div>
+        </button>)}{!loading && rows.length === 0 && <div className="p-12 text-center text-sm text-slate-400">ไม่พบรายการตามตัวกรอง</div>}</div>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -155,7 +213,7 @@ export default function CsatAutomationPage() {
         ].map(([title, detail, done]) => <div key={String(title)} className="flex gap-3"><span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-black ${done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{done ? "✓" : "·"}</span><div><p className="text-xs font-black text-slate-800">{title}</p><p className="mt-0.5 text-xs text-slate-500">{detail}</p></div></div>)}</div></section>
           {selected.afterSalesCase && <a href="/after-sales" className="block rounded-xl bg-blue-600 px-4 py-3 text-center text-sm font-black text-white">เปิดเคส {selected.afterSalesCase}</a>}
           {selected.ncrNo && <a href="/ncr" className="block rounded-xl bg-red-600 px-4 py-3 text-center text-sm font-black text-white">เปิด {selected.ncrNo}</a>}
-          {!selected.afterSalesCase && <button disabled className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white opacity-35">Local preview — ปิดการบันทึก</button>}
+          {!selected.afterSalesCase && <button disabled className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white opacity-35">{localPreview ? "Local preview — ปิดการบันทึก" : "บันทึกผ่านหน้าคิว CS"}</button>}
         </aside>
       </div>
     </div></div>}
