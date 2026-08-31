@@ -34,6 +34,12 @@ interface Question {
   order_index: number;
 }
 
+interface SheetQuestion {
+  id: string;
+  order: number;
+  label: string;
+}
+
 interface JobRow extends Job {
   evaluation: Evaluation | null;
   work_order_id: string | null;
@@ -65,8 +71,8 @@ function StarScore({ score }: { score: number | null }) {
   );
 }
 
-function EvalModal({ row, questions, onClose, onSaved }: {
-  row: JobRow; questions: Question[]; onClose: () => void; onSaved: () => void;
+function EvalModal({ row, questions, readOnly = false, onClose, onSaved }: {
+  row: JobRow; questions: Question[]; readOnly?: boolean; onClose: () => void; onSaved: () => void;
 }) {
   const supabase = createClient();
   const ev = row.evaluation;
@@ -80,8 +86,15 @@ function EvalModal({ row, questions, onClose, onSaved }: {
 
   async function save() {
     if (!score) { toast.error("กรุณาให้คะแนนความพึงพอใจ"); return; }
+    const missingQuestion = questions.find((question) => !answers[question.id]);
+    if (missingQuestion) { toast.error("กรุณาตอบแบบประเมินให้ครบทั้ง 5 ข้อ"); return; }
     if (!csName.trim()) { toast.error("กรุณาระบุชื่อ CS ที่โทร"); return; }
     if (!callDate) { toast.error("กรุณาระบุวันที่โทร"); return; }
+    if (readOnly) {
+      toast.success("ทดสอบแบบประเมินครบแล้ว — โหมด Local ไม่บันทึกข้อมูลจริง");
+      onClose();
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -141,13 +154,19 @@ function EvalModal({ row, questions, onClose, onSaved }: {
           </div>
           {questions.length > 0 && (
             <div className="space-y-3">
-              <p className="text-sm font-medium text-gray-700">คำถามประเมิน</p>
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+                <p className="text-sm font-semibold text-blue-900">ชุดคำถามโทรติดตามจาก Google Form</p>
+                <p className="mt-1 text-xs leading-relaxed text-blue-700">ให้ CS อ่านคำถามตามลำดับและเลือกคะแนน 1–5 จากคำตอบลูกค้า เพื่อให้ข้อมูลหน้ารายงานตรงกับแบบฟอร์มเดิม</p>
+              </div>
               {questions.map((q) => (
-                <div key={q.id}>
-                  <label className="text-xs text-gray-600">{q.question_text}</label>
-                  <input type="text" value={answers[q.id] ?? ""}
-                    onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
-                    className="mt-1 w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                <div key={q.id} className="rounded-xl border border-gray-200 p-3">
+                  <label className="text-sm font-medium leading-relaxed text-gray-700">{q.question_text}</label>
+                  <select value={answers[q.id] ?? ""} onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
+                    className="mt-2 w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                    <option value="">เลือกคะแนนจากคำตอบลูกค้า</option>
+                    <option value="5">5 · ดีมาก</option><option value="4">4 · ดี</option><option value="3">3 · ปานกลาง</option>
+                    <option value="2">2 · พอใช้</option><option value="1">1 · ควรปรับปรุง</option>
+                  </select>
                 </div>
               ))}
             </div>
@@ -167,7 +186,7 @@ function EvalModal({ row, questions, onClose, onSaved }: {
           <button onClick={onClose} className="flex-1 border rounded-xl py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50">ยกเลิก</button>
           <button onClick={save} disabled={saving}
             className="flex-1 bg-blue-600 text-white rounded-xl py-2.5 text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
-            {saving ? "กำลังบันทึก..." : "💾 บันทึก"}
+            {saving ? "กำลังบันทึก..." : readOnly ? "✓ ทดลองจบแบบประเมิน" : "💾 บันทึก"}
           </button>
         </div>
       </div>
@@ -184,6 +203,33 @@ const FILTER_TABS = [
 ] as const;
 type FilterKey = typeof FILTER_TABS[number]["key"];
 
+function localDemoRows(): JobRow[] {
+  const at = (daysAgo: number) => new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+  return [
+    {
+      job_no: "DEMO-CS-001", customer_name: "ลูกค้าตัวอย่าง A", product_name: "พื้น SPC พร้อมติดตั้ง",
+      external_id: "DEMO-001", product_skus: ["SPC-DEMO"], closed_at: at(4), appt_date: at(4),
+      customer_phone: "08x-xxx-1201", stage: 6, evaluation: null, work_order_id: null, work_order_status: "waiting_cs",
+    },
+    {
+      job_no: "DEMO-CS-002", customer_name: "ลูกค้าตัวอย่าง B", product_name: "พื้นกระเบื้องยาง",
+      external_id: "DEMO-002", product_skus: ["LVT-DEMO"], closed_at: at(2), appt_date: at(2),
+      customer_phone: "09x-xxx-3342", stage: 6, evaluation: null, work_order_id: null, work_order_status: "waiting_cs",
+    },
+    {
+      job_no: "DEMO-CS-003", customer_name: "ลูกค้าตัวอย่าง C", product_name: "งานติดตั้งพื้นสำนักงาน",
+      external_id: "DEMO-003", product_skus: ["OFFICE-DEMO"], closed_at: at(6), appt_date: at(6),
+      customer_phone: "06x-xxx-9050", stage: 6,
+      evaluation: {
+        id: "demo-evaluation", job_no: "DEMO-CS-003", score: 3, cs_name: "CS ตัวอย่าง", call_date: bangkokToday(),
+        issues_text: "ลูกค้าขอให้ติดตามรอยต่อบริเวณประตู", needs_followup: true,
+        answers: { service: "4", installation_quality: "3", tidiness: "4", punctuality: "3", manner_guidance: "4" },
+      },
+      work_order_id: null, work_order_status: "closed",
+    },
+  ];
+}
+
 function CsTrackingInner() {
   const supabase = createClient();
   const [rows, setRows]           = useState<JobRow[]>([]);
@@ -192,11 +238,24 @@ function CsTrackingInner() {
   const [filter, setFilter]       = useState<FilterKey>("pending");
   const [search, setSearch]       = useState("");
   const [selected, setSelected]   = useState<JobRow | null>(null);
+  const [localPreview, setLocalPreview] = useState(false);
 
   async function load() {
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    if (isLocal) {
+      setLocalPreview(true);
+      const sheetResult = await fetch("/api/satisfaction-survey", { cache: "no-store" })
+        .then((response) => response.json())
+        .catch(() => ({ questions: [] }));
+      const sheetQuestions = Array.isArray(sheetResult?.questions) ? sheetResult.questions as SheetQuestion[] : [];
+      setQuestions(sheetQuestions.map((question) => ({ id: question.id, question_text: question.label, order_index: question.order })));
+      setRows(localDemoRows());
+      setLoading(false);
+      return;
+    }
     const { data: orderRows, error: orderError } = await supabase.from("floor_work_orders").select("id,job_no,status,waiting_cs_at,closed_at").in("status", ["waiting_cs", "closed"]);
     const workOrders = (orderRows ?? []) as { id: string; job_no: string; status: string; waiting_cs_at: string | null; closed_at: string | null }[];
-    const [stageJobsResult, flowJobsResult, evalResult, questionResult] = await Promise.all([
+    const [stageJobsResult, flowJobsResult, evalResult, questionResult, sheetResult] = await Promise.all([
       supabase
         .from("install_jobs")
         .select("job_no, customer_name, product_name, external_id, product_skus, closed_at, appt_date, customer_phone, stage")
@@ -205,6 +264,7 @@ function CsTrackingInner() {
       workOrders.length ? supabase.from("install_jobs").select("job_no, customer_name, product_name, external_id, product_skus, closed_at, appt_date, customer_phone, stage").in("job_no", workOrders.map((row) => row.job_no)) : Promise.resolve({ data: [], error: null }),
       supabase.from("job_evaluations").select("*, score:satisfaction_score"),
       supabase.from("evaluation_questions").select("id, question_text, order_index").eq("is_active", true).order("order_index"),
+      fetch("/api/satisfaction-survey", { cache: "no-store" }).then((response) => response.json()).catch(() => ({ questions: [] })),
     ]);
     const jobErr = stageJobsResult.error ?? flowJobsResult.error ?? orderError; if (jobErr) toast.error(jobErr.message);
     const jobs = Array.from(new Map([...(stageJobsResult.data ?? []), ...(flowJobsResult.data ?? [])].map((row) => [row.job_no, row])).values()) as Job[];
@@ -215,7 +275,10 @@ function CsTrackingInner() {
       const orderMap = new Map(workOrders.map((row) => [row.job_no, row]));
       setRows(jobs.map((j: Job) => { const order = orderMap.get(j.job_no); return { ...j, closed_at: j.closed_at ?? order?.waiting_cs_at ?? null, evaluation: evalMap.get(j.job_no) ?? null, work_order_id: order?.id ?? null, work_order_status: order?.status ?? null }; }));
     } else setRows([]);
-    if (qs) setQuestions(qs);
+    const sheetQuestions = Array.isArray(sheetResult?.questions) ? sheetResult.questions as SheetQuestion[] : [];
+    if (sheetQuestions.length) {
+      setQuestions(sheetQuestions.map((question) => ({ id: question.id, question_text: question.label, order_index: question.order })));
+    } else if (qs) setQuestions(qs);
     setLoading(false);
   }
 
@@ -273,6 +336,11 @@ function CsTrackingInner() {
             placeholder="ค้นหา เลขงาน / ลูกค้า / สินค้า..."
             className="border rounded-xl px-4 py-2 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-blue-400" />
         </div>
+        {localPreview && (
+          <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+            <span className="font-semibold">Local preview:</span> ข้อมูลใบงานและเบอร์โทรเป็นข้อมูลตัวอย่าง การทดลองกรอกแบบประเมินจะไม่บันทึกลง Supabase
+          </div>
+        )}
         <div className="grid grid-cols-5 gap-3 mt-4">
           {[
             { label: "งานเสร็จสิ้นทั้งหมด", value: total,    color: "text-gray-700",   bg: "bg-gray-100" },
@@ -372,7 +440,7 @@ function CsTrackingInner() {
       )}
 
       {selected && (
-        <EvalModal row={selected} questions={questions} onClose={() => setSelected(null)} onSaved={() => { void (async () => { if (selected.work_order_id && selected.work_order_status === "waiting_cs") { const { error } = await supabase.rpc("close_floor_work_order_cs_v3", { p_work_order_id: selected.work_order_id }); if (error) toast.error(`บันทึกผลแล้ว แต่ปิดงานไม่สำเร็จ: ${error.message}`); else toast.success("ประเมินและปิดงานเรียบร้อย"); } await load(); })(); }} />
+        <EvalModal row={selected} questions={questions} readOnly={localPreview} onClose={() => setSelected(null)} onSaved={() => { void (async () => { if (selected.work_order_id && selected.work_order_status === "waiting_cs") { const { error } = await supabase.rpc("close_floor_work_order_cs_v3", { p_work_order_id: selected.work_order_id }); if (error) toast.error(`บันทึกผลแล้ว แต่ปิดงานไม่สำเร็จ: ${error.message}`); else toast.success("ประเมินและปิดงานเรียบร้อย"); } await load(); })(); }} />
       )}
     </div>
   );
