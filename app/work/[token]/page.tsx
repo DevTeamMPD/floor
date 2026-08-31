@@ -6,7 +6,9 @@ import { floorActionError, floorErrorMessage } from "@/lib/floor-error-message";
 import {
   checklistFromRpcPayload,
   checklistProvenanceLabel,
+  checklistWithoutAssignment,
   fallbackChecklist,
+  loadingChecklist,
   type JobChecklistSource,
 } from "@/lib/job-checklist";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
@@ -361,7 +363,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     setWorkProgress(null);
     setCentralWorkOrder(null);
     setRemnantReport(null);
-    setChecklist(fallbackChecklist("กำลังโหลดเกณฑ์ตรวจรับ"));
+    setChecklist(loadingChecklist());
     clearStatusFiles();
     setStatusNote("");
     setPickedSheetCount("");
@@ -387,7 +389,12 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       });
     }
     const detailTasks: PromiseLike<unknown>[] = [];
-    if (a.assignmentId) {
+    if (!a.assignmentId) {
+      // งานคิวทีมยังไม่มีใบมอบหมายรายบุคคล จึงเรียก RPC เกณฑ์ตรวจรับไม่ได้ (ด่านตรวจสิทธิ์ผูกกับใบมอบหมาย)
+      // และเราจะไม่ลดด่านลงเพื่อให้เรียกได้ — ต้อง "จบ" ที่ชุดสำรองพร้อมเหตุผลจริง
+      // ไม่ใช่ปล่อยให้จอค้างคำว่า "กำลังโหลด" ตลอดกาลจนดูเหมือนแอปแฮงก์
+      setChecklist(checklistWithoutAssignment());
+    } else {
       detailTasks.push(
         supabase.rpc("get_technician_assignment_detail", { p_token: token, p_pin: pin.trim(), p_assignment_id: a.assignmentId })
           .then(({ data }) => {
@@ -775,14 +782,19 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
               </div>
 
               <div className="mt-4 border-t border-slate-100 pt-4">
-                <div className={`rounded-xl border px-3 py-2 text-xs leading-relaxed ${checklist.origin === "template" ? "border-blue-200 bg-blue-50 text-blue-900" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+                <div className={`rounded-xl border px-3 py-2 text-xs leading-relaxed ${checklist.origin === "template" ? "border-blue-200 bg-blue-50 text-blue-900" : checklist.origin === "loading" ? "border-slate-200 bg-slate-50 text-slate-600" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
                   <div className="font-semibold">{checklistProvenanceLabel(checklist)}</div>
                   <p className="mt-0.5">
-                    {checklist.origin === "template"
+                    {checklist.origin === "loading"
+                      ? "ยังไม่แสดงรายการจนกว่าจะรู้ว่าเกณฑ์รุ่นไหนใช้อยู่ — กันไม่ให้อ่านเกณฑ์รุ่นเก่าโดยไม่รู้ตัว"
+                      : checklist.origin === "template"
                       ? `${checklist.items.length} ข้อ ตามเกณฑ์รุ่นที่หัวหน้าช่างเปิดใช้งานอยู่`
                       : `กำลังแสดงชุดสำรองในโปรแกรม (${checklist.items.length} ข้อ) ยังไม่ใช่รุ่นล่าสุดที่หัวหน้าช่างแก้ · สาเหตุ: ${checklist.fallbackReason ?? "ไม่ทราบสาเหตุ"}`}
                   </p>
                 </div>
+                {checklist.origin === "loading" ? <div className="mt-3 space-y-2" aria-busy="true">
+                  {[0, 1, 2].map((row) => <div key={row} className="h-14 animate-pulse rounded-xl bg-slate-100" />)}
+                </div> : null}
                 <ul className="mt-3 space-y-2">
                   {checklist.items.map((item, index) => <li key={item.code} className="rounded-xl border border-slate-200 px-3 py-2">
                     <div className="flex items-start gap-2">

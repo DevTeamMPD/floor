@@ -20,7 +20,7 @@ export interface JobChecklistItem {
   measuringDeviceKind: string | null;
 }
 
-export type ChecklistOrigin = "template" | "fallback";
+export type ChecklistOrigin = "template" | "fallback" | "loading";
 
 export interface JobChecklistSource {
   items: JobChecklistItem[];
@@ -68,25 +68,97 @@ export function fallbackChecklist(reason: string): JobChecklistSource {
   };
 }
 
+/**
+ * สถานะ "กำลังโหลด" ต้องแยกออกจาก "กำลังใช้ชุดสำรอง" ให้ชัด
+ *
+ * ทำไม: ระหว่างที่ยังอ่านแม่แบบไม่เสร็จ ถ้าเอาชุดสำรอง 15 ข้อขึ้นจอไปก่อน คนอ่านจะเข้าใจว่านั่นคือ
+ * เกณฑ์ที่ใช้จริง หัวหน้าช่างที่เพิ่งกดเปิดใช้งานแม่แบบรุ่นใหม่จะอ่านรายการรุ่นเก่าโดยไม่มีอะไรเตือนเลย
+ * จึงคืนรายการว่างพร้อม origin = "loading" ให้หน้าจอแสดงว่า "กำลังโหลด" แทนการแสดงรายการปลอม ๆ
+ */
+export function loadingChecklist(): JobChecklistSource {
+  return {
+    items: [],
+    origin: "loading",
+    version: null,
+    templateId: null,
+    jobTypeName: null,
+    fallbackReason: null,
+  };
+}
+
+/**
+ * เหตุผลของงานที่ยังเป็น "คิวทีม" คือยังไม่มีใบมอบหมายรายบุคคล (assignmentId = null)
+ *
+ * RPC get_technician_job_checklist ใช้ "ใบมอบหมายของช่างคนนี้" เป็นด่านตรวจสิทธิ์ร่วมกับ token+PIN
+ * งานที่ยังไม่ถูกจ่ายรายบุคคลจึงเรียก RPC ไม่ได้ และเราจะไม่ลดด่านลงเพื่อให้เรียกได้
+ * (ถ้าตัดใบมอบหมายออก ด่านจะเหลือแค่ token+PIN ซึ่งอ่อนกว่าเดิม)
+ * สิ่งที่ถูกต้องคือ "จบ" ที่ชุดสำรองพร้อมบอกเหตุผลจริง ไม่ใช่ค้างคำว่ากำลังโหลดค้างจอถาวร
+ */
+export const NO_ASSIGNMENT_FALLBACK_REASON =
+  "งานนี้ยังเป็นคิวทีม ยังไม่ได้จ่ายให้ช่างรายบุคคล ระบบจึงยังดึงเกณฑ์รุ่นล่าสุดจากแม่แบบให้ไม่ได้";
+
+/** ชุดเกณฑ์ที่ "จบแล้ว" สำหรับงานคิวทีมที่ยังไม่มีใบมอบหมายรายบุคคล */
+export function checklistWithoutAssignment(): JobChecklistSource {
+  return fallbackChecklist(NO_ASSIGNMENT_FALLBACK_REASON);
+}
+
 /** ข้อความบอกที่มาของเกณฑ์ที่กำลังแสดง เพื่อให้หัวหน้าช่างที่เพิ่งแก้แม่แบบรู้ว่าการแก้มีผลแล้วหรือยัง */
 export function checklistProvenanceLabel(source: JobChecklistSource): string {
-  if (source.origin === "template" && source.version != null) {
-    return `เกณฑ์ตรวจรับ v${source.version}${source.jobTypeName ? ` · ${source.jobTypeName}` : ""}`;
+  if (source.origin === "loading") return "กำลังโหลดเกณฑ์ตรวจรับจากแม่แบบ…";
+  if (source.origin === "template") {
+    const suffix = source.jobTypeName ? ` · ${source.jobTypeName}` : "";
+    // เกณฑ์ที่มาจากแม่แบบจริงแต่ payload ไม่ได้บอกเลขเวอร์ชันมา ก็ยังห้ามป้ายว่าเป็น "ชุดสำรองในโค้ด"
+    // ป้ายผิดที่มาคือการโกหกคนอ่าน และทำให้หัวหน้าช่างคิดว่าการแก้แม่แบบยังไม่มีผลทั้งที่มีผลแล้ว
+    return source.version != null
+      ? `เกณฑ์ตรวจรับ v${source.version}${suffix}`
+      : `เกณฑ์ตรวจรับจากแม่แบบที่เปิดใช้งาน (ไม่ทราบเลขเวอร์ชัน)${suffix}`;
   }
   return "เกณฑ์ตรวจรับ (ชุดสำรองในโค้ด)";
 }
 
 /**
- * เลขข้อเดิม (1–15) ที่ผลตรวจรับรุ่นเก่าใช้เป็นคีย์ ↔ รหัสเกณฑ์ (QC01–QC15)
- * seed ทำไว้ตรงกันข้อต่อข้อ การแปลงจึงไม่ทำให้ผลเก่าเพี้ยนหรือหาย
+ * เหตุผลภาษาไทยแยกตามค่า reason ที่ RPC คืนมา
+ *
+ * ทำไมต้องแยก: job_type_not_found คือ "ยังไม่ได้ตั้งประเภทงาน" ซึ่งต้องให้ผู้ดูแลระบบแก้
+ * ส่วน no_active_template คือ "ตั้งประเภทงานแล้ว แต่ยังไม่เปิดใช้งานแม่แบบ" ซึ่งหัวหน้าช่างแก้เองได้
+ * ถ้ายุบเป็นข้อความเดียว ช่างจะถูกชี้ไปผิดที่ และคนที่แก้ได้จริงจะไม่รู้ว่าต้องทำอะไร
  */
-export function legacyQcIdForCode(code: string): number | null {
-  const matched = /^QC(\d+)$/.exec(code.trim());
-  if (!matched) return null;
-  const value = Number(matched[1]);
-  return Number.isFinite(value) && value > 0 ? value : null;
+const RPC_FALLBACK_REASONS: Record<string, string> = {
+  job_type_not_found:
+    "ยังไม่ได้ตั้งประเภทงานปูพื้นในระบบ (หรือถูกปิดใช้งานอยู่) จึงยังไม่มีแม่แบบให้ดึง — แจ้งผู้ดูแลระบบให้เปิดประเภทงานก่อน",
+  no_active_template:
+    "ตั้งประเภทงานไว้แล้ว แต่ยังไม่มีแม่แบบเกณฑ์ตรวจรับรุ่นใดเปิดใช้งาน — แจ้งหัวหน้าช่างให้กดเปิดใช้งานแม่แบบ",
+  template_has_no_active_items:
+    "แม่แบบที่เปิดใช้งานอยู่ยังไม่มีเกณฑ์ที่เปิดใช้งานสักข้อ — แจ้งหัวหน้าช่างให้เพิ่มเกณฑ์ในแม่แบบ",
+};
+
+export function checklistRpcReasonMessage(reason: unknown): string | null {
+  return typeof reason === "string" ? RPC_FALLBACK_REASONS[reason] ?? null : null;
 }
 
+/** สถานะการโหลดผลตรวจรับเดิมของงาน (install_jobs.qc_data) */
+export type QcLoadState = "loading" | "ready" | "error";
+
+/**
+ * เหตุผลที่ "ยังบันทึกผลตรวจรับไม่ได้" — คืน null แปลว่าบันทึกได้
+ *
+ * ทำไมต้องมี: ปุ่มบันทึกเขียนทั้งก้อน qc_data จาก state ในหน่วยความจำ ถ้าโหลดของเดิมไม่สำเร็จ
+ * (คิวรีพัง หรือ JSON.parse ล้ม) state จะว่าง การกดบันทึกจะลบผลตรวจรับเดิมของงานนั้นทิ้งทั้งชุด
+ * จึงต้องบล็อกไว้ก่อน แล้วบอกเหตุผลเป็นภาษาไทย ดีกว่าปล่อยให้ข้อมูลหายเงียบ ๆ
+ */
+export function qcSaveBlockReason(state: QcLoadState): string | null {
+  if (state === "loading") return "ยังโหลดผลตรวจรับเดิมของงานนี้ไม่เสร็จ — รอสักครู่แล้วกดบันทึกอีกครั้ง";
+  if (state === "error") {
+    return "อ่านผลตรวจรับเดิมของงานนี้ไม่สำเร็จ จึงยังบันทึกทับไม่ได้ เพราะจะลบผลที่เคยบันทึกไว้ทิ้ง — ปิดหน้าต่างนี้แล้วเปิดใหม่ ถ้ายังไม่หายให้แจ้งผู้ดูแลระบบ";
+  }
+  return null;
+}
+
+/**
+ * เลขข้อเดิม (1–15) ที่ผลตรวจรับรุ่นเก่าใช้เป็นคีย์ → รหัสเกณฑ์ (QC01–QC15)
+ * seed ทำไว้ตรงกันข้อต่อข้อ การแปลงจึงไม่ทำให้ผลเก่าเพี้ยนหรือหาย
+ * (ทิศทางกลับ รหัส → เลขข้อ ไม่มีที่ใช้จริงในโปรแกรม จึงไม่เก็บไว้เป็น API ค้างไว้เฉย ๆ)
+ */
 export function codeForLegacyQcId(id: number): string {
   return `QC${String(id).padStart(2, "0")}`;
 }
@@ -157,6 +229,7 @@ export function checklistItemsFromRows(rows: unknown): JobChecklistItem[] {
 }
 
 interface ChecklistRpcPayload {
+  reason?: unknown;
   templateId?: unknown;
   version?: unknown;
   jobTypeName?: unknown;
@@ -171,7 +244,9 @@ export function checklistFromRpcPayload(payload: unknown, fallbackReason: string
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return fallbackChecklist(fallbackReason);
   const value = payload as ChecklistRpcPayload;
   const items = checklistItemsFromRows(value.items);
-  if (items.length === 0) return fallbackChecklist(fallbackReason);
+  // ถ้า RPC บอกสาเหตุมา ให้ใช้สาเหตุนั้น (แยก "ยังไม่ตั้งประเภทงาน" ออกจาก "ยังไม่เปิดใช้งานแม่แบบ")
+  // ไม่งั้นค่อยใช้ข้อความสำรองที่หน้าจอส่งมา
+  if (items.length === 0) return fallbackChecklist(checklistRpcReasonMessage(value.reason) ?? fallbackReason);
   return {
     items,
     origin: "template",

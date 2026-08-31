@@ -3,13 +3,17 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   FALLBACK_QC_ITEMS,
+  NO_ASSIGNMENT_FALLBACK_REASON,
   checklistFromRpcPayload,
   checklistItemsFromRows,
   checklistProvenanceLabel,
+  checklistRpcReasonMessage,
+  checklistWithoutAssignment,
   codeForLegacyQcId,
   fallbackChecklist,
-  legacyQcIdForCode,
+  loadingChecklist,
   normalizeQcResults,
+  qcSaveBlockReason,
 } from "./job-checklist";
 
 describe("ชุดสำรองต้องตรงกับที่ seed ไว้ในฐานข้อมูล", () => {
@@ -34,23 +38,16 @@ describe("ชุดสำรองต้องตรงกับที่ seed �
   });
 });
 
-describe("legacyQcIdForCode / codeForLegacyQcId", () => {
-  it("แปลงรหัสเป็นเลขข้อเดิมได้", () => {
-    expect(legacyQcIdForCode("QC01")).toBe(1);
-    expect(legacyQcIdForCode("QC15")).toBe(15);
-    expect(legacyQcIdForCode(" QC07 ")).toBe(7);
+describe("codeForLegacyQcId", () => {
+  it("เติมศูนย์นำหน้าให้เป็นรหัสสองหลักเสมอ", () => {
+    expect(codeForLegacyQcId(1)).toBe("QC01");
+    expect(codeForLegacyQcId(15)).toBe("QC15");
   });
 
-  it("รหัสที่ไม่ใช่รูปแบบ QC<ตัวเลข> คืน null ไม่เดาเอาเอง", () => {
-    expect(legacyQcIdForCode("SAFE01")).toBeNull();
-    expect(legacyQcIdForCode("QC")).toBeNull();
-    expect(legacyQcIdForCode("QC00")).toBeNull();
-  });
-
-  it("ไป-กลับได้ครบทุกข้อของชุดสำรอง", () => {
-    for (const item of FALLBACK_QC_ITEMS) {
-      expect(codeForLegacyQcId(legacyQcIdForCode(item.code)!)).toBe(item.code);
-    }
+  it("ครอบคลุมทุกข้อของชุดสำรองแบบข้อต่อข้อ", () => {
+    FALLBACK_QC_ITEMS.forEach((item, index) => {
+      expect(codeForLegacyQcId(index + 1)).toBe(item.code);
+    });
   });
 });
 
@@ -115,11 +112,17 @@ describe("checklistFromRpcPayload — ต้องตกไปใช้ชุด
     expect(source.fallbackReason).toBeNull();
   });
 
-  it("ไม่มีแม่แบบที่เปิดใช้งาน ใช้ชุดสำรองพร้อมบอกเหตุผล", () => {
-    const source = checklistFromRpcPayload({ found: false, reason: "no_active_template" }, "ยังไม่มีแม่แบบที่เปิดใช้งาน");
+  it("ไม่มีแม่แบบที่เปิดใช้งาน ใช้ชุดสำรองพร้อมบอกเหตุผลที่ RPC ส่งมา", () => {
+    const source = checklistFromRpcPayload({ found: false, reason: "no_active_template" }, "ข้อความสำรองของหน้าจอ");
     expect(source.origin).toBe("fallback");
     expect(source.items).toHaveLength(15);
-    expect(source.fallbackReason).toBe("ยังไม่มีแม่แบบที่เปิดใช้งาน");
+    expect(source.fallbackReason).toBe(checklistRpcReasonMessage("no_active_template"));
+  });
+
+  it("reason ที่ไม่รู้จักหรือไม่มี ตกกลับไปใช้ข้อความสำรองของหน้าจอ", () => {
+    expect(checklistFromRpcPayload({ found: false, reason: "อะไรก็ไม่รู้" }, "ข้อความสำรอง").fallbackReason)
+      .toBe("ข้อความสำรอง");
+    expect(checklistFromRpcPayload({ found: false }, "ข้อความสำรอง").fallbackReason).toBe("ข้อความสำรอง");
   });
 
   it("แม่แบบมีอยู่แต่ไม่มีข้อที่เปิดใช้งานเลย ก็ยังต้องไม่ปล่อยจอว่าง", () => {
@@ -134,6 +137,95 @@ describe("checklistFromRpcPayload — ต้องตกไปใช้ชุด
   });
 });
 
+
+
+// A5: RPC แยกสองสาเหตุไว้แล้ว หน้าจอต้องไม่ยุบเป็นข้อความเดียว เพราะคนละคนต้องลงมือแก้
+describe("checklistRpcReasonMessage — สาเหตุต่างกันต้องได้ข้อความต่างกัน", () => {
+  it("job_type_not_found กับ no_active_template ต้องไม่ใช่ข้อความเดียวกัน", () => {
+    const jobType = checklistRpcReasonMessage("job_type_not_found");
+    const template = checklistRpcReasonMessage("no_active_template");
+    expect(jobType).toBeTruthy();
+    expect(template).toBeTruthy();
+    expect(jobType).not.toBe(template);
+  });
+
+  it("แม่แบบเปิดใช้งานแต่ไม่มีเกณฑ์สักข้อ มีข้อความของตัวเอง", () => {
+    const items = checklistRpcReasonMessage("template_has_no_active_items");
+    expect(items).toBeTruthy();
+    expect(items).not.toBe(checklistRpcReasonMessage("no_active_template"));
+  });
+
+  it("ค่าที่ไม่รู้จักคืน null ไม่แต่งข้อความขึ้นเอง", () => {
+    expect(checklistRpcReasonMessage("boom")).toBeNull();
+    expect(checklistRpcReasonMessage(null)).toBeNull();
+    expect(checklistRpcReasonMessage(7)).toBeNull();
+  });
+});
+
+// A3: ระหว่างโหลดต้องไม่เอาชุดสำรอง 15 ข้อขึ้นจอราวกับเป็นเกณฑ์จริง
+describe("loadingChecklist — สถานะกำลังโหลดต้องแยกจากสถานะใช้ชุดสำรอง", () => {
+  it("ไม่คืนรายการเกณฑ์ออกมาเลยระหว่างโหลด", () => {
+    const source = loadingChecklist();
+    expect(source.origin).toBe("loading");
+    expect(source.items).toEqual([]);
+    expect(source.fallbackReason).toBeNull();
+  });
+
+  it("ป้ายที่มาบอกว่ากำลังโหลด ไม่ใช่ป้ายชุดสำรอง", () => {
+    const label = checklistProvenanceLabel(loadingChecklist());
+    expect(label).toContain("กำลังโหลด");
+    expect(label).not.toContain("ชุดสำรอง");
+  });
+
+  it("สถานะกำลังโหลดต่างจากชุดสำรองอย่างชัดเจน", () => {
+    expect(loadingChecklist().origin).not.toBe(fallbackChecklist("เหตุผลใด ๆ").origin);
+    expect(fallbackChecklist("เหตุผลใด ๆ").items).toHaveLength(15);
+  });
+});
+
+// A1: งานคิวทีมที่ไม่มีใบมอบหมายรายบุคคล ต้อง "จบ" ไม่ใช่ค้างคำว่ากำลังโหลดตลอดกาล
+describe("checklistWithoutAssignment — งานคิวทีมต้องได้สถานะที่จบแล้ว", () => {
+  it("จบที่ชุดสำรองครบ 15 ข้อ ไม่ใช่จอว่าง", () => {
+    const source = checklistWithoutAssignment();
+    expect(source.origin).toBe("fallback");
+    expect(source.items).toHaveLength(15);
+  });
+
+  it("เหตุผลบอกความจริงว่าเป็นคิวทีม ห้ามใช้คำว่ากำลังโหลด", () => {
+    const source = checklistWithoutAssignment();
+    expect(source.fallbackReason).toBe(NO_ASSIGNMENT_FALLBACK_REASON);
+    expect(source.fallbackReason).not.toContain("กำลังโหลด");
+    expect(source.fallbackReason).toContain("คิวทีม");
+  });
+
+  it("สถานะนี้ไม่ใช่ 'กำลังโหลด' จึงไม่ค้างจอ", () => {
+    expect(checklistWithoutAssignment().origin).not.toBe("loading");
+  });
+});
+
+// A2: ปุ่มบันทึกเขียนทับทั้งก้อน ถ้าโหลดของเดิมไม่สำเร็จแล้วยังบันทึกได้ ผลตรวจรับเดิมจะหายทั้งชุด
+describe("qcSaveBlockReason — ห้ามบันทึกทับเมื่อยังไม่รู้ว่าของเดิมมีอะไร", () => {
+  it("โหลดสำเร็จแล้วเท่านั้นถึงบันทึกได้", () => {
+    expect(qcSaveBlockReason("ready")).toBeNull();
+  });
+
+  it("ยังโหลดไม่เสร็จ ต้องบล็อกพร้อมเหตุผลภาษาไทย", () => {
+    const reason = qcSaveBlockReason("loading");
+    expect(reason).toBeTruthy();
+    expect(reason).toContain("ยังโหลด");
+  });
+
+  it("โหลดล้มเหลว ต้องบล็อกและบอกตรง ๆ ว่าจะทำให้ผลเดิมหาย", () => {
+    const reason = qcSaveBlockReason("error");
+    expect(reason).toBeTruthy();
+    expect(reason).toContain("ทับ");
+  });
+
+  it("เหตุผลของสองสถานะที่บล็อกต้องไม่เหมือนกัน คนอ่านจะได้รู้ว่าต้องรอหรือต้องแจ้ง", () => {
+    expect(qcSaveBlockReason("loading")).not.toBe(qcSaveBlockReason("error"));
+  });
+});
+
 describe("checklistProvenanceLabel — ต้องบอกความจริงว่าเกณฑ์ที่เห็นมาจากไหน", () => {
   it("บอกเลขเวอร์ชันเมื่ออ่านแม่แบบได้", () => {
     const source = checklistFromRpcPayload({
@@ -145,5 +237,19 @@ describe("checklistProvenanceLabel — ต้องบอกความจร�
 
   it("บอกตรง ๆ ว่าเป็นชุดสำรองเมื่ออ่านแม่แบบไม่ได้ — ห้ามแสร้งว่าเป็นเวอร์ชันจากระบบ", () => {
     expect(checklistProvenanceLabel(fallbackChecklist("เน็ตหลุด"))).toBe("เกณฑ์ตรวจรับ (ชุดสำรองในโค้ด)");
+  });
+
+  // A4: มาจากแม่แบบจริงแต่ payload ไม่ได้บอกเลขเวอร์ชัน ก็ห้ามป้ายว่าเป็นชุดสำรอง — ป้ายผิดคือโกหกคนอ่าน
+  it("มาจากแม่แบบแต่ไม่รู้เลขเวอร์ชัน ต้องไม่ถูกป้ายว่าเป็นชุดสำรองในโค้ด", () => {
+    const source = checklistFromRpcPayload({
+      found: true, version: "4", jobTypeName: "ปูพื้น",
+      items: [{ code: "QC01", label: "ข้อหนึ่ง", sort_order: 0, is_active: true }],
+    }, "ไม่ควรถูกใช้");
+    expect(source.origin).toBe("template");
+    expect(source.version).toBeNull();
+    const label = checklistProvenanceLabel(source);
+    expect(label).not.toContain("ชุดสำรอง");
+    expect(label).toContain("แม่แบบที่เปิดใช้งาน");
+    expect(label).toContain("ปูพื้น");
   });
 });

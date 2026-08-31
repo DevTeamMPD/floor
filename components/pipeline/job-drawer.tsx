@@ -10,12 +10,21 @@ import {
   checklistItemsFromRows,
   checklistProvenanceLabel,
   fallbackChecklist,
+  loadingChecklist,
   normalizeQcResults,
+  qcSaveBlockReason,
   type JobChecklistSource,
+  type QcLoadState,
   type QCResult,
 } from "@/lib/job-checklist";
+import type { StaffRole } from "@/lib/staff";
 import { toast } from "sonner";
 import TechQueueView from "@/components/tech-queue/tech-queue-view";
+
+// เกณฑ์สิทธิ์เดียวกับหน้า /job-templates (ผู้แก้แม่แบบเกณฑ์ตรวจรับ) และเมนู Pipeline
+// นโยบาย install_jobs_active_staff_update เปิดให้พนักงาน active ทุกคนเขียนแถวงานได้
+// หน้าจอจึงต้องกันเองไม่ให้ฝ่ายขาย/คลัง/CS บันทึกหรือทับผลตรวจรับ ส่วนการ "อ่าน" เกณฑ์ยังเปิดให้ทุกคน
+const QC_ROLE_NOTICE = "บัญชีนี้ดูเกณฑ์ตรวจรับได้อย่างเดียว เฉพาะผู้ดูแลระบบและหัวหน้าช่างเท่านั้นที่บันทึกผลตรวจรับได้";
 
 interface Props {
   job: InstallJob;
@@ -190,8 +199,14 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const [qcResults, setQcResults] = useState<Record<string, QCResult>>({});
   const [qcInspector, setQcInspector] = useState("");
   const [qcNotes, setQcNotes] = useState("");
-  // เกณฑ์ตรวจรับที่กำลังแสดง: ตั้งต้นด้วยชุดสำรอง แล้วแทนที่ด้วยแม่แบบที่เปิดใช้งานอยู่เมื่อโหลดสำเร็จ
-  const [checklist, setChecklist] = useState<JobChecklistSource>(() => fallbackChecklist("กำลังโหลดแม่แบบเกณฑ์ตรวจรับ"));
+  // สถานะการโหลดผลตรวจรับเดิม — ปุ่มบันทึกเขียนทับทั้งก้อน จึงห้ามบันทึกถ้ายังไม่รู้ว่าของเดิมมีอะไร
+  const [qcLoadState, setQcLoadState] = useState<QcLoadState>(() => (job.id ? "loading" : "ready"));
+  // เกณฑ์ตรวจรับที่กำลังแสดง: ตั้งต้นเป็น "กำลังโหลด" (ไม่ใช่ชุดสำรอง) เพื่อไม่ให้เอารายการเก่าขึ้นจอเป็นของจริง
+  const [checklist, setChecklist] = useState<JobChecklistSource>(() => loadingChecklist());
+  // สิทธิ์บันทึกผลตรวจรับ — ใช้เกณฑ์เดียวกับหน้า "แม่แบบประเภทงาน" และเมนู Pipeline คือ ผู้ดูแลระบบ/หัวหน้าช่าง
+  const [staffRole, setStaffRole] = useState<StaffRole | null>(null);
+  const [roleChecked, setRoleChecked] = useState(false);
+  const canEditQc = roleChecked && (staffRole === "admin" || staffRole === "head_technician");
 
   // S3 reschedule state
   const [newApptDate, setNewApptDate] = useState(job.apptDate ?? "");
@@ -209,9 +224,16 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   // Load saved data
   useEffect(() => {
     if (job.id) {
+      setQcLoadState("loading");
       supabase.from("install_jobs")
         .select("survey_data, qc_data, material_usage, pick_plan, waiting_on, waiting_since, needs_survey, has_defect, needs_redesign, is_claim")
-        .eq("job_no", job.jobNo).single().then(({ data }) => {
+        .eq("job_no", job.jobNo).single().then(({ data, error }) => {
+        if (error) {
+          // อ่านแถวงานไม่สำเร็จ = ไม่รู้ว่าผลตรวจรับเดิมมีอะไร ห้ามให้กดบันทึกทับ
+          setQcLoadState("error");
+          toast.error(floorActionError("โหลดข้อมูลที่บันทึกไว้ของงานนี้", error));
+          return;
+        }
         if (data?.survey_data) {
           try { setSurvey(JSON.parse(data.survey_data)); } catch {}
         }
@@ -229,11 +251,18 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
         }
         if (data?.qc_data) {
           try {
-            const qc: QCData = JSON.parse(data.qc_data);
-            setQcResults(normalizeQcResults(qc.results));
-            setQcInspector(qc.inspector ?? "");
-            setQcNotes(qc.notes ?? "");
-          } catch {}
+            const qc: QCData = typeof data.qc_data === "string" ? JSON.parse(data.qc_data) : (data.qc_data as QCData);
+            setQcResults(normalizeQcResults(qc?.results));
+            setQcInspector(qc?.inspector ?? "");
+            setQcNotes(qc?.notes ?? "");
+            setQcLoadState("ready");
+          } catch (e: unknown) {
+            // ห้ามกลืนเงียบ: ถ้าอ่านของเดิมไม่ออกแล้วยังให้กดบันทึกได้ ผลตรวจรับเดิมจะถูกทับหายทั้งชุด
+            setQcLoadState("error");
+            toast.error(floorActionError("อ่านผลตรวจรับเดิมของงานนี้", e));
+          }
+        } else {
+          setQcLoadState("ready");
         }
         if (data) {
           setWaitingOn(data.waiting_on ?? "ไม่ได้ค้าง");
@@ -251,6 +280,21 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   useEffect(() => {
     supabase.from("tech_teams").select("id, name").eq("is_active", true).order("name")
       .then(({ data }) => setTechs((data as { id: string; name: string }[]) ?? []));
+  }, []);
+
+  // สิทธิ์ของผู้ใช้ที่ล็อกอินอยู่ — ใช้วิธีเดียวกับหน้า /job-templates (ดู is_active ด้วย ไม่ใช่แค่ role)
+  // ถ้าดูแค่ role พนักงานที่ถูกปิดใช้งานจะเห็นปุ่มบันทึกครบ กดแล้วเพิ่งโดนปฏิเสธ ซึ่งทำให้เข้าใจผิด
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { if (!cancelled) { setStaffRole(null); setRoleChecked(true); } return; }
+      const { data } = await supabase.from("floor_staff_profiles").select("role,is_active").eq("id", user.id).maybeSingle();
+      if (cancelled) return;
+      setStaffRole(data?.is_active ? ((data.role as StaffRole | undefined) ?? null) : null);
+      setRoleChecked(true);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
 
@@ -381,6 +425,10 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   }
 
   async function saveQC() {
+    // กันข้อมูลหาย: ถ้ายังโหลดผลเดิมไม่สำเร็จ การเขียนทั้งก้อนจากหน่วยความจำจะลบผลตรวจรับเดิมทิ้ง
+    const blocked = qcSaveBlockReason(qcLoadState);
+    if (blocked) { toast.error(blocked); return; }
+    if (!canEditQc) { toast.error(QC_ROLE_NOTICE); return; }
     setSaving(true);
     try {
       const qcPayload: QCData = {
@@ -1165,20 +1213,37 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
           {/* ตรวจรับ (QC) — เกณฑ์มาจากแม่แบบที่หัวหน้าช่างเปิดใช้งานอยู่ ไม่ใช่รายการที่ฝังในโค้ด */}
           {tab === "qc" && (
             <div className="space-y-4">
-              <div className={`rounded-lg border p-2.5 text-xs leading-relaxed ${checklist.origin === "template" ? "border-blue-200 bg-blue-50 text-blue-900" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+              <div className={`rounded-lg border p-2.5 text-xs leading-relaxed ${checklist.origin === "template" ? "border-blue-200 bg-blue-50 text-blue-900" : checklist.origin === "loading" ? "border-gray-200 bg-gray-50 text-gray-600" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
                 <div className="font-semibold">{checklistProvenanceLabel(checklist)}</div>
                 <p className="mt-0.5">
-                  {checklist.origin === "template"
+                  {checklist.origin === "loading"
+                    ? "ยังไม่แสดงรายการจนกว่าจะรู้ว่าแม่แบบรุ่นไหนเปิดใช้งานอยู่ — กันไม่ให้อ่านเกณฑ์รุ่นเก่าไปโดยเข้าใจว่าเป็นรุ่นล่าสุด"
+                    : checklist.origin === "template"
                     ? `แสดง ${checklist.items.length} ข้อจากแม่แบบที่เปิดใช้งานอยู่ — แก้ได้ที่หน้า “แม่แบบประเภทงาน” โดยไม่ต้องแก้โปรแกรม`
                     : `ตอนนี้ใช้ชุดสำรองที่ฝังอยู่ในโปรแกรม (${checklist.items.length} ข้อ) การแก้แม่แบบจะยังไม่มีผลกับหน้านี้ · สาเหตุ: ${checklist.fallbackReason ?? "ไม่ทราบสาเหตุ"}`}
                 </p>
               </div>
 
-              <div className="flex items-center gap-3 text-xs">
-                <span className="text-gray-500">ตอบแล้ว {qcAnswered}/{checklist.items.length} ข้อ</span>
-                <span className="text-emerald-700 font-medium">ผ่าน {qcPass}</span>
-                <span className="text-red-700 font-medium">ไม่ผ่าน {qcFail}</span>
-              </div>
+              {roleChecked && !canEditQc ? (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-800">{QC_ROLE_NOTICE}</div>
+              ) : null}
+              {qcSaveBlockReason(qcLoadState) && qcLoadState === "error" ? (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-700">{qcSaveBlockReason(qcLoadState)}</div>
+              ) : null}
+
+              {checklist.origin === "loading" ? (
+                <div className="space-y-2" aria-busy="true">
+                  {[0, 1, 2].map((row) => <div key={row} className="h-16 animate-pulse rounded-lg bg-gray-100" />)}
+                </div>
+              ) : null}
+
+              {checklist.origin === "loading" ? null : (
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="text-gray-500">ตอบแล้ว {qcAnswered}/{checklist.items.length} ข้อ</span>
+                  <span className="text-emerald-700 font-medium">ผ่าน {qcPass}</span>
+                  <span className="text-red-700 font-medium">ไม่ผ่าน {qcFail}</span>
+                </div>
+              )}
 
               <div className="space-y-2">
                 {checklist.items.map((item, index) => {
@@ -1206,8 +1271,9 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                             <button
                               key={key}
                               type="button"
+                              disabled={!canEditQc || qcLoadState !== "ready"}
                               onClick={() => setQcResults((current) => ({ ...current, [item.code]: on ? null : key }))}
-                              className={`min-h-9 rounded-lg border px-2 text-xs font-medium transition-colors ${on ? tone : "border-gray-200 text-gray-500 hover:bg-gray-50"}`}
+                              className={`min-h-9 rounded-lg border px-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${on ? tone : "border-gray-200 text-gray-500 hover:bg-gray-50"}`}
                             >
                               {label}
                             </button>
@@ -1224,6 +1290,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                   ผู้ตรวจรับ
                   <input
                     value={qcInspector}
+                    disabled={!canEditQc || qcLoadState !== "ready"}
                     onChange={(e) => setQcInspector(e.target.value)}
                     placeholder="ชื่อผู้ตรวจรับ"
                     className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-400"
@@ -1233,6 +1300,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                   หมายเหตุการตรวจรับ
                   <textarea
                     value={qcNotes}
+                    disabled={!canEditQc || qcLoadState !== "ready"}
                     onChange={(e) => setQcNotes(e.target.value)}
                     rows={3}
                     placeholder="สิ่งที่พบหน้างาน / สิ่งที่ต้องแก้"
@@ -1243,10 +1311,16 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
               <button
                 onClick={saveQC}
-                disabled={saving}
+                disabled={saving || !canEditQc || qcLoadState !== "ready"}
+                title={!canEditQc && roleChecked ? QC_ROLE_NOTICE : (qcSaveBlockReason(qcLoadState) ?? undefined)}
                 className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
               >
-                {saving ? "กำลังบันทึก..." : "💾 บันทึกผลตรวจรับ"}
+                {saving ? "กำลังบันทึก..."
+                  : !roleChecked ? "กำลังตรวจสอบสิทธิ์…"
+                  : !canEditQc ? "🔒 ไม่มีสิทธิ์บันทึกผลตรวจรับ"
+                  : qcLoadState === "loading" ? "กำลังโหลดผลตรวจรับเดิม…"
+                  : qcLoadState === "error" ? "⛔ บันทึกไม่ได้ — อ่านผลเดิมไม่สำเร็จ"
+                  : "💾 บันทึกผลตรวจรับ"}
               </button>
             </div>
           )}
