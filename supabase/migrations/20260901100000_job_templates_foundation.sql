@@ -15,7 +15,7 @@ create table if not exists public.job_types (
   task_field text check (task_field is null or task_field in ('ball_pit', 'workshop_set', 'gym', 'floor', 'other')),
   is_active boolean not null default true,
   sort_order integer not null default 0,
-  created_by uuid,
+  created_by uuid references public.floor_staff_profiles(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -28,7 +28,7 @@ create table if not exists public.job_checklist_templates (
   status text not null default 'draft' check (status in ('draft', 'active', 'retired')),
   effective_from timestamptz,
   notes text,
-  created_by uuid,
+  created_by uuid references public.floor_staff_profiles(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (job_type_id, version)
@@ -64,7 +64,7 @@ create table if not exists public.job_prep_templates (
   status text not null default 'draft' check (status in ('draft', 'active', 'retired')),
   effective_from timestamptz,
   notes text,
-  created_by uuid,
+  created_by uuid references public.floor_staff_profiles(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (job_type_id, version)
@@ -104,7 +104,7 @@ create table if not exists public.job_template_revisions (
   template_id uuid not null,
   version integer not null,
   action text not null,
-  changed_by uuid,
+  changed_by uuid references public.floor_staff_profiles(id) on delete set null,
   changed_at timestamptz not null default now(),
   diff jsonb,
   note text
@@ -149,10 +149,10 @@ create table if not exists public.job_acceptance_results (
   measured_value text,
   measuring_device_id uuid references public.measuring_devices(id),
   photo_paths text[] not null default '{}'::text[],
-  performed_by uuid,
+  performed_by uuid references public.floor_staff_profiles(id) on delete set null,
   performed_technician_id uuid references public.floor_technicians(id),
   performed_at timestamptz,
-  verified_by uuid,
+  verified_by uuid references public.floor_staff_profiles(id) on delete set null,
   verified_at timestamptz,
   note text,
   created_at timestamptz not null default now(),
@@ -171,6 +171,14 @@ comment on table public.job_acceptance_results is
 comment on column public.job_acceptance_results.item_label_snapshot is
   'เก็บข้อความของเกณฑ์ ณ ตอนตรวจรับจริง ไม่ใช่การอ้างอิงสดไปยังแม่แบบ เพราะการแก้แม่แบบภายหลังต้องไม่ย้อนไป '
   'เปลี่ยนเกณฑ์ของงานที่ตรวจรับไปแล้ว (ISO 7.5 การควบคุมเอกสาร)';
+comment on column public.job_acceptance_results.performed_by is
+  'ต้องผูก FK ไปยัง floor_staff_profiles(id) เพราะระบบนี้ต้องตอบคำถาม "ใครเป็นคนตรวจรับงานนี้" '
+  'ได้เสมอตาม ISO 8.6 ถ้าเป็น uuid ลอย ๆ ไม่มี FK เมื่อพนักงานถูกลบออกจากระบบ ค่าที่เหลือจะชี้ไปหาคนที่ไม่มีอยู่แล้ว '
+  'ทำให้หลักฐานการตรวจรับใช้ไม่ได้ ใช้ on delete set null เพื่อให้บันทึกยังอยู่แต่บอกตรง ๆ ว่าอ้างอิงคนไม่ได้แล้ว '
+  'ซึ่งซื่อสัตย์กว่า id ที่ชี้ไปที่ว่างเปล่า';
+comment on column public.job_acceptance_results.verified_by is
+  'เหตุผลเดียวกับ performed_by — ต้องผูก FK ไปยัง floor_staff_profiles(id) เพื่อสืบย้อนผู้ตรวจรับได้ตาม ISO 8.6 '
+  'และใช้ on delete set null ด้วยเหตุผลเดียวกัน';
 
 -- คอลัมน์เพิ่มในตารางเดิม (nullable ทั้งหมด — additive only) รองรับช่างของผู้รับเหมานอกเหนือจากพนักงานเอง
 alter table public.floor_technicians add column if not exists provider_id uuid references public.suppliers(id);
