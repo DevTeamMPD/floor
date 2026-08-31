@@ -133,8 +133,14 @@ function stringArray(v: unknown): string[] {
 // install_job_work_orders.external_work_order_id เป็นคอลัมน์ uuid ถ้าส่ง string ที่ไม่ใช่ uuid ลงไป
 // Postgres จะ error 22P02 ทั้ง batch (ไม่ใช่แค่แถวนั้น) แล้ว syncWorkOrders ที่ห้าม throw จะกลืน error
 // ทิ้งไป → ใบสั่งงานของงานนั้นหายทั้งชุดแบบเงียบ ๆ เพราะใบเดียวที่ id เพี้ยน
-// backfill ใน supabase/migrations/20260901110000_install_job_work_orders.sql กรองด้วยกติกาเดียวกันนี้อยู่แล้ว
-// สองด่านต้องใช้กติกาเดียวกัน ไม่งั้นข้อมูลที่ backfill ข้ามไป จะไหลกลับเข้ามาทาง sync แทน
+// กติกานี้ "เข้มกว่า" ตัวกรองที่ backfill ครั้งเดียวใน
+// supabase/migrations/20260901110000_install_job_work_orders.sql ใช้ (ที่นั่นแค่ /^[0-9a-fA-F-]{36}$/
+// ซึ่งผ่านได้แม้เป็น hex ล้วน 36 ตัวไม่มีขีดเลย ไม่ใช่ uuid จริง) — ตั้งใจให้ต่างกันแบบนี้ ไม่ใช่ให้ตรงกัน:
+// backfill รันครั้งเดียวกับข้อมูลที่ผ่านการตรวจมาแล้วระดับหนึ่ง ผ่อนกติกาได้โดยเสี่ยงต่ำ ส่วนที่นี่รับ payload
+// จาก BBPS ทุกครั้งที่ webhook ยิงเข้ามา ต้องเข้มสุดเท่าที่ Postgres คอลัมน์ uuid จะยอมรับจริง ๆ เพื่อไม่ให้
+// ค่าที่ "หน้าตาคล้าย uuid แต่ไม่ใช่" หลุดไปทำให้ 22P02 ทั้ง batch — กติกาที่เข้มกว่าไม่มีทางทำให้ backfill
+// เคยยอมรับแต่ที่นี่ปฏิเสธกลับกลายเป็นปัญหา เพราะทิศทางที่ผิดพลาดได้อย่างเดียวคือ "ข้ามใบที่ควรรับ" ซึ่งไม่ทำ
+// ให้ batch พังทั้งชุดเหมือนทิศทางตรงข้าม
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function uuidOrNull(v: unknown): string | null {
@@ -524,16 +530,35 @@ export async function closeBbpsJob(supabase: SupabaseClient, j: BbpsJob, event: 
 export async function syncWorkOrders(supabase: SupabaseClient, jobNo: string, j: BbpsJob): Promise<void> {
   try {
     const rows = parseBbpsWorkOrders(j);
+    const orders = j.workOrders ?? [];
+    // ใบที่ parseBbpsWorkOrders ข้ามไป (id ไม่ใช่ uuid หรือรูปร่างผิด) ไม่ได้แปลว่างานนั้นถูกยกเลิก
+    // แค่รอบนี้ BBPS ส่งข้อมูลมาไม่ครบ/ผิดรูป ต้องมีสัญญาณให้เห็น ไม่งั้นจะเงียบเหมือนบั๊กเดิมที่ 23505
+    // ถูกกลืนทิ้งด้วย console.warn จนไม่มีใครสังเกต
+    const skippedCount = orders.length - rows.length;
+    if (skippedCount > 0) {
+      console.warn(`[bbps-sync] work order sync: ข้ามใบสั่งงาน ${skippedCount} ใบเพราะ id ไม่ใช่ uuid ที่ใช้ได้ (คงแถวเดิมไว้ ไม่ลบ)`);
+    }
     if (!rows.length) return;
     const keepIds = rows.map((row) => row.external_work_order_id);
 
+    // ใบที่ id เพี้ยนรอบนี้จับคู่กับแถวเดิมทาง external_work_order_id ไม่ได้เลย (id ที่ส่งมาไม่ใช่ uuid
+    // ไม่มีทางตรงกับ uuid ที่เก็บไว้อยู่แล้ว) แต่ seq ยังบอกตำแหน่งเดิมได้ — กันแถวที่ seq ตรงกับใบที่เพิ่ง
+    // ถูกข้ามไว้จากการลบด้านล่าง ไม่งั้นใบที่แค่ "รอบนี้ id เพี้ยน" จะถูกลบทิ้งถาวรปนไปกับใบที่ BBPS ลบทิ้งจริง
+    const skippedSeqs = orders
+      .filter((order) => order && typeof order === "object" && !uuidOrNull((order as BbpsWorkOrder).id))
+      .map((order) => (order as BbpsWorkOrder).seq)
+      .filter((seq): seq is number => typeof seq === "number");
+
     // ลบใบสั่งงานของงานนี้ที่ไม่อยู่ใน payload แล้ว (BBPS ลบทิ้ง) รวมถึงแถวเก่าที่ไม่มี external id
     // ซึ่งไม่มีทางถูก upsert ทับได้เลย — ทำก่อน upsert เสมอ เพื่อให้ seq ที่ถูกนำกลับมาใช้ใหม่ไม่ชนของเก่า
-    const { error: deleteError } = await supabase
+    const deleteQuery = supabase
       .from("install_job_work_orders")
       .delete()
       .eq("job_no", jobNo)
       .or(`external_work_order_id.is.null,external_work_order_id.not.in.(${keepIds.join(",")})`);
+    const { error: deleteError } = await (skippedSeqs.length
+      ? deleteQuery.not("seq", "in", `(${skippedSeqs.join(",")})`)
+      : deleteQuery);
     if (deleteError) {
       console.warn("[bbps-sync] work order reconcile failed", deleteError.message);
     }

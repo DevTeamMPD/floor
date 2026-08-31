@@ -388,7 +388,7 @@ describe("parseBbpsWorkOrders — กติกา uuid ต้องตรงก�
 // final review ข้อ 5: syncWorkOrders ต้อง "ลู่เข้าหา payload" ไม่ใช่แค่ upsert ทับ
 // ถ้า BBPS ลบใบ seq=1 แล้วสร้างใบใหม่ seq=1 แถวเก่าต้องถูกลบก่อน ไม่งั้น sync ของงานนั้นตายถาวร
 describe("syncWorkOrders", () => {
-  type Call = { op: string; table: string; or?: string; eq?: Record<string, unknown>; rows?: unknown[] };
+  type Call = { op: string; table: string; or?: string; not?: string; eq?: Record<string, unknown>; rows?: unknown[] };
 
   function fakeSupabase(calls: Call[], opts: { deleteError?: string; upsertError?: string; explode?: boolean } = {}) {
     return {
@@ -400,6 +400,7 @@ describe("syncWorkOrders", () => {
             const q = {
               eq(col: string, val: unknown) { call.eq![col] = val; return q; },
               or(expr: string) { call.or = expr; return q; },
+              not(col: string, op: string, val: unknown) { call.not = `${col}.${op}.${val}`; return q; },
               then(resolve: (v: { error: { message: string } | null }) => unknown) {
                 calls.push(call);
                 return Promise.resolve({ error: opts.deleteError ? { message: opts.deleteError } : null }).then(resolve);
@@ -433,6 +434,32 @@ describe("syncWorkOrders", () => {
     await syncWorkOrders(fakeSupabase(calls), "JOB-001", { id: "job-1", workOrders: null });
     await syncWorkOrders(fakeSupabase(calls), "JOB-001", { id: "job-1", workOrders: [{ id: "ไม่ใช่ uuid" } as never] });
     expect(calls).toEqual([]);
+  });
+
+  // R1: parseBbpsWorkOrders ข้ามใบที่ id เพี้ยนทีละใบ (ไม่ทำให้ทั้ง batch ตาย) แต่ reconcile เดิมลบทุกแถว
+  // ที่ external_work_order_id ไม่อยู่ใน keepIds — ใบที่แค่ "รอบนี้ id เพี้ยน" จะโดนลบทิ้งถาวรปนไปกับใบที่
+  // BBPS ลบทิ้งจริง ๆ ต้องกันแถวของใบที่ id เพี้ยนไว้ด้วย seq โดยที่ใบที่หายไปจากใน payload จริง ๆ ต้องยังถูกลบ
+  it("payload ผสม valid+id เพี้ยน → กันแถวของใบ id เพี้ยนไว้ด้วย seq ไม่ให้ถูกลบ ส่วนใบที่หายไปจริงยังลบตามปกติ", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const calls: Call[] = [];
+    await syncWorkOrders(fakeSupabase(calls), "JOB-001", {
+      id: "job-1",
+      workOrders: [
+        { id: WO_ID_1, seq: 1 } as never,
+        { id: "ไม่ใช่ uuid", seq: 2 } as never, // ใบนี้ id เพี้ยนรอบนี้ ไม่ใช่ถูกยกเลิก — ห้ามลบแถวเดิมของมัน
+      ],
+    });
+    expect(calls.map((c) => c.op)).toEqual(["delete", "upsert"]);
+    // ใบที่ id ใช้ได้ (WO_ID_1) ต้องอยู่ใน keepIds ตามปกติ
+    expect(calls[0].or).toContain(WO_ID_1);
+    expect(calls[0].or).toContain("external_work_order_id.is.null");
+    // ใบ id เพี้ยนมี seq=2 → ต้องถูกกันไว้ด้วย "seq.not.in" ไม่ให้เข้าเงื่อนไขลบ แม้ external_work_order_id
+    // ของมันจะไม่อยู่ใน keepIds (เพราะมันไม่มี external id ที่ใช้ได้ตั้งแต่แรก)
+    expect(calls[0].not).toBe("seq.in.(2)");
+    // ใบที่หายไปจากใน payload จริง ๆ (เช่น WO_ID_2 เดิมที่ seq ไม่ใช่ 2) ยังเข้าเงื่อนไขลบตามปกติ เพราะ
+    // เงื่อนไข not.in.(WO_ID_1) จับได้ และ seq ของมันไม่ตรงกับ seq ที่กันไว้ (2)
+    expect(calls[0].or).not.toContain(WO_ID_2);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("1"));
   });
 
   it("ลบล้มเหลว → ไม่ throw และยัง upsert ต่อ (การจองคิวหลักสำเร็จไปแล้ว ห้ามทำให้ webhook เป็น 500)", async () => {
