@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { outboundConfig, sendMessageToBbps } from "@/lib/integrations/bbps-chat";
 
 export const TEAM_B_ID = "eb37a557-3c82-4051-b056-a5f6075f6c9e";
 const BKK = "+07:00";
@@ -122,6 +124,88 @@ export function mergeClashFlag(existing: string | null | undefined, clashNote: s
     .filter((part) => part.length > 0 && !part.startsWith(CLASH_FLAG_PREFIX));
   if (clashNote) kept.push(clashNote);
   return kept.length ? kept.join(" · ") : null;
+}
+
+/**
+ * ข้อความแจ้งคิวชนที่จะส่งเข้าแชทตั๋ว — ฝั่ง LENDI เห็น และวิ่งต่อไปฝั่ง BBPS
+ * ผ่านช่องทางแชทเดิมที่พิสูจน์แล้ว จึงไม่ต้องเพิ่มสัญญา event ใหม่ระหว่างสองระบบ
+ *
+ * externalMessageId ผูกกับ "ชุดวันที่ชน" ไม่ใช่เวลาที่ส่ง — sync ซ้ำด้วยผลเดิมจึงได้ id เดิม
+ * และถูก BBPS ตัดซ้ำทิ้งเองด้วย unique external_message_id
+ */
+export function buildClashNotice(jobNo: string, clashes: ClashInfo[]): { externalMessageId: string; body: string } | null {
+  if (!clashes.length) return null;
+  const fingerprint = createHash("sha256")
+    .update(`${jobNo}|${clashes.map((c) => c.date).join(",")}`, "utf8")
+    .digest("hex")
+    .slice(0, 16);
+  const lines = clashes.map((c) => `• ${c.date} — ชนกับ ${c.withLabel}`);
+  return {
+    externalMessageId: `lendi-clash-${fingerprint}`,
+    body: [
+      "⚠️ วันติดตั้งที่ส่งมาชนกับงานที่ทีมช่างรับไว้แล้ว ระบบจึงยังไม่ได้จองคิวให้",
+      ...lines,
+      "กรุณาเลือกวันใหม่ หรือแจ้งให้หัวหน้าช่างจัดคิวให้",
+    ].join("\n"),
+  };
+}
+
+const CLASH_NOTICE_SENDER = "ระบบคิว LENDI";
+
+/**
+ * แจ้งฝั่ง BBPS ว่าคิวชน โดยส่งเข้าแชทตั๋ว
+ *
+ * ห้าม throw: งานหลักคือการจองคิวซึ่งสำเร็จไปแล้ว ถ้าการแจ้งล้มเหลวแล้วโยน error ออกไป
+ * BBPS จะเห็นเป็น 500 แล้วส่งซ้ำทั้งชุด กลายเป็นทำงานซ้ำโดยไม่จำเป็น
+ * ถ้าส่งไม่ผ่าน ข้อความจะค้างเป็น pending และถูก flush ตอนมีคนเปิดแชท (พฤติกรรมเดิม)
+ */
+async function notifyBbpsClash(
+  supabase: SupabaseClient,
+  jobNo: string,
+  job: BbpsJob,
+  clashes: ClashInfo[],
+): Promise<void> {
+  const notice = buildClashNotice(jobNo, clashes);
+  if (!notice) return;
+
+  try {
+    const { data: already } = await supabase.from("floor_ticket_messages")
+      .select("id").eq("job_no", jobNo).eq("external_message_id", notice.externalMessageId).maybeSingle();
+    if (already) return;
+
+    const createdAt = new Date().toISOString();
+    const { data: inserted, error: insertError } = await supabase.from("floor_ticket_messages").insert({
+      job_no: jobNo,
+      sender_kind: "staff",
+      sender_name: CLASH_NOTICE_SENDER,
+      body: notice.body,
+      external_message_id: notice.externalMessageId,
+    }).select("id").maybeSingle();
+    if (insertError) { console.warn("[bbps-sync] clash notice insert failed", insertError.message); return; }
+
+    const config = outboundConfig();
+    // ยังตั้ง env ไม่ครบ: ข้อความอยู่ในแชทฝั่ง LENDI แล้ว และค้าง pending รอ flush
+    if (!config) return;
+
+    const outcome = await sendMessageToBbps({
+      externalMessageId: notice.externalMessageId,
+      ticketId: job.id,
+      quoteNumber: job.quoteNumber ?? null,
+      senderName: CLASH_NOTICE_SENDER,
+      senderRole: "staff",
+      body: notice.body,
+      attachments: [],
+      createdAt,
+    }, config);
+
+    const patch = outcome.kind === "delivered"
+      ? { sync_status: "delivered", external_provider_message_id: outcome.providerMessageId, sync_error: null, sync_attempts: 1, synced_at: new Date().toISOString() }
+      : { sync_status: outcome.kind === "failed" ? "failed" : "pending", sync_error: outcome.message, sync_attempts: 1 };
+    if (inserted?.id) await supabase.from("floor_ticket_messages").update(patch).eq("id", inserted.id);
+    console.log(`[bbps-sync] clash notice job=${jobNo} dates=${clashes.map((c) => c.date).join(",")} -> ${outcome.kind}`);
+  } catch (e) {
+    console.warn("[bbps-sync] clash notice failed", e instanceof Error ? e.message : String(e));
+  }
 }
 
 function jobNoFor(id: string) {
@@ -369,6 +453,8 @@ export async function applyBbpsJob(supabase: SupabaseClient, j: BbpsJob) {
     }).eq("job_no", jobNo);
     if (flagError) throw flagError;
     await writeActivity(supabase, jobNo, "sync", "flag_note", previousFlag, nextFlag);
+    // แจ้งฝั่ง BBPS เฉพาะตอนชุดวันที่ชนเปลี่ยน ไม่ใช่ทุกครั้งที่ sync
+    if (clashes.length) await notifyBbpsClash(supabase, jobNo, j, clashes);
   }
 
   return { jobNo, added, updated, removed: staleIds.length, blocks: dates.length, skipped: false, clashes };
