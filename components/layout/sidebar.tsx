@@ -18,6 +18,7 @@ const CORE_NAV: NavItem[] = [
   { href: "/appointments", icon: "📅", label: "ปฏิทินทีม", roles: ["admin", "head_technician"] },
   { href: "/document-control", icon: "🗂️", label: "ศูนย์เอกสาร", roles: ["admin", "head_technician", "cs"] },
   { href: "/technicians", icon: "🔑", label: "ทีมช่าง / PIN", roles: ["admin", "head_technician"] },
+  { href: "/job-templates", icon: "🧩", label: "แม่แบบงาน", roles: ["admin", "head_technician"] },
   { href: "/remnants", icon: "✂️", label: "ตรวจรับเศษ", roles: ["admin", "warehouse"] },
   { href: "/cs-tracking", icon: "📞", label: "CS รอติดตาม", roles: ["admin", "cs"] },
   { href: "/csat-automation", icon: "✨", label: "CSAT อัตโนมัติ", roles: ["admin", "cs"] },
