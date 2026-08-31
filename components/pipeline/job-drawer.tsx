@@ -5,6 +5,15 @@ import { IP_STAGES } from "@/lib/types";
 import type { InstallJob } from "@/lib/types";
 import { formatDate, ipGenToken } from "@/lib/utils";
 import { floorActionError, floorErrorMessage } from "@/lib/floor-error-message";
+import {
+  FLOOR_JOB_TYPE_CODE,
+  checklistItemsFromRows,
+  checklistProvenanceLabel,
+  fallbackChecklist,
+  normalizeQcResults,
+  type JobChecklistSource,
+  type QCResult,
+} from "@/lib/job-checklist";
 import { toast } from "sonner";
 import TechQueueView from "@/components/tech-queue/tech-queue-view";
 
@@ -88,30 +97,21 @@ interface SurveyData {
   savedAt?: string;
 }
 
-const QC_ITEMS = [
-  { id: 1, label: "ช่องว่างขอบแผ่นกับผนัง/บัว/เสา/เฟอร์นิเจอร์", spec: "≤ 1 mm" },
-  { id: 2, label: "รอยต่อชนก่อนเชื่อม", spec: "≤ 0.3 mm" },
-  { id: 3, label: "ความตรงของแนวตัด", spec: "เบี่ยง ≤ 1 mm/1 m" },
-  { id: 4, label: "ขอบแผ่นเผยอ / กระดก", spec: "= 0 mm" },
-  { id: 5, label: "รอยตัดไหม้ / บิ่น / ฉีก", spec: "ต้องไม่มี" },
-  { id: 6, label: "ความลึกร่องกรีด", spec: "~2/3 ความหนาแผ่น" },
-  { id: 7, label: "ความสมบูรณ์แนวเชื่อม", spec: "เต็มแนว เรียบเสมอผิว" },
-  { id: 8, label: "ความแข็งแรงรอยเชื่อม", spec: "ดึงเบาไม่แยก" },
-  { id: 9, label: "เวลาบ่ม", spec: "≥ 24 ชม." },
-  { id: 10, label: "บัว / ตัวจบแนบสนิท", spec: "0 mm" },
-  { id: 11, label: "แนวซิลิโคนต่อเนื่อง", spec: "ไม่ขาดช่วง" },
-  { id: 12, label: "โซนเปียก — น้ำไม่ซึมใต้แผ่น", spec: "ผ่านทดสอบ" },
-  { id: 13, label: "ความลาดตัวจบ", spec: "เดินผ่านไม่สะดุ้ง" },
-  { id: 14, label: "ความสะอาดผิวงาน", spec: "ไม่มีคราบ" },
-  { id: 15, label: "สภาพพื้นก่อนติดตั้ง", spec: "แห้งสะอาด" },
-];
+// เกณฑ์ตรวจรับ 15 ข้อที่เคย hardcode ไว้ตรงนี้ (const QC_ITEMS) ถูกย้ายไปที่
+// lib/job-checklist.ts ในชื่อ FALLBACK_QC_ITEMS — ไม่ได้ถูกลบทิ้ง ยังอยู่ในโค้ดและยังใช้จริง
+// เพียงแต่ย้ายไปที่เดียวกลาง เพราะหน้าช่างหน้างาน (app/work/[token]/page.tsx) ต้องใช้ชุดสำรองชุดเดียวกัน
+// ถ้าเก็บสำเนาไว้สองที่ วันหนึ่งสองจอจะแสดงเกณฑ์สำรองคนละชุดโดยไม่มีใครรู้
 
-type QCResult = "pass" | "fail" | "na" | null;
 interface QCData {
-  results: Record<number, QCResult>;
+  // คีย์เป็นรหัสเกณฑ์ (QC01…) ตั้งแต่ T8 เป็นต้นไป — ของเก่าที่คีย์เป็นเลขข้อ ("1".."15")
+  // ยังอ่านได้เหมือนเดิม ผ่าน normalizeQcResults() ที่แปลงเลขข้อเป็นรหัสให้ตรงกันข้อต่อข้อ
+  results: Record<string, QCResult>;
   inspector: string;
   notes: string;
   savedAt?: string;
+  // ที่มาของเกณฑ์ที่ใช้ตอนบันทึก เพื่อให้ย้อนดูได้ว่าผลชุดนี้ตรวจด้วยแม่แบบรุ่นไหน
+  templateId?: string | null;
+  templateVersion?: number | null;
 }
 
 // เฟส 3: เศษคงเหลือ (S4) — บันทึกง่าย + เข้าคลังเศษ (remnant_stock)
@@ -156,7 +156,7 @@ function sumZoneStrips(zones: ZoneRow[]): { total140: number; total110: number }
 
 export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   const supabase = createClient();
-  const [tab, setTab] = useState<"info" | "stages" | "survey" | "log">("info");
+  const [tab, setTab] = useState<"info" | "stages" | "survey" | "qc" | "log">("info");
   const [saving, setSaving] = useState(false);
   const [activity, setActivity] = useState<ActivityRow[]>([]);
 
@@ -186,10 +186,12 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   // แสดงตารางคิวช่างที่โซนซ้าย (A) ตอนจองช่าง
   const [showQueue, setShowQueue] = useState(false);
 
-  // QC state
-  const [qcResults, setQcResults] = useState<Record<number, QCResult>>({});
+  // QC state — คีย์ด้วยรหัสเกณฑ์ (QC01…) ไม่ใช่ลำดับที่แสดงบนจอ เพราะลำดับเปลี่ยนได้เมื่อหัวหน้าช่างแก้แม่แบบ
+  const [qcResults, setQcResults] = useState<Record<string, QCResult>>({});
   const [qcInspector, setQcInspector] = useState("");
   const [qcNotes, setQcNotes] = useState("");
+  // เกณฑ์ตรวจรับที่กำลังแสดง: ตั้งต้นด้วยชุดสำรอง แล้วแทนที่ด้วยแม่แบบที่เปิดใช้งานอยู่เมื่อโหลดสำเร็จ
+  const [checklist, setChecklist] = useState<JobChecklistSource>(() => fallbackChecklist("กำลังโหลดแม่แบบเกณฑ์ตรวจรับ"));
 
   // S3 reschedule state
   const [newApptDate, setNewApptDate] = useState(job.apptDate ?? "");
@@ -228,7 +230,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
         if (data?.qc_data) {
           try {
             const qc: QCData = JSON.parse(data.qc_data);
-            setQcResults(qc.results ?? {});
+            setQcResults(normalizeQcResults(qc.results));
             setQcInspector(qc.inspector ?? "");
             setQcNotes(qc.notes ?? "");
           } catch {}
@@ -258,6 +260,52 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     supabase.from("install_job_zones").select("zone_name, width_cm, length_cm").eq("job_no", job.jobNo)
       .then(({ data }) => setZones((data as ZoneRow[]) ?? []));
   }, [job.jobNo]);
+
+  // T8: เกณฑ์ตรวจรับต้องมาจากแม่แบบที่หัวหน้าช่างเปิดใช้งานอยู่ ไม่ใช่รายการที่ฝังไว้ในไฟล์นี้
+  // อ่านตรงจากตารางด้วยสิทธิ์ของพนักงานที่ล็อกอิน (RLS เปิด select ให้ staff ที่ active อยู่แล้ว)
+  // ถ้าอ่านไม่ได้ด้วยเหตุใดก็ตาม ให้ตกไปใช้ชุดสำรองในโค้ด และบอกบนจอตรง ๆ ว่ากำลังใช้ชุดสำรอง
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: jobType, error: jobTypeError } = await supabase
+          .from("job_types").select("id, name")
+          .eq("code", FLOOR_JOB_TYPE_CODE).eq("is_active", true).maybeSingle();
+        if (jobTypeError) throw jobTypeError;
+        if (!jobType) {
+          if (!cancelled) setChecklist(fallbackChecklist(`ยังไม่ได้ตั้งประเภทงานรหัส ${FLOOR_JOB_TYPE_CODE} ในระบบ`));
+          return;
+        }
+        const { data: template, error: templateError } = await supabase
+          .from("job_checklist_templates").select("id, version")
+          .eq("job_type_id", jobType.id).eq("status", "active")
+          .order("version", { ascending: false }).limit(1).maybeSingle();
+        if (templateError) throw templateError;
+        if (!template) {
+          if (!cancelled) setChecklist(fallbackChecklist("ยังไม่มีแม่แบบเกณฑ์ตรวจรับที่เปิดใช้งานสำหรับงานปูพื้น"));
+          return;
+        }
+        const { data: rows, error: itemsError } = await supabase
+          .from("job_checklist_template_items")
+          .select("code, label, spec_text, requires_photo, is_critical, measuring_device_kind, sort_order, is_active")
+          .eq("template_id", template.id).eq("is_active", true).order("sort_order");
+        if (itemsError) throw itemsError;
+        if (cancelled) return;
+        const items = checklistItemsFromRows(rows);
+        if (items.length === 0) {
+          setChecklist(fallbackChecklist("แม่แบบที่เปิดใช้งานอยู่ยังไม่มีเกณฑ์ที่เปิดใช้งานสักข้อ"));
+          return;
+        }
+        setChecklist({
+          items, origin: "template", version: template.version,
+          templateId: template.id, jobTypeName: jobType.name, fallbackReason: null,
+        });
+      } catch (e: unknown) {
+        if (!cancelled) setChecklist(fallbackChecklist(`โหลดแม่แบบเกณฑ์ตรวจรับไม่สำเร็จ — ${floorErrorMessage(e)}`));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // เฟส A: บันทึก waiting_on / ธง (ตั้ง waiting_since เมื่อ waiting_on เปลี่ยน)
   async function saveWaiting(nextWaiting?: string, nextFlags?: FlagState) {
@@ -340,6 +388,8 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
         inspector: qcInspector,
         notes: qcNotes,
         savedAt: new Date().toISOString(),
+        templateId: checklist.templateId,
+        templateVersion: checklist.version,
       };
       const { error } = await supabase
         .from("install_jobs")
@@ -538,9 +588,12 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     onClose();
   }
 
-  const qcAnswered = Object.values(qcResults).filter(Boolean).length;
-  const qcPass = Object.values(qcResults).filter((v) => v === "pass").length;
-  const qcFail = Object.values(qcResults).filter((v) => v === "fail").length;
+  // นับเฉพาะข้อที่แสดงอยู่จริงในแม่แบบรุ่นปัจจุบัน ไม่นับผลของข้อที่ถูกถอดออกจากแม่แบบไปแล้ว
+  // (ผลของข้อเก่ายังอยู่ใน qc_data ไม่ได้ถูกลบ แต่ไม่ควรเอามาโชว์ว่า "ตอบครบ" ทั้งที่ข้อนั้นไม่มีแล้ว)
+  const qcShownResults = checklist.items.map((item) => qcResults[item.code] ?? null);
+  const qcAnswered = qcShownResults.filter(Boolean).length;
+  const qcPass = qcShownResults.filter((v) => v === "pass").length;
+  const qcFail = qcShownResults.filter((v) => v === "fail").length;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
@@ -642,7 +695,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
         {/* Tabs */}
         <div className="flex text-sm border-b overflow-x-auto">
-          {(["info", "stages", "survey", "log"] as const).map((t) => (
+          {(["info", "stages", "survey", "qc", "log"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -655,6 +708,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
               {t === "info" ? "ข้อมูล"
                : t === "stages" ? "สเตจ"
                : t === "survey" ? "สำรวจ"
+               : t === "qc" ? "ตรวจรับ"
                : "ประวัติ"}
             </button>
           ))}
@@ -1104,6 +1158,95 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
               >
                 {saving ? "กำลังบันทึก..." : "💾 บันทึกข้อมูลสำรวจ"}
+              </button>
+            </div>
+          )}
+
+          {/* ตรวจรับ (QC) — เกณฑ์มาจากแม่แบบที่หัวหน้าช่างเปิดใช้งานอยู่ ไม่ใช่รายการที่ฝังในโค้ด */}
+          {tab === "qc" && (
+            <div className="space-y-4">
+              <div className={`rounded-lg border p-2.5 text-xs leading-relaxed ${checklist.origin === "template" ? "border-blue-200 bg-blue-50 text-blue-900" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+                <div className="font-semibold">{checklistProvenanceLabel(checklist)}</div>
+                <p className="mt-0.5">
+                  {checklist.origin === "template"
+                    ? `แสดง ${checklist.items.length} ข้อจากแม่แบบที่เปิดใช้งานอยู่ — แก้ได้ที่หน้า “แม่แบบประเภทงาน” โดยไม่ต้องแก้โปรแกรม`
+                    : `ตอนนี้ใช้ชุดสำรองที่ฝังอยู่ในโปรแกรม (${checklist.items.length} ข้อ) การแก้แม่แบบจะยังไม่มีผลกับหน้านี้ · สาเหตุ: ${checklist.fallbackReason ?? "ไม่ทราบสาเหตุ"}`}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-gray-500">ตอบแล้ว {qcAnswered}/{checklist.items.length} ข้อ</span>
+                <span className="text-emerald-700 font-medium">ผ่าน {qcPass}</span>
+                <span className="text-red-700 font-medium">ไม่ผ่าน {qcFail}</span>
+              </div>
+
+              <div className="space-y-2">
+                {checklist.items.map((item, index) => {
+                  const value = qcResults[item.code] ?? null;
+                  return (
+                    <div key={item.code} className="rounded-lg border border-gray-200 p-2.5">
+                      <div className="flex items-start gap-2">
+                        <span className="mt-0.5 rounded border border-gray-300 bg-gray-50 px-1.5 py-0.5 font-mono text-[11px] text-gray-600" title="รหัสถาวรของเกณฑ์ข้อนี้ ใช้อ้างอิงผลตรวจรับย้อนหลัง">{item.code}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-gray-900 break-words">{index + 1}. {item.label}</div>
+                          <div className="mt-0.5 text-xs text-gray-500">
+                            {item.spec ? `เกณฑ์: ${item.spec}` : "ไม่ได้ระบุค่าเกณฑ์"}
+                            {item.measuringDeviceKind ? ` · เครื่องมือ: ${item.measuringDeviceKind}` : ""}
+                            {item.isCritical ? " · ข้อสำคัญ" : ""}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-2 grid grid-cols-3 gap-1.5">
+                        {([["pass", "ผ่าน"], ["fail", "ไม่ผ่าน"], ["na", "ไม่เกี่ยวข้อง"]] as const).map(([key, label]) => {
+                          const on = value === key;
+                          const tone = key === "pass" ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                            : key === "fail" ? "border-red-500 bg-red-50 text-red-800"
+                            : "border-gray-400 bg-gray-100 text-gray-700";
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => setQcResults((current) => ({ ...current, [item.code]: on ? null : key }))}
+                              className={`min-h-9 rounded-lg border px-2 text-xs font-medium transition-colors ${on ? tone : "border-gray-200 text-gray-500 hover:bg-gray-50"}`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-xs text-gray-500">
+                  ผู้ตรวจรับ
+                  <input
+                    value={qcInspector}
+                    onChange={(e) => setQcInspector(e.target.value)}
+                    placeholder="ชื่อผู้ตรวจรับ"
+                    className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </label>
+                <label className="block text-xs text-gray-500">
+                  หมายเหตุการตรวจรับ
+                  <textarea
+                    value={qcNotes}
+                    onChange={(e) => setQcNotes(e.target.value)}
+                    rows={3}
+                    placeholder="สิ่งที่พบหน้างาน / สิ่งที่ต้องแก้"
+                    className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </label>
+              </div>
+
+              <button
+                onClick={saveQC}
+                disabled={saving}
+                className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {saving ? "กำลังบันทึก..." : "💾 บันทึกผลตรวจรับ"}
               </button>
             </div>
           )}

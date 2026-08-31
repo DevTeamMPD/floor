@@ -3,6 +3,12 @@
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { floorActionError, floorErrorMessage } from "@/lib/floor-error-message";
+import {
+  checklistFromRpcPayload,
+  checklistProvenanceLabel,
+  fallbackChecklist,
+  type JobChecklistSource,
+} from "@/lib/job-checklist";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import RemnantReportForm, { MaterialMovement, RemnantReportData } from "@/components/technician/remnant-report-form";
 import TechnicianPushButton from "@/components/notifications/technician-push-button";
@@ -256,6 +262,8 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   const [workProgress, setWorkProgress] = useState<WorkProgress | null>(null);
   const [centralWorkOrder, setCentralWorkOrder] = useState<CentralWorkOrder | null>(null);
   const [remnantReport, setRemnantReport] = useState<RemnantReportData | null>(null);
+  // T8: เกณฑ์ตรวจรับที่ช่างต้องเคลียร์ — อ่านจากแม่แบบที่หัวหน้าช่างเปิดใช้งานอยู่ ไม่ใช่รายการที่ฝังในโค้ด
+  const [checklist, setChecklist] = useState<JobChecklistSource>(() => fallbackChecklist("ยังไม่ได้เปิดงาน"));
   const [statusFiles, setStatusFiles] = useState<StatusFilePreview[]>([]);
   const statusFilesRef = useRef<StatusFilePreview[]>([]);
   const [statusNote, setStatusNote] = useState("");
@@ -353,6 +361,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     setWorkProgress(null);
     setCentralWorkOrder(null);
     setRemnantReport(null);
+    setChecklist(fallbackChecklist("กำลังโหลดเกณฑ์ตรวจรับ"));
     clearStatusFiles();
     setStatusNote("");
     setPickedSheetCount("");
@@ -364,6 +373,8 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       } : current);
       setWorkProgress(localDemoWorkProgress());
       setCentralWorkOrder(localDemoWorkOrder());
+      // โหมดข้อมูลจำลองไม่มี token/PIN จริงให้เรียก RPC จึงแสดงชุดสำรองและบอกตรง ๆ ว่าเป็นชุดสำรอง
+      setChecklist(fallbackChecklist("โหมดข้อมูลจำลองไม่ได้อ่านแม่แบบจากระบบจริง"));
       return;
     }
     if (a.assignmentId) {
@@ -400,6 +411,17 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       detailTasks.push(
         supabase.rpc("get_technician_remnant_report", { p_token: token, p_pin: pin.trim(), p_assignment_id: a.assignmentId })
           .then(({ data }) => setRemnantReport((data ?? null) as RemnantReportData | null))
+      );
+      detailTasks.push(
+        // RPC security definer ที่ตรวจ token+PIN ก่อน — หน้านี้วิ่งเป็น anon จึงอ่านตารางแม่แบบตรง ๆ ไม่ได้
+        supabase.rpc("get_technician_job_checklist", { p_token: token, p_pin: pin.trim(), p_assignment_id: a.assignmentId })
+          .then(({ data, error }) => {
+            if (error) {
+              setChecklist(fallbackChecklist(`อ่านแม่แบบเกณฑ์ตรวจรับไม่สำเร็จ — ${floorErrorMessage(error)}`));
+              return;
+            }
+            setChecklist(checklistFromRpcPayload(data, "ยังไม่มีแม่แบบเกณฑ์ตรวจรับที่เปิดใช้งานสำหรับงานนี้"));
+          })
       );
     }
     await Promise.all(detailTasks.map((task) => Promise.resolve(task)));
@@ -750,6 +772,33 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
                 <label className="flex items-center gap-2"><input type="checkbox" readOnly checked={Boolean(selected.locationUrl || selected.address)} /> มีพิกัด/ที่อยู่สำหรับเดินทาง</label>
                 <label className="flex items-center gap-2"><input type="checkbox" readOnly checked={Boolean(selected.productName || selected.requirement)} /> มีสเปกงานติดตั้ง</label>
                 <label className="flex items-center gap-2"><input type="checkbox" readOnly checked={Boolean(centralWorkOrder?.items.length || selected.pickPlan)} /> มีใบสั่งงานและรายการวัสดุ/อุปกรณ์</label>
+              </div>
+
+              <div className="mt-4 border-t border-slate-100 pt-4">
+                <div className={`rounded-xl border px-3 py-2 text-xs leading-relaxed ${checklist.origin === "template" ? "border-blue-200 bg-blue-50 text-blue-900" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+                  <div className="font-semibold">{checklistProvenanceLabel(checklist)}</div>
+                  <p className="mt-0.5">
+                    {checklist.origin === "template"
+                      ? `${checklist.items.length} ข้อ ตามเกณฑ์รุ่นที่หัวหน้าช่างเปิดใช้งานอยู่`
+                      : `กำลังแสดงชุดสำรองในโปรแกรม (${checklist.items.length} ข้อ) ยังไม่ใช่รุ่นล่าสุดที่หัวหน้าช่างแก้ · สาเหตุ: ${checklist.fallbackReason ?? "ไม่ทราบสาเหตุ"}`}
+                  </p>
+                </div>
+                <ul className="mt-3 space-y-2">
+                  {checklist.items.map((item, index) => <li key={item.code} className="rounded-xl border border-slate-200 px-3 py-2">
+                    <div className="flex items-start gap-2">
+                      <span className="mt-0.5 rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-600">{item.code}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-slate-900">{index + 1}. {item.label}</div>
+                        <div className="mt-0.5 text-xs text-slate-500">
+                          {item.spec ? `เกณฑ์: ${item.spec}` : "ไม่ได้ระบุค่าเกณฑ์"}
+                          {item.measuringDeviceKind ? ` · เครื่องมือ: ${item.measuringDeviceKind}` : ""}
+                          {item.requiresPhoto ? " · ต้องมีรูป" : ""}
+                        </div>
+                      </div>
+                    </div>
+                  </li>)}
+                </ul>
+                <p className="mt-3 text-xs text-slate-500">หน้านี้แสดงเกณฑ์ให้ตรวจหน้างาน ส่วนการบันทึกผลผ่าน/ไม่ผ่านทำที่หน้าออฟฟิศ (แท็บ “ตรวจรับ” ในรายละเอียดงาน)</p>
               </div>
             </WorkSection>
 
