@@ -47,6 +47,10 @@ interface ChecklistItemRow {
 
 interface ChecklistItemDraft {
   key: string;
+  // code เป็นตัวระบุที่ต้องคงที่ข้ามเวลา/เวอร์ชัน — ผูกกับ job_acceptance_results.item_code
+  // ตอนช่างติ๊กผลตรวจรับ (ใช้หาสถิติ "เกณฑ์ข้อไหนตกบ่อยที่สุด" ตาม ISO 9.1.3)
+  // undefined = ข้อที่ยังไม่เคยบันทึกลง DB (สร้างใหม่ในฟอร์ม) ต้อง generate ตอนบันทึก
+  code?: string;
   label: string;
   spec_text: string;
   requires_photo: boolean;
@@ -141,7 +145,7 @@ function newChecklistDraft(): ChecklistItemDraft {
   return { key: crypto.randomUUID(), label: "", spec_text: "", requires_photo: false, is_critical: true, measuring_device_kind: "", is_active: true };
 }
 function checklistRowToDraft(row: ChecklistItemRow): ChecklistItemDraft {
-  return { key: row.id, label: row.label, spec_text: row.spec_text ?? "", requires_photo: row.requires_photo, is_critical: row.is_critical, measuring_device_kind: row.measuring_device_kind ?? "", is_active: row.is_active };
+  return { key: row.id, code: row.code, label: row.label, spec_text: row.spec_text ?? "", requires_photo: row.requires_photo, is_critical: row.is_critical, measuring_device_kind: row.measuring_device_kind ?? "", is_active: row.is_active };
 }
 function newPrepDraft(): PrepItemDraft {
   return { key: crypto.randomUUID(), material_id: "", item_name: "", unit: "", item_kind: "consumable", calc_mode: "fixed", calc_qty: "1", waste_pct: "0", is_required: true, note: "" };
@@ -156,6 +160,23 @@ function moveByKey<T extends { key: string }>(items: T[], key: string, direction
   const next = items.slice();
   [next[idx], next[target]] = [next[target], next[idx]];
   return next;
+}
+
+// code ต้องคงที่ข้ามเวลา/เวอร์ชัน (ผูกกับ job_acceptance_results.item_code สำหรับสถิติ ISO 9.1.3)
+// ข้อที่มี code อยู่แล้วจากฐานข้อมูล -> ใช้ค่าเดิมเสมอ ไม่ว่าจะถูกเลื่อนลำดับหรือย้ายตำแหน่งแค่ไหน
+// ข้อใหม่ที่ยังไม่มี code -> เดินหน้าต่อจากเลขสูงสุดของ QCnn ที่ "เคยมีอยู่ในแม่แบบนี้" เท่านั้น
+// ห้ามอิง sort_order/ตำแหน่งใน array เป็นที่มาของเลข เพราะจะวนกลับไปชนกับ code ของข้อที่เคยถูกลบไปแล้ว
+function assignChecklistCodes(items: ChecklistItemDraft[]): string[] {
+  let maxSeq = 0;
+  for (const item of items) {
+    const match = item.code ? /^QC(\d+)$/.exec(item.code) : null;
+    if (match) maxSeq = Math.max(maxSeq, parseInt(match[1], 10));
+  }
+  return items.map((item) => {
+    if (item.code) return item.code;
+    maxSeq += 1;
+    return `QC${String(maxSeq).padStart(2, "0")}`;
+  });
 }
 
 export default function JobTemplatesPage() {
@@ -380,8 +401,11 @@ export default function JobTemplatesPage() {
       if (!item.label.trim()) { toast.error("กรุณากรอกชื่อรายการตรวจให้ครบทุกข้อ"); return; }
     }
     const wasActive = clTemplates.find((t) => t.id === clSelectedId)?.status === "active";
+    // code มาจาก assignChecklistCodes (คงค่าเดิมของข้อที่มีอยู่แล้ว, gen ใหม่เฉพาะข้อที่เพิ่งเพิ่ม)
+    // ส่วน sort_order ยังมาจากตำแหน่งใน array ตามเดิม — ลำดับการแสดงผลกับตัวระบุ (code) เป็นคนละเรื่องกัน
+    const codes = assignChecklistCodes(clItems);
     const payload = clItems.map((item, idx) => ({
-      code: `QC${String(idx + 1).padStart(2, "0")}`,
+      code: codes[idx],
       label: item.label.trim(),
       spec_text: item.spec_text.trim() || null,
       requires_photo: item.requires_photo,
