@@ -64,7 +64,9 @@ export const EXPERIMENTAL_NAV: NavItem[] = [
   // ต้นทุนเศษเปิดราคาทุนของวัสดุ จึงไม่เปิดกว้างเท่าหน้าคลัง
   { href: "/waste-cost", icon: "♻️", label: "ต้นทุนเศษ", roles: ["admin", "warehouse", "executive"] },
   { href: "/bom", icon: "📐", label: "BOQ / BOM", roles: ["admin", "warehouse"] },
-  { href: "/providers", icon: "🤝", label: "ผู้ให้บริการภายนอก", roles: ["admin", "warehouse", "head_technician", "staff"] },
+  // executive อยู่ด้วยเพราะเคยเป็นผู้ยื่นใบเคลมซัพพลายเออร์ 3 ใบจากทั้งหมด 11 ใบ
+  // หน้านี้เป็นทะเบียนอ่านเป็นหลัก ส่วนการอนุมัติ/ระงับผู้ให้บริการยังเป็น admin ที่ RPC
+  { href: "/providers", icon: "🤝", label: "ผู้ให้บริการภายนอก", roles: ["admin", "warehouse", "head_technician", "staff", "executive"] },
   { href: "/purchase-orders", icon: "🛒", label: "ใบสั่งซื้อและตรวจรับ", roles: ["admin", "warehouse", "staff"] },
   { href: "/documents", icon: "📄", label: "เอกสารแบบเดิม", roles: ["admin"] },
   { href: "/ncr", icon: "🔴", label: "NCR", roles: ["admin", "head_technician", "warehouse", "cs", "staff"] },

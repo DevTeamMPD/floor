@@ -84,6 +84,11 @@ describe("page access — แหล่งความจริงเดียว
     }
   });
 
+  /** executive เคยยื่นใบเคลมซัพพลายเออร์จริง จึงต้องเข้าทะเบียนผู้ให้บริการได้ */
+  it("executive เข้าทะเบียนผู้ให้บริการได้", () => {
+    expect(canRoleAccessPath("executive", "/providers")).toBe(true);
+  });
+
   it("หน้าตั้งค่าระบบและข้อมูลเชิงพาณิชย์ยังต้องแคบอยู่", () => {
     expect(canRoleAccessPath("staff", "/staff")).toBe(false);
     expect(canRoleAccessPath("staff", "/evaluation-config")).toBe(false);
