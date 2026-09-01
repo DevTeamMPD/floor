@@ -3,6 +3,7 @@
   "crons": [
     { "path": "/api/sync-evaluations", "schedule": "0 1 * * *" },
     { "path": "/api/documents/process", "schedule": "15 18 * * *" },
-    { "path": "/api/stock/shortage-check", "schedule": "0 0 * * *" }
+    { "path": "/api/stock/shortage-check", "schedule": "0 0 * * *" },
+    { "path": "/api/providers/eval-recompute", "schedule": "0 19 * * *" }
   ]
 }

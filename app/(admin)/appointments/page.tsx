@@ -8,6 +8,13 @@ import { floorErrorMessage } from "@/lib/floor-error-message";
 import TechnicianManager from "@/components/appointments/technician-manager";
 import TechnicianAssignmentButton from "@/components/appointments/technician-assignment";
 import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
+import {
+  evalComputedAtLabel,
+  evalDisplayLines,
+  evalEvidenceNote,
+  evalHeadline,
+  type StoredTeamEvalRow,
+} from "@/lib/provider-eval-display";
 
 interface TechTeam {
   id: string;
@@ -142,6 +149,9 @@ export default function AppointmentsPage() {
   const supabase = useMemo(() => createClient(), []);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [techs, setTechs] = useState<TechTeam[]>([]);
+  // P4-9: คะแนนประเมินทีม พร้อมคะแนนย่อยรายด้าน — โหลดแยกและไม่ให้ล้มทั้งหน้าถ้าอ่านไม่ได้
+  const [evalScores, setEvalScores] = useState<Record<string, StoredTeamEvalRow>>({});
+  const [openEvalTeamId, setOpenEvalTeamId] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [technicians, setTechnicians] = useState<FloorTechnician[]>([]);
   const [assignments, setAssignments] = useState<TechnicianAssignment[]>([]);
@@ -191,6 +201,12 @@ export default function AppointmentsPage() {
       setJobs((jobData ?? []) as Job[]);
       setTechnicians((personData ?? []) as FloorTechnician[]);
       setAssignments((assignmentData ?? []) as TechnicianAssignment[]);
+
+      // อ่านคะแนนทีมแยกจากก้อนหลักโดยตั้งใจ: ถ้าตารางนี้อ่านไม่ได้ (สิทธิ์/ยังไม่คำนวณ)
+      // หน้านัดหมายทั้งหน้าต้องยังใช้งานได้ตามปกติ แค่ไม่มีคะแนนโชว์
+      const { data: scoreData } = await supabase.from('tech_team_eval_scores').select('*');
+      setEvalScores(Object.fromEntries(((scoreData ?? []) as StoredTeamEvalRow[]).map((row) => [row.team_id, row])));
+
       setLastUpdatedAt(new Date());
     } catch (error) {
       const message = error instanceof Error ? error.message : 'ไม่สามารถเชื่อมต่อข้อมูลได้';
@@ -801,6 +817,52 @@ export default function AppointmentsPage() {
                       {tech.notes && <div className="text-xs text-slate-400">{tech.notes}</div>}
                       {tech.eval_avg > 0 && (
                         <div className="text-xs text-amber-500">★ {tech.eval_avg.toFixed(1)}</div>
+                      )}
+                      {/* P4-9 — ดาวโดด ๆ ที่ตรวจที่มาไม่ได้ แย่กว่าไม่มีดาว จึงกางคะแนนย่อยให้ดูได้ทุกทีม */}
+                      <button
+                        type="button"
+                        onClick={() => setOpenEvalTeamId(openEvalTeamId === tech.id ? null : tech.id)}
+                        className="mt-1 text-left text-xs text-slate-500 underline decoration-dotted underline-offset-2 hover:text-slate-700"
+                      >
+                        {evalHeadline(evalScores[tech.id])} · ดูที่มา {openEvalTeamId === tech.id ? '▲' : '▼'}
+                      </button>
+                      {openEvalTeamId === tech.id && (
+                        <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                          <div className="text-[11px] text-slate-500">{evalEvidenceNote(evalScores[tech.id])}</div>
+                          {evalScores[tech.id] ? (
+                            <>
+                              <table className="mt-2 w-full text-[11px]">
+                                <thead className="text-slate-400">
+                                  <tr>
+                                    <th className="text-left font-medium">ด้าน</th>
+                                    <th className="text-right font-medium">คะแนน</th>
+                                    <th className="text-right font-medium">ค่าดิบ</th>
+                                    <th className="text-right font-medium">น้ำหนัก</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {evalDisplayLines(evalScores[tech.id]).map((line) => (
+                                    <tr key={line.key} className="border-t border-slate-200">
+                                      <td className="py-1 pr-1 text-slate-700">
+                                        {line.label}
+                                        <div className="text-[10px] text-slate-400">{line.sample}</div>
+                                      </td>
+                                      <td className="py-1 text-right font-semibold text-slate-800">{line.score}</td>
+                                      <td className="py-1 text-right text-slate-500">{line.raw}</td>
+                                      <td className="py-1 text-right text-slate-400">{line.weight}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                              <div className="mt-1 text-[10px] text-slate-400">
+                                คะแนนแต่ละด้านถูกหดเข้าหาค่ากลางตามจำนวนตัวอย่าง ยิ่งข้อมูลน้อยยิ่งเข้าใกล้ค่ากลาง
+                                {evalComputedAtLabel(evalScores[tech.id]) && ` · คำนวณล่าสุด ${evalComputedAtLabel(evalScores[tech.id])}`}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="mt-1 text-[10px] text-slate-400">คะแนนคำนวณใหม่ทุกคืนโดยอัตโนมัติ</div>
+                          )}
+                        </div>
                       )}
                     </div>
                     <button onClick={() => { setEditTech(tech); setTechForm({ name: tech.name, phone: tech.phone ?? '', notes: tech.notes ?? '' }); }}

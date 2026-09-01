@@ -1,0 +1,369 @@
+/**
+ * P4-9 — คะแนนประเมินทีมช่าง/ผู้ให้บริการ: คณิตศาสตร์ล้วน ไม่มี I/O
+ *
+ * ทำไมคณิตศาสตร์ต้องอยู่ที่นี่ ไม่ใช่ใน SQL:
+ *   วิธี "นับ" ของจริง (มีกี่งาน กี่ NC ตรงนัดกี่ใบ) เปลี่ยนน้อยและต้องอยู่ใกล้ข้อมูล -> อยู่ใน
+ *   public.tech_team_eval_inputs()  ส่วนวิธี "ให้คะแนน" (ถ่วงน้ำหนักเท่าไร ตัวอย่างน้อยทำยังไง)
+ *   เป็นเรื่องนโยบายที่จะถูกเถียงและแก้บ่อย จึงต้องอยู่ในที่ที่เขียนเทสครอบได้ทุกกรณี
+ *
+ * ------------------------------------------------------------------------
+ * น้ำหนักที่เลือก และเหตุผล
+ * ------------------------------------------------------------------------
+ *   ความพอใจลูกค้า (CSAT)      40%  = เสียงเดียวจากนอกบริษัท ปลอมยากที่สุด และเป็นผลลัพธ์ที่เราขาย
+ *   ข้อบกพร่อง (NC)            25%  = สิ่งที่บริษัทตรวจเจอเอง มีหลักฐานเป็นใบ ไม่ใช่ความรู้สึก
+ *   ตรงนัด                     25%  = ต้นทุนที่ลูกค้าจ่ายก่อนจะรู้ว่างานดีหรือไม่ดี และวัดจากเวลาจริง
+ *   ผ่านตรวจรับครั้งแรก (FTP)  10%  = สัญญาณคุณภาพที่ละเอียดที่สุด แต่เพิ่งเริ่มเก็บ และซ้อนกับ NC อยู่แล้ว
+ *   ด้านที่ยังไม่มีข้อมูลเลยจะถูก "ตัดออกแล้วเกลี่ยน้ำหนักที่เหลือ" ไม่ใช่คิดเป็นศูนย์
+ *   เพราะการไม่มีข้อมูลไม่ใช่ผลงานที่แย่ และการให้ 0 จะลงโทษทีมใหม่โดยไม่มีเหตุผล
+ *
+ * ------------------------------------------------------------------------
+ * กฎกลุ่มตัวอย่างเล็ก — หัวใจของงานนี้
+ * ------------------------------------------------------------------------
+ *   ปัญหาที่ต้องกันให้ได้: ทีมที่มีงานใบเดียวแล้วบังเอิญได้ 5 ดาว ต้องไม่ขึ้นนำทีมที่ทำมา 50 งาน
+ *   วิธีที่ใช้คือการหดเข้าหาค่ากลาง (shrinkage) สองชั้น:
+ *
+ *   ชั้นที่ 1 — ค่ากลางของทั้งบริษัทเอง ก็ถูกหดเข้าหาค่ากลาง "เฉย ๆ" 70 ด้วยน้ำหนัก 10 งาน
+ *       prior = (ตัวอย่างทั้งบริษัท x ค่าเฉลี่ยทั้งบริษัท + 10 x 70) / (ตัวอย่างทั้งบริษัท + 10)
+ *       จำเป็น เพราะถ้าทั้งบริษัทมีข้อมูลอยู่ทีมเดียว ค่ากลาง "ของบริษัท" ก็คือทีมนั้นเอง
+ *       การหดเข้าหาตัวเองไม่ได้แก้อะไรเลย ต้องมีจุดยึดที่ไม่ได้มาจากข้อมูลด้วย
+ *
+ *   ชั้นที่ 2 — คะแนนรายด้านของทีมถูกหดเข้าหา prior ด้วยน้ำหนัก 5 งาน
+ *       score = (n x ค่าดิบของทีม + 5 x prior) / (n + 5)   โดย n = ตัวอย่างของ "ด้านนั้น"
+ *       ตอบคำถามว่า "ตัวเลขด้านนี้เชื่อได้แค่ไหน" — ลูกค้าให้คะแนนมาใบเดียวไม่เท่ากับห้าสิบใบ
+ *       ด้านที่ยังไม่มีข้อมูลเลย ได้ค่า prior ไปตรง ๆ (n = 0) ไม่ใช่ถูกตัดออกจากการคิด
+ *       จุดนี้สำคัญ: ถ้าตัดออกแล้วเกลี่ยน้ำหนัก ทีมที่มีข้อมูลเฉพาะด้านที่ตัวเองเด่น
+ *       จะถูกตัดสินจากด้านที่เด่นล้วน ๆ ซึ่งเป็นการเลือกสนามเอง
+ *
+ *   ชั้นที่ 3 — คะแนนรวมถูกหดเข้าหา 70 อีกครั้งด้วย "จำนวนงานทั้งหมดของทีม"
+ *       evalScore = (jobCount x คะแนนรวม + 5 x 70) / (jobCount + 5)
+ *       ชั้นที่ 2 ตอบว่า "เชื่อตัวเลขด้านนี้ได้แค่ไหน"  ชั้นที่ 3 ตอบคนละคำถามคือ
+ *       "เรารู้จักทีมนี้ดีแค่ไหน" — ทีมที่ทำมา 1 งานต่อให้ทุกด้านสวย เราก็ยังไม่รู้จักเขา
+ *       ผลจริงจากเทส: ทีม 1 งาน 5 ดาว ได้ราว 73  ส่วนทีม 50 งานที่ทำได้จริง ได้ราว 86
+ *
+ *   ประตูสุดท้าย — สองเงื่อนไขต้องผ่านพร้อมกันจึงจะประกาศดาว (ไม่งั้น is_provisional)
+ *       ก) งานอย่างน้อย 3 ใบ — งานเดียวยังแยกไม่ออกว่าเป็นฝีมือหรือเป็นวันโชคดี
+ *       ข) "หลักฐานที่ถูกบันทึกจริง" อย่างน้อย 5 จุด = คะแนนลูกค้า + งานที่เทียบวันนัดได้ + ผลตรวจรับ
+ *          ข้อนี้จำเป็น เพราะด้าน NC ให้คะแนนเต็มกับทีมที่ "ไม่มีใครเปิด NC ใส่" ซึ่งวันนี้เป็นจริง
+ *          กับทุกทีมเพราะระบบ NC ยังไม่มีใครใช้ — การไม่มีข่าวร้ายยังไม่ใช่ข่าวดี
+ *          ถ้าไม่มีข้อนี้ ทีมที่ไม่มีข้อมูลอะไรเลยจะได้ดาวราว 3.6 ดวงจากความว่างเปล่า
+ *       คะแนนยังคำนวณและแสดงพร้อมคำว่า "ยังไม่นิ่ง" เพื่อความโปร่งใส แต่จะไม่ถูกเขียนกลับไปที่
+ *       tech_teams.eval_avg ที่หน้าจอเอาไปโชว์เป็นดาว
+ *       เงื่อนไข (ก) ถูกย้ำเป็น check constraint ที่ตาราง จึงข้ามด้วยโค้ดฝั่งไหนก็ไม่ได้
+ */
+
+export const PROVIDER_EVAL_METHOD_VERSION = "P4-9.1";
+
+/** น้ำหนักของแต่ละด้าน — รวมกันได้ 1 เมื่อมีข้อมูลครบทุกด้าน */
+export const EVAL_WEIGHTS = { csat: 0.4, ncr: 0.25, onTime: 0.25, firstTimePass: 0.1 } as const;
+export type EvalComponentKey = keyof typeof EVAL_WEIGHTS;
+
+export const EVAL_COMPONENT_LABELS: Record<EvalComponentKey, string> = {
+  csat: "ความพอใจลูกค้า",
+  ncr: "ข้อบกพร่อง (NC)",
+  onTime: "ตรงนัด",
+  firstTimePass: "ผ่านตรวจรับครั้งแรก",
+};
+
+export const EVAL_COMPONENT_SAMPLE_LABELS: Record<EvalComponentKey, string> = {
+  csat: "งานที่ลูกค้าให้คะแนน",
+  ncr: "งานทั้งหมดที่นับ NC",
+  onTime: "งานที่มีทั้งวันนัดและวันจบจริง",
+  firstTimePass: "งานที่มีผลตรวจรับ",
+};
+
+/** น้ำหนักที่ทีมต้องมีผลงานเท่าไรคะแนนตัวเองถึงจะมีน้ำหนักเท่าค่ากลาง (หน่วย: งาน) */
+export const SHRINK_K = 5;
+/** ค่ากลาง "เฉย ๆ" ของทีมที่ยังไม่มีอะไรพิสูจน์ — ไม่ดีไม่แย่ */
+export const NEUTRAL_PRIOR = 70;
+/** น้ำหนักของค่ากลางเฉย ๆ ที่ถ่วงค่าเฉลี่ยทั้งบริษัทอีกชั้น (หน่วย: งาน) */
+export const NEUTRAL_PRIOR_WEIGHT = 10;
+/** งานขั้นต่ำก่อนประกาศดาวบน tech_teams.eval_avg — ต่ำกว่านี้ = ยังไม่นิ่ง */
+export const MIN_JOBS_FOR_STARS = 3;
+/** น้ำหนักการหดคะแนนรวมตามจำนวนงานทั้งหมดของทีม (หน่วย: งาน) */
+export const CONFIDENCE_K = 5;
+/** จุดข้อมูลที่ "ถูกบันทึกจริง" ขั้นต่ำก่อนประกาศดาว — ไม่นับด้าน NC ที่ได้คะแนนจากการไม่มีข่าว */
+export const MIN_DIRECT_EVIDENCE = 5;
+
+/** NC ถ่วงน้ำหนักต่อ 1 งาน ที่ทำให้คะแนนด้าน NC เหลือ 0 */
+export const NCR_TOLERANCE_PER_JOB = 0.5;
+
+export interface TeamEvalInput {
+  teamId: string;
+  teamName: string;
+  providerType: string | null;
+  isActive: boolean;
+  jobCount: number;
+  /** ผลรวมคะแนนความพอใจ (1-5) ต่อ "งาน" ไม่ใช่ต่อใบประเมิน */
+  csatSum: number;
+  csatCount: number;
+  ncrWeighted: number;
+  ncrCount: number;
+  onTimeCount: number;
+  onTimeBase: number;
+  firstPassCount: number;
+  firstPassBase: number;
+}
+
+export interface EvalComponentScore {
+  key: EvalComponentKey;
+  label: string;
+  /** ค่าดิบก่อนหด 0-100 (null = ไม่มีข้อมูลด้านนี้) */
+  raw: number | null;
+  /** คะแนนหลังหดเข้าหาค่ากลาง 0-100 */
+  score: number | null;
+  /** จำนวนงานที่ด้านนี้ยืนอยู่บน */
+  sample: number;
+  /** ค่ากลางที่ใช้หดในรอบนี้ */
+  prior: number;
+  /** น้ำหนักที่ใช้จริงหลังเกลี่ย (0 = ด้านนี้ไม่มีข้อมูล จึงไม่ถูกนับ) */
+  weight: number;
+}
+
+export interface TeamEvalScore {
+  teamId: string;
+  teamName: string;
+  providerType: string | null;
+  methodVersion: string;
+  jobCount: number;
+  hasData: boolean;
+  isProvisional: boolean;
+  /** คะแนนรวมจากผลงานล้วน ๆ ก่อนถ่วงด้วยปริมาณงาน 0-100 (null = ไม่มีข้อมูลสักด้าน) */
+  performanceScore: number | null;
+  /** คะแนนรวมที่ใช้จริง = performanceScore หดตามจำนวนงานทั้งหมด 0-100 */
+  evalScore: number | null;
+  /** ดาว 0-5 = evalScore/20 (null เมื่อไม่มีข้อมูล) */
+  evalAvg: number | null;
+  ncrWeighted: number;
+  ncrCount: number;
+  /** จำนวนจุดข้อมูลที่มีคนบันทึกไว้จริง (คะแนนลูกค้า + งานที่เทียบวันนัดได้ + ผลตรวจรับ) */
+  directEvidence: number;
+  components: EvalComponentScore[];
+  /** คำอธิบายภาษาไทยว่าทำไมคะแนนนี้ถึงแสดงแบบนี้ */
+  reason: string;
+}
+
+function clamp(value: number, min = 0, max = 100): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function round(value: number, digits = 1): number {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function num(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** คะแนนความพอใจ 1-5 -> 0-100 (1 ดาว = 0 คะแนน ไม่ใช่ 20 เพราะ 1 ดาวคือแย่ที่สุดที่ให้ได้) */
+export function csatToScore(average: number): number {
+  return clamp(((average - 1) / 4) * 100);
+}
+
+/** NC ถ่วงน้ำหนักต่องาน -> 0-100 */
+export function ncrToScore(weighted: number, jobs: number): number {
+  if (jobs <= 0) return NEUTRAL_PRIOR;
+  return clamp(100 * (1 - weighted / jobs / NCR_TOLERANCE_PER_JOB));
+}
+
+interface RawComponent {
+  raw: number | null;
+  sample: number;
+  /** ตัวตั้ง/ตัวหารสำหรับรวมเป็นค่ากลางทั้งบริษัท */
+  poolNumerator: number;
+  poolDenominator: number;
+}
+
+function rawComponents(input: TeamEvalInput): Record<EvalComponentKey, RawComponent> {
+  const csatAvg = input.csatCount > 0 ? input.csatSum / input.csatCount : null;
+  return {
+    csat: {
+      raw: csatAvg === null ? null : csatToScore(csatAvg),
+      sample: input.csatCount,
+      poolNumerator: input.csatSum,
+      poolDenominator: input.csatCount,
+    },
+    ncr: {
+      // ฐานของด้านนี้คือ "ทุกงานของทีม" เพราะงานที่ไม่มี NC คือข้อมูลที่ดี ไม่ใช่ข้อมูลที่ขาด
+      raw: input.jobCount > 0 ? ncrToScore(input.ncrWeighted, input.jobCount) : null,
+      sample: input.jobCount,
+      poolNumerator: input.ncrWeighted,
+      poolDenominator: input.jobCount,
+    },
+    onTime: {
+      raw: input.onTimeBase > 0 ? clamp((input.onTimeCount / input.onTimeBase) * 100) : null,
+      sample: input.onTimeBase,
+      poolNumerator: input.onTimeCount,
+      poolDenominator: input.onTimeBase,
+    },
+    firstTimePass: {
+      raw: input.firstPassBase > 0 ? clamp((input.firstPassCount / input.firstPassBase) * 100) : null,
+      sample: input.firstPassBase,
+      poolNumerator: input.firstPassCount,
+      poolDenominator: input.firstPassBase,
+    },
+  };
+}
+
+/**
+ * ค่ากลางที่ใช้หด = ค่าเฉลี่ยรวมทั้งบริษัท ที่ถูกหดเข้าหา NEUTRAL_PRIOR อีกชั้นหนึ่ง
+ * ชั้นที่สองคือสิ่งที่กันกรณี "ทั้งบริษัทมีข้อมูลอยู่ทีมเดียว" ไม่ให้ทีมนั้นหดเข้าหาตัวเอง
+ */
+export function fleetPrior(key: EvalComponentKey, inputs: TeamEvalInput[]): number {
+  let numerator = 0;
+  let denominator = 0;
+  for (const input of inputs) {
+    const component = rawComponents(input)[key];
+    numerator += component.poolNumerator;
+    denominator += component.poolDenominator;
+  }
+  if (denominator <= 0) return NEUTRAL_PRIOR;
+
+  const pooledRaw =
+    key === "csat" ? csatToScore(numerator / denominator)
+    : key === "ncr" ? ncrToScore(numerator, denominator)
+    : clamp((numerator / denominator) * 100);
+
+  return (denominator * pooledRaw + NEUTRAL_PRIOR_WEIGHT * NEUTRAL_PRIOR) / (denominator + NEUTRAL_PRIOR_WEIGHT);
+}
+
+/** หดค่าดิบเข้าหาค่ากลางตามจำนวนตัวอย่าง — สูตรเดียวที่ใช้กับทุกด้าน */
+export function shrink(raw: number, sample: number, prior: number): number {
+  if (sample <= 0) return prior;
+  return (sample * raw + SHRINK_K * prior) / (sample + SHRINK_K);
+}
+
+export function scoreTeam(input: TeamEvalInput, fleet: TeamEvalInput[]): TeamEvalScore {
+  const raws = rawComponents(input);
+  const keys = Object.keys(EVAL_WEIGHTS) as EvalComponentKey[];
+
+  const withData = keys.filter((key) => raws[key].raw !== null);
+
+  const components: EvalComponentScore[] = keys.map((key) => {
+    const prior = fleetPrior(key, fleet);
+    const rawValue = raws[key].raw;
+    return {
+      key,
+      label: EVAL_COMPONENT_LABELS[key],
+      raw: rawValue === null ? null : round(rawValue),
+      // ด้านที่ไม่มีข้อมูล (sample = 0) ได้ค่ากลางไปตรง ๆ ไม่ใช่ 0 และไม่ใช่การถูกตัดออก
+      score: round(shrink(rawValue ?? prior, raws[key].sample, prior)),
+      sample: raws[key].sample,
+      prior: round(prior),
+      // ทุกด้านถือน้ำหนักเต็มเสมอ ไม่มีการเกลี่ย — ทีมจึงเลือกสนามที่ตัวเองเด่นไม่ได้
+      weight: EVAL_WEIGHTS[key],
+    };
+  });
+
+  const hasData = withData.length > 0;
+  const performance = components.reduce((sum, component) => sum + (component.score ?? 0) * component.weight, 0);
+  const performanceScore = hasData ? round(performance) : null;
+  // ชั้นที่ 3 — หดตามจำนวนงานทั้งหมด: ตอบคำถาม "เรารู้จักทีมนี้ดีแค่ไหน"
+  const evalScore = hasData
+    ? round((input.jobCount * performance + CONFIDENCE_K * NEUTRAL_PRIOR) / (input.jobCount + CONFIDENCE_K))
+    : null;
+  const directEvidence = input.csatCount + input.onTimeBase + input.firstPassBase;
+  const isProvisional =
+    !hasData || input.jobCount < MIN_JOBS_FOR_STARS || directEvidence < MIN_DIRECT_EVIDENCE;
+
+  return {
+    teamId: input.teamId,
+    teamName: input.teamName,
+    providerType: input.providerType,
+    methodVersion: PROVIDER_EVAL_METHOD_VERSION,
+    jobCount: input.jobCount,
+    hasData,
+    isProvisional,
+    performanceScore,
+    evalScore,
+    evalAvg: evalScore === null ? null : round(evalScore / 20, 2),
+    ncrWeighted: round(input.ncrWeighted, 2),
+    ncrCount: input.ncrCount,
+    directEvidence,
+    components,
+    reason: evalReason(hasData, isProvisional, input.jobCount, directEvidence, withData.length, keys.length),
+  };
+}
+
+export function evalReason(
+  hasData: boolean,
+  isProvisional: boolean,
+  jobCount: number,
+  directEvidence: number,
+  componentsWithData: number,
+  componentsTotal: number,
+): string {
+  if (!hasData) return "ยังไม่มีข้อมูลสักด้าน จึงยังให้คะแนนไม่ได้";
+  const coverage = `ใช้ข้อมูล ${componentsWithData} จาก ${componentsTotal} ด้าน`;
+  if (!isProvisional) return `คิดจากงาน ${jobCount} ใบ (${coverage})`;
+  if (jobCount < MIN_JOBS_FOR_STARS) {
+    return `ยังไม่นิ่ง — มีงานที่นับได้ ${jobCount} ใบ ต้องมีอย่างน้อย ${MIN_JOBS_FOR_STARS} ใบจึงจะประกาศดาว (${coverage})`;
+  }
+  return `ยังไม่นิ่ง — มีหลักฐานที่บันทึกไว้จริง ${directEvidence} จุด ต้องมีอย่างน้อย ${MIN_DIRECT_EVIDENCE} จุด `
+    + `(คะแนนลูกค้า/งานที่เทียบวันนัดได้/ผลตรวจรับ) จึงจะประกาศดาว (${coverage})`;
+}
+
+export function scoreAllTeams(inputs: TeamEvalInput[]): TeamEvalScore[] {
+  return inputs.map((input) => scoreTeam(input, inputs));
+}
+
+/** แปลง payload ที่ RPC tech_team_eval_inputs() ส่งมาให้เป็น input ที่คำนวณได้ — ทนของที่ขาด */
+export function parseEvalInputs(value: unknown): TeamEvalInput[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const raw = row as Record<string, unknown>;
+    const teamId = typeof raw.teamId === "string" ? raw.teamId : "";
+    if (!teamId) return [];
+    return [{
+      teamId,
+      teamName: typeof raw.teamName === "string" ? raw.teamName : "ไม่ทราบชื่อทีม",
+      providerType: typeof raw.providerType === "string" ? raw.providerType : null,
+      isActive: raw.isActive !== false,
+      jobCount: num(raw.jobCount),
+      csatSum: num(raw.csatSum),
+      csatCount: num(raw.csatCount),
+      ncrWeighted: num(raw.ncrWeighted),
+      ncrCount: num(raw.ncrCount),
+      onTimeCount: num(raw.onTimeCount),
+      onTimeBase: num(raw.onTimeBase),
+      firstPassCount: num(raw.firstPassCount),
+      firstPassBase: num(raw.firstPassBase),
+    }];
+  });
+}
+
+function componentOf(score: TeamEvalScore, key: EvalComponentKey): EvalComponentScore | undefined {
+  return score.components.find((component) => component.key === key);
+}
+
+/** แปลงผลคะแนนเป็นรูปที่ apply_tech_team_eval_scores(jsonb) รับ */
+export function toApplyPayload(scores: TeamEvalScore[]): Record<string, unknown>[] {
+  return scores.map((score) => ({
+    teamId: score.teamId,
+    methodVersion: score.methodVersion,
+    evalScore: score.evalScore,
+    evalAvg: score.evalAvg,
+    hasData: score.hasData,
+    isProvisional: score.isProvisional,
+    jobCount: score.jobCount,
+    performanceScore: score.performanceScore,
+    directEvidence: score.directEvidence,
+    csatScore: componentOf(score, "csat")?.score ?? null,
+    csatRaw: componentOf(score, "csat")?.raw ?? null,
+    csatSample: componentOf(score, "csat")?.sample ?? 0,
+    ncrScore: componentOf(score, "ncr")?.score ?? null,
+    ncrRaw: componentOf(score, "ncr")?.raw ?? null,
+    ncrSample: componentOf(score, "ncr")?.sample ?? 0,
+    ncrWeighted: score.ncrWeighted,
+    ncrCount: score.ncrCount,
+    onTimeScore: componentOf(score, "onTime")?.score ?? null,
+    onTimeRaw: componentOf(score, "onTime")?.raw ?? null,
+    onTimeSample: componentOf(score, "onTime")?.sample ?? 0,
+    ftpScore: componentOf(score, "firstTimePass")?.score ?? null,
+    ftpRaw: componentOf(score, "firstTimePass")?.raw ?? null,
+    ftpSample: componentOf(score, "firstTimePass")?.sample ?? 0,
+  }));
+}

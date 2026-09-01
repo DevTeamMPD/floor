@@ -5,6 +5,18 @@ import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { floorActionError } from "@/lib/floor-error-message";
+import {
+  CREATE_NCR_RPC,
+  EMPTY_NCR_FORM_OPTIONS,
+  NCR_FORM_OPTIONS_RPC,
+  causeLabel,
+  findJob,
+  ncrFormError,
+  parseNcrFormOptions,
+  providerEmptyMessage,
+  providerFieldVisible,
+  type NcrFormOptions,
+} from "@/lib/ncr-cause";
 
 type Severity = "critical" | "high" | "medium" | "low";
 type IsoStage = "containment" | "root_cause" | "capa_plan" | "implementation" | "effectiveness" | "closed";
@@ -13,6 +25,8 @@ interface NcrReport {
   id: string; job_no: string | null; title: string; type: string; status: string; severity: Severity;
   due_at: string | null; product_sku: string | null; quantity: number | null; description: string | null;
   estimated_value_thb: number | null; created_by: string | null; created_at: string; updated_at: string; closed_at: string | null;
+  // P4-4/P4-10: แกน "ทำไมถึงเกิด" และผู้ให้บริการภายนอกที่เกี่ยวข้อง — ทั้งคู่ว่างได้ (NC เก่าไม่มี)
+  cause_code: string | null; provider_id: string | null;
 }
 
 interface IsoDetail {
@@ -21,8 +35,6 @@ interface IsoDetail {
   evidence: Array<{ label: string; complete: boolean }>;
   timeline: Array<{ title: string; detail: string; at: string }>;
 }
-
-interface JobOption { job_no: string; customer: string | null }
 
 const ISO_STAGES: Array<{ key: IsoStage; short: string; label: string; clause: string }> = [
   { key: "containment", short: "1", label: "ควบคุมทันที", clause: "ISO 8.7" },
@@ -65,11 +77,11 @@ const hoursFromNow = (hours: number) => new Date(previewNow.getTime() + hours * 
 const daysAgo = (days: number) => new Date(previewNow.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
 
 const DEMO_NCRS: NcrReport[] = [
-  { id: "demo-ncr-001", job_no: "ORD-202608-8293", title: "พื้นยกตัวหลังติดตั้งบริเวณทางเดิน", type: "installation", status: "root_cause", severity: "critical", due_at: hoursFromNow(-5), product_sku: "RS-WB-18", quantity: 18, description: "ลูกค้าแจ้งว่าพื้นยกตัวหลายจุดหลังส่งมอบ 7 วัน มีความเสี่ยงสะดุดล้ม", estimated_value_thb: 42000, created_by: "ฝ่ายบริการลูกค้า", created_at: daysAgo(2), updated_at: hoursFromNow(-2), closed_at: null },
-  { id: "demo-ncr-002", job_no: "ORD-202608-8137", title: "สีสินค้าในล็อตเดียวกันไม่สม่ำเสมอ", type: "quality", status: "capa_plan", severity: "high", due_at: hoursFromNow(8), product_sku: "RL-160-OAK", quantity: 26, description: "พบความต่างของเฉดสีระหว่างกล่องในล็อตเดียวกัน ต้องกักกันสต็อกคงเหลือ", estimated_value_thb: 68500, created_by: "หัวหน้าช่าง", created_at: daysAgo(4), updated_at: hoursFromNow(-6), closed_at: null },
-  { id: "demo-ncr-003", job_no: "ORD-202608-8064", title: "อุปกรณ์จบงานจัดส่งไม่ครบตาม BOQ", type: "missing", status: "implementation", severity: "medium", due_at: hoursFromNow(46), product_sku: "ACC-END-08", quantity: 4, description: "ทีมติดตั้งได้รับตัวจบไม่ครบ ทำให้งานส่งมอบเลื่อน 1 วัน", estimated_value_thb: 7200, created_by: "คลังสินค้า", created_at: daysAgo(6), updated_at: hoursFromNow(-12), closed_at: null },
-  { id: "demo-ncr-004", job_no: "ORD-202608-7970", title: "วิธีตรวจรับความชื้นก่อนติดตั้งไม่ครบ", type: "process", status: "effectiveness", severity: "medium", due_at: hoursFromNow(70), product_sku: null, quantity: null, description: "ทบทวน checklist และอบรมทีมแล้ว รอตรวจติดตามงานตัวอย่าง 3 งาน", estimated_value_thb: 0, created_by: "Quality Manager", created_at: daysAgo(14), updated_at: daysAgo(1), closed_at: null },
-  { id: "demo-ncr-005", job_no: "ORD-202608-7844", title: "บรรจุภัณฑ์เสียหายระหว่างขนส่ง", type: "damage", status: "closed", severity: "low", due_at: daysAgo(3), product_sku: "RL-180-WB", quantity: 2, description: "เปลี่ยนสินค้าและเพิ่มมาตรฐานการรัดพาเลต ปิดหลังติดตาม 14 วันไม่เกิดซ้ำ", estimated_value_thb: 4100, created_by: "คลังสินค้า", created_at: daysAgo(30), updated_at: daysAgo(3), closed_at: daysAgo(3) },
+  { id: "demo-ncr-001", job_no: "ORD-202608-8293", title: "พื้นยกตัวหลังติดตั้งบริเวณทางเดิน", type: "installation", status: "root_cause", severity: "critical", due_at: hoursFromNow(-5), product_sku: "RS-WB-18", quantity: 18, description: "ลูกค้าแจ้งว่าพื้นยกตัวหลายจุดหลังส่งมอบ 7 วัน มีความเสี่ยงสะดุดล้ม", estimated_value_thb: 42000, created_by: "ฝ่ายบริการลูกค้า", created_at: daysAgo(2), updated_at: hoursFromNow(-2), closed_at: null, cause_code: "INSTALL", provider_id: null },
+  { id: "demo-ncr-002", job_no: "ORD-202608-8137", title: "สีสินค้าในล็อตเดียวกันไม่สม่ำเสมอ", type: "quality", status: "capa_plan", severity: "high", due_at: hoursFromNow(8), product_sku: "RL-160-OAK", quantity: 26, description: "พบความต่างของเฉดสีระหว่างกล่องในล็อตเดียวกัน ต้องกักกันสต็อกคงเหลือ", estimated_value_thb: 68500, created_by: "หัวหน้าช่าง", created_at: daysAgo(4), updated_at: hoursFromNow(-6), closed_at: null, cause_code: "MATERIAL", provider_id: null },
+  { id: "demo-ncr-003", job_no: "ORD-202608-8064", title: "อุปกรณ์จบงานจัดส่งไม่ครบตาม BOQ", type: "missing", status: "implementation", severity: "medium", due_at: hoursFromNow(46), product_sku: "ACC-END-08", quantity: 4, description: "ทีมติดตั้งได้รับตัวจบไม่ครบ ทำให้งานส่งมอบเลื่อน 1 วัน", estimated_value_thb: 7200, created_by: "คลังสินค้า", created_at: daysAgo(6), updated_at: hoursFromNow(-12), closed_at: null, cause_code: "LOGISTICS", provider_id: null },
+  { id: "demo-ncr-004", job_no: "ORD-202608-7970", title: "วิธีตรวจรับความชื้นก่อนติดตั้งไม่ครบ", type: "process", status: "effectiveness", severity: "medium", due_at: hoursFromNow(70), product_sku: null, quantity: null, description: "ทบทวน checklist และอบรมทีมแล้ว รอตรวจติดตามงานตัวอย่าง 3 งาน", estimated_value_thb: 0, created_by: "Quality Manager", created_at: daysAgo(14), updated_at: daysAgo(1), closed_at: null, cause_code: "OTHER", provider_id: null },
+  { id: "demo-ncr-005", job_no: "ORD-202608-7844", title: "บรรจุภัณฑ์เสียหายระหว่างขนส่ง", type: "damage", status: "closed", severity: "low", due_at: daysAgo(3), product_sku: "RL-180-WB", quantity: 2, description: "เปลี่ยนสินค้าและเพิ่มมาตรฐานการรัดพาเลต ปิดหลังติดตาม 14 วันไม่เกิดซ้ำ", estimated_value_thb: 4100, created_by: "คลังสินค้า", created_at: daysAgo(30), updated_at: daysAgo(3), closed_at: daysAgo(3), cause_code: "LOGISTICS", provider_id: null },
 ];
 
 const DEMO_DETAILS: Record<string, IsoDetail> = {
@@ -111,7 +123,7 @@ const DEMO_DETAILS: Record<string, IsoDetail> = {
   },
 };
 
-const EMPTY_FORM = { job_no: "", title: "", type: "quality", severity: "medium", description: "", created_by: "" };
+const EMPTY_FORM = { job_no: "", title: "", type: "quality", severity: "medium", description: "", created_by: "", cause_code: "", provider_id: "" };
 
 function stageOf(ncr: NcrReport): IsoStage {
   if (ncr.status in STAGE_STYLE) return ncr.status as IsoStage;
@@ -152,7 +164,8 @@ function NcrPageInner() {
   const prefillJobNo = params.get("job_no") ?? "";
   const supabase = useMemo(() => createClient(), []);
   const [ncrs, setNcrs] = useState<NcrReport[]>([]);
-  const [jobs, setJobs] = useState<JobOption[]>([]);
+  // ตัวเลือกทั้งหมดของฟอร์มมาจาก RPC เดียว (ncr_form_options) — ใบงาน + ทีมภายนอก + สาเหตุ + ผู้ให้บริการ
+  const [options, setOptions] = useState<NcrFormOptions>(EMPTY_NCR_FORM_OPTIONS);
   const [selected, setSelected] = useState<NcrReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [localPreview, setLocalPreview] = useState(false);
@@ -175,16 +188,25 @@ function NcrPageInner() {
       setLocalPreview(isLocal);
       if (isLocal) {
         setNcrs(DEMO_NCRS);
-        setJobs(DEMO_NCRS.filter((item) => item.job_no).map((item) => ({ job_no: item.job_no!, customer: item.title })));
+        setOptions({
+          ...EMPTY_NCR_FORM_OPTIONS,
+          jobs: DEMO_NCRS.filter((item) => item.job_no).map((item) => ({
+            jobNo: item.job_no!, customer: item.title, teamName: null, providerType: null, isExternal: false,
+          })),
+        });
         if (highlightId) setSelected(DEMO_NCRS.find((item) => item.id === highlightId) ?? null);
         setLoading(false);
         return;
       }
       try {
-        const [{ data: jobData }] = await Promise.all([
-          supabase.from("install_jobs").select("job_no, customer").order("job_no", { ascending: false }), loadNcrs(),
+        // เดิมที่นี่อ่าน install_jobs.select("job_no, customer") ซึ่งคอลัมน์ customer ไม่มีอยู่จริง
+        // (ชื่อจริงคือ customer_name) PostgREST จึงคืน error เงียบ ๆ และช่อง "ใบงาน" ว่างเปล่าตลอด
+        // = เปิด NC จากหน้านี้ไม่ได้เลย ตอนนี้ย้ายไปอ่านจาก RPC ที่เซิร์ฟเวอร์ประกอบให้ชุดเดียว
+        const [{ data: optionData, error: optionError }] = await Promise.all([
+          supabase.rpc(NCR_FORM_OPTIONS_RPC), loadNcrs(),
         ]);
-        setJobs((jobData ?? []) as JobOption[]);
+        if (optionError) throw optionError;
+        setOptions(parseNcrFormOptions(optionData));
       } catch (error) {
         toast.error(floorActionError("โหลด NCR", error));
       } finally { setLoading(false); }
@@ -208,17 +230,23 @@ function NcrPageInner() {
     if (filter === "overdue" && !isOverdue(ncr)) return false;
     if (filter === "critical" && !["critical", "high"].includes(ncr.severity)) return false;
     const needle = query.trim().toLowerCase();
-    return !needle || [ncr.title, ncr.job_no, ncr.product_sku, TYPE_LABELS[ncr.type]].some((value) => value?.toLowerCase().includes(needle));
-  }), [filter, ncrs, query]);
+    return !needle || [ncr.title, ncr.job_no, ncr.product_sku, TYPE_LABELS[ncr.type], causeLabel(ncr.cause_code, options.causes)]
+      .some((value) => value?.toLowerCase().includes(needle));
+  }), [filter, ncrs, options.causes, query]);
 
   async function createNcr() {
     if (localPreview) return;
-    if (!form.title.trim() || !form.job_no) { toast.error("กรุณาเลือกใบงานและระบุปัญหา"); return; }
+    const formError = ncrFormError(
+      { jobNo: form.job_no, title: form.title, causeCode: form.cause_code, providerId: form.provider_id },
+      options.jobs, options.causes,
+    );
+    if (formError) { toast.error(formError); return; }
     setSaving(true);
     try {
-      const { error } = await supabase.rpc("create_floor_ncr", {
+      const { error } = await supabase.rpc(CREATE_NCR_RPC, {
         p_job_no: form.job_no, p_title: form.title.trim(), p_type: form.type, p_product_sku: null, p_quantity: null,
         p_description: form.description.trim() || null, p_estimated_value_thb: null, p_created_by: form.created_by.trim() || null, p_severity: form.severity,
+        p_cause_code: form.cause_code || null, p_provider_id: form.provider_id || null,
       });
       if (error) throw error;
       toast.success("สร้าง NCR แล้ว"); setShowForm(false); setForm(EMPTY_FORM); await loadNcrs();
@@ -267,7 +295,7 @@ function NcrPageInner() {
 
           {loading ? <div className="p-12 text-center text-sm text-slate-400">กำลังโหลด NCR...</div> : <div className="divide-y divide-slate-100">
             {visibleNcrs.map((ncr) => { const stage = stageOf(ncr); const severity = SEVERITY_STYLE[ncr.severity]; return <button key={ncr.id} onClick={() => setSelected(ncr)} className="grid w-full grid-cols-1 gap-3 px-4 py-4 text-left transition hover:bg-slate-50 lg:grid-cols-[1.5fr_.7fr_.7fr_.6fr_auto] lg:items-center">
-              <div className="min-w-0"><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 shrink-0 rounded-full ${severity.dot}`} /><p className="truncate font-bold text-slate-900">{ncr.title}</p></div><p className="mt-1 truncate pl-[18px] text-xs text-slate-500">{ncr.job_no || "ไม่ผูกใบงาน"} · {TYPE_LABELS[ncr.type] ?? ncr.type}</p></div>
+              <div className="min-w-0"><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 shrink-0 rounded-full ${severity.dot}`} /><p className="truncate font-bold text-slate-900">{ncr.title}</p></div><p className="mt-1 truncate pl-[18px] text-xs text-slate-500">{ncr.job_no || "ไม่ผูกใบงาน"} · อาการ: {TYPE_LABELS[ncr.type] ?? ncr.type} · สาเหตุ: {causeLabel(ncr.cause_code, options.causes)}</p></div>
               <div><span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${severity.cls}`}>{severity.label}</span></div><div><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${STAGE_STYLE[stage].cls}`}>{STAGE_STYLE[stage].label}</span></div>
               <div><p className={`text-xs font-bold ${isOverdue(ncr) ? "text-red-700" : "text-slate-700"}`}>{isOverdue(ncr) ? "เกิน SLA" : stage === "closed" ? "ปิดแล้ว" : "ครบกำหนด"}</p><p className="mt-0.5 text-xs text-slate-400">{formatDate(stage === "closed" ? ncr.closed_at : ncr.due_at)}</p></div><div className="flex items-center justify-between gap-4 lg:justify-end"><span className="text-xs font-semibold text-slate-500">{formatMoney(ncr.estimated_value_thb)}</span><span className="text-xl text-slate-300">›</span></div>
             </button>; })}
@@ -278,7 +306,7 @@ function NcrPageInner() {
 
       {selected && selectedDetail && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-3 backdrop-blur-[1px] sm:p-6" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelected(null); }}>
         <div role="dialog" aria-modal="true" aria-label={`รายละเอียด ${selectedDetail.ncrNo}`} className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-          <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6"><div><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-black text-slate-950">{selectedDetail.ncrNo}</h2><span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${SEVERITY_STYLE[selected.severity].cls}`}>{SEVERITY_STYLE[selected.severity].label}</span><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${STAGE_STYLE[selectedDetail.isoStage].cls}`}>{STAGE_STYLE[selectedDetail.isoStage].label}</span></div><p className="mt-1 text-sm font-semibold text-slate-700">{selected.title}</p><p className="mt-1 text-xs text-slate-400">ใบงาน {selected.job_no || "—"} · {selectedDetail.source}</p></div><button aria-label="ปิดรายละเอียด" onClick={() => setSelected(null)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700">×</button></div>
+          <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6"><div><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-black text-slate-950">{selectedDetail.ncrNo}</h2><span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${SEVERITY_STYLE[selected.severity].cls}`}>{SEVERITY_STYLE[selected.severity].label}</span><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${STAGE_STYLE[selectedDetail.isoStage].cls}`}>{STAGE_STYLE[selectedDetail.isoStage].label}</span></div><p className="mt-1 text-sm font-semibold text-slate-700">{selected.title}</p><p className="mt-1 text-xs text-slate-400">ใบงาน {selected.job_no || "—"} · {selectedDetail.source}</p><p className="mt-1 text-xs font-semibold text-slate-500">อาการ: {TYPE_LABELS[selected.type] ?? selected.type} · สาเหตุ: {causeLabel(selected.cause_code, options.causes)}{selected.provider_id ? ` · ผู้ให้บริการ: ${options.providers.find((provider) => provider.id === selected.provider_id)?.name ?? "ไม่พบชื่อ"}` : ""}</p></div><button aria-label="ปิดรายละเอียด" onClick={() => setSelected(null)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700">×</button></div>
           <div className="overflow-y-auto">
             <div className="border-b border-slate-200 bg-slate-50 px-5 py-4 sm:px-6"><div className="grid grid-cols-3 gap-2 sm:grid-cols-6">{ISO_STAGES.map((stage, index) => { const current = ISO_STAGES.findIndex((item) => item.key === selectedDetail.isoStage); const done = index < current || selectedDetail.isoStage === "closed"; const active = index === current && selectedDetail.isoStage !== "closed"; return <div key={stage.key} className="text-center"><div className={`mx-auto flex h-8 w-8 items-center justify-center rounded-full text-xs font-black ${done ? "bg-emerald-500 text-white" : active ? "bg-red-600 text-white ring-4 ring-red-100" : "bg-slate-200 text-slate-500"}`}>{done ? "✓" : stage.short}</div><p className={`mt-1.5 text-[11px] font-bold ${active ? "text-red-700" : "text-slate-600"}`}>{stage.label}</p></div>; })}</div></div>
             <div className="grid gap-5 p-5 sm:p-6 lg:grid-cols-[1.45fr_.8fr]">
@@ -301,9 +329,32 @@ function NcrPageInner() {
       </div>}
 
       {showForm && !localPreview && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"><div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl"><div className="flex items-center justify-between border-b px-5 py-4"><h2 className="text-lg font-black">เปิด NCR ใหม่</h2><button onClick={() => setShowForm(false)} className="text-xl text-slate-400">×</button></div><div className="space-y-4 p-5">
-        <label className="block text-sm font-bold text-slate-700">ใบงาน<select value={form.job_no} onChange={(event) => setForm({ ...form, job_no: event.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2.5 text-sm"><option value="">เลือกใบงาน</option>{jobs.map((job) => <option key={job.job_no} value={job.job_no}>{job.job_no} · {job.customer}</option>)}</select></label>
+        <label className="block text-sm font-bold text-slate-700">ใบงาน<select value={form.job_no} onChange={(event) => setForm({ ...form, job_no: event.target.value, provider_id: "" })} className="mt-1 w-full rounded-xl border px-3 py-2.5 text-sm"><option value="">เลือกใบงาน</option>{options.jobs.map((job) => <option key={job.jobNo} value={job.jobNo}>{job.jobNo}{job.customer ? ` · ${job.customer}` : ""}{job.teamName ? ` · ${job.teamName}` : ""}</option>)}</select>{options.jobs.length === 0 && <span className="mt-1 block text-xs font-medium text-amber-700">ยังไม่มีใบงานให้เลือก — อาจยังไม่มีสิทธิ์ หรือยังไม่มีงานในระบบ</span>}</label>
         <label className="block text-sm font-bold text-slate-700">ปัญหา<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2.5 text-sm" /></label>
         <div className="grid grid-cols-2 gap-3"><label className="block text-sm font-bold text-slate-700">ประเภท<select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2.5 text-sm">{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="block text-sm font-bold text-slate-700">ความรุนแรง<select value={form.severity} onChange={(event) => setForm({ ...form, severity: event.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2.5 text-sm"><option value="critical">Critical · 4 ชม.</option><option value="high">High · 24 ชม.</option><option value="medium">Medium · 7 วัน</option><option value="low">Low · 14 วัน</option></select></label></div>
+        {/* P4-4 — "อาการ" กับ "สาเหตุ" เป็นคนละแกน จึงถามแยกกันสองช่อง ไม่ยุบเป็นช่องเดียว */}
+        <label className="block text-sm font-bold text-slate-700">สาเหตุที่ทำให้เกิด (ไม่บังคับ)
+          <select value={form.cause_code} onChange={(event) => setForm({ ...form, cause_code: event.target.value })} className="mt-1 w-full rounded-xl border px-3 py-2.5 text-sm">
+            <option value="">ยังไม่ระบุสาเหตุ</option>
+            {options.causes.map((cause) => <option key={cause.code} value={cause.code}>{cause.label}</option>)}
+          </select>
+          <span className="mt-1 block text-xs font-normal text-slate-500">
+            {options.causes.find((cause) => cause.code === form.cause_code)?.help
+              ?? "ประเภทข้างบนบอกว่า \"เกิดอะไรขึ้น\" ช่องนี้บอกว่า \"ทำไมถึงเกิด\" — เลือกภายหลังได้ถ้ายังไม่รู้"}
+          </span>
+        </label>
+        {/* P4-10 — โชว์เฉพาะงานที่ทีมช่างเป็นผู้รับเหมาภายนอก ไม่งั้นเป็นช่องรกที่ไม่มีคำตอบ */}
+        {providerFieldVisible(options.jobs, form.job_no) && (
+          <label className="block text-sm font-bold text-slate-700">ผู้ให้บริการภายนอกที่เกี่ยวข้อง
+            <select value={form.provider_id} onChange={(event) => setForm({ ...form, provider_id: event.target.value })} disabled={options.providers.length === 0} className="mt-1 w-full rounded-xl border px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400">
+              <option value="">ไม่ระบุ</option>
+              {options.providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
+            </select>
+            <span className="mt-1 block text-xs font-normal text-slate-500">
+              {providerEmptyMessage(options.providers) ?? `งานนี้ใช้ทีมภายนอก (${findJob(options.jobs, form.job_no)?.teamName ?? "ไม่ทราบชื่อทีม"})`}
+            </span>
+          </label>
+        )}
         <label className="block text-sm font-bold text-slate-700">รายละเอียด<textarea rows={3} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="mt-1 w-full resize-none rounded-xl border px-3 py-2.5 text-sm" /></label>
       </div><div className="flex gap-3 border-t p-5"><button onClick={() => setShowForm(false)} className="flex-1 rounded-xl border py-2.5 text-sm font-bold text-slate-600">ยกเลิก</button><button disabled={saving} onClick={() => void createNcr()} className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white disabled:opacity-50">{saving ? "กำลังบันทึก..." : "สร้าง NCR"}</button></div></div></div>}
     </div>
