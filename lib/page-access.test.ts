@@ -2,31 +2,118 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { ALL_NAV, CORE_NAV, EXPERIMENTAL_NAV, UNLISTED_NAV, DEFAULT_PAGE_ROLES } from "@/lib/nav";
-import { canRoleAccessPath, matchNavItem, normalizePath, rolesForPath } from "@/lib/page-access";
+import { PUBLIC_PREFIXES, canRoleAccessPath, isPublicPath, matchNavItem, normalizePath, rolesForPath } from "@/lib/page-access";
 import { STAFF_ROLES } from "@/lib/staff";
 
-/** รายชื่อหน้า admin จริงจากดิสก์ — กัน drift ระหว่างไฟล์ที่มีอยู่กับสิทธิ์ที่ประกาศไว้ */
-function adminPagePaths(): string[] {
-  const root = path.join(process.cwd(), "app", "(admin)");
-  const out: string[] = [];
+/**
+ * เส้นทางทั้งหมดที่มีไฟล์อยู่จริงในโฟลเดอร์ app/ — ไม่ใช่แค่ app/(admin)
+ *
+ * ทำไมต้องกวาดทั้ง app/: เทสรุ่นก่อนกวาดแค่ app/(admin) จึงมองไม่เห็นสองหน้าที่สำคัญที่สุด
+ * คือ "/" (app/page.tsx — เป็น start_url ของ PWA ทุกคนเปิดแอปมาเจอหน้านี้ก่อน) กับ
+ * /share/queue (app/share/queue/page.tsx) ทั้งสองหน้าถูกล็อกเหลือ admin โดยไม่มีใครตั้งใจ
+ * และเทสก็ยังเขียวอยู่ตลอด — เทสที่มองไม่เห็นที่ที่ผิดพลาดจริง ไม่ได้กันอะไรเลย
+ *
+ * กติกาการแปลงชื่อโฟลเดอร์เป็น URL (ตาม App Router):
+ *   (ชื่อ)   route group  ไม่ปรากฏใน URL — app/(admin)/home/page.tsx = /home
+ *   [ชื่อ]   dynamic segment  แทนด้วยค่าตัวอย่างเพื่อทดสอบการจับคู่กับหน้าแม่
+ *   @ชื่อ / _ชื่อ  parallel route กับโฟลเดอร์ส่วนตัว ไม่เป็นเส้นทางจริง
+ */
+function appRoutePaths(): { route: string; file: string }[] {
+  const root = path.join(process.cwd(), "app");
+  const out: { route: string; file: string }[] = [];
   const walk = (dir: string, prefix: string) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isDirectory()) walk(path.join(dir, entry.name), `${prefix}/${entry.name}`);
-      else if (entry.name === "page.tsx") out.push(prefix === "" ? "/" : prefix);
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name.startsWith("_") || entry.name.startsWith("@")) continue;
+        const isGroup = entry.name.startsWith("(") && entry.name.endsWith(")");
+        walk(full, isGroup ? prefix : `${prefix}/${entry.name}`);
+      } else if (entry.name === "page.tsx" || entry.name === "route.ts") {
+        out.push({ route: prefix === "" ? "/" : prefix, file: path.relative(process.cwd(), full) });
+      }
     }
   };
   walk(root, "");
-  return out.sort();
+  return out.sort((a, b) => a.route.localeCompare(b.route));
+}
+
+/** แทน [param] ด้วยค่าตัวอย่าง เพื่อให้จับคู่กับหน้าแม่ผ่าน prefix ได้เหมือนของจริง */
+function concreteRoute(route: string): string {
+  return route.replace(/\/\[[^\]]+\]/g, "/sample");
+}
+
+/** เส้นทางที่ "ด่านสิทธิ์ระดับหน้า" เอื้อมถึงจริง = ทุกเส้นทางในแอป ลบเส้นทางสาธารณะออก */
+function guardedRoutePaths(): { route: string; file: string }[] {
+  return appRoutePaths().filter((entry) => !isPublicPath(concreteRoute(entry.route)));
 }
 
 describe("page access — แหล่งความจริงเดียว", () => {
-  it("ทุกหน้า admin ที่มีไฟล์จริง ต้องมีสิทธิ์ประกาศไว้ใน lib/nav.ts", () => {
-    const undeclared = adminPagePaths().filter((page) => {
-      // หน้าที่มีพารามิเตอร์ ([jobNo]) ใช้สิทธิ์ของหน้าแม่ผ่านการจับคู่ prefix
-      const concrete = page.replace(/\/\[[^\]]+\]/g, "/sample");
-      return matchNavItem(concrete) === null;
-    });
+  it("ทุกเส้นทางในแอปที่ด่านเอื้อมถึง ต้องมีสิทธิ์ประกาศไว้ใน lib/nav.ts", () => {
+    const undeclared = guardedRoutePaths()
+      .filter((entry) => matchNavItem(concreteRoute(entry.route)) === null)
+      .map((entry) => `${entry.route}  (${entry.file})`);
     expect(undeclared).toEqual([]);
+  });
+
+  /**
+   * ด่านนี้เอื้อมถึงมากกว่าหน้าใน app/(admin) — เทสจึงต้องพิสูจน์ว่ามันเห็นหน้านอกกลุ่มด้วย
+   * ถ้าใครย้าย/ลบสองหน้านี้ เทสจะแดงทันทีแทนที่จะเงียบเหมือนรุ่นก่อน
+   */
+  it("รายการที่กวาดได้ต้องรวมหน้านอก app/(admin) ด้วย ไม่ใช่แค่ในกลุ่ม admin", () => {
+    const routes = guardedRoutePaths().map((entry) => entry.route);
+    expect(routes).toContain("/");
+    expect(routes).toContain("/share/queue");
+    expect(routes).toContain("/home");
+    // และต้องไม่ลากเส้นทางสาธารณะเข้ามาให้ต้องประกาศสิทธิ์โดยไม่จำเป็น
+    expect(routes).not.toContain("/login");
+    expect(routes).not.toContain("/eval");
+    expect(routes.some((route) => route.startsWith("/api/"))).toBe(false);
+    expect(routes.some((route) => route.startsWith("/work/"))).toBe(false);
+  });
+
+  /**
+   * *** ข้อที่ล็อกคนทั้งบริษัทออกจากแอปได้จริง ***
+   * app/manifest.ts ตั้ง start_url: "/" ทุกคนที่กดไอคอนแอปบนมือถือจะมาที่นี่ก่อนเสมอ
+   * ถ้า "/" ไม่ได้ประกาศไว้ 6 ใน 7 ตำแหน่งจะเจอ "ไม่มีสิทธิ์เข้าหน้านี้" ตั้งแต่วินาทีแรก
+   */
+  it("*** ทุกตำแหน่งต้องเปิด / ได้ เพราะเป็น start_url ของแอปที่ติดตั้งบนมือถือ ***", () => {
+    for (const role of STAFF_ROLES) expect(canRoleAccessPath(role, "/")).toBe(true);
+    const manifest = fs.readFileSync(path.join(process.cwd(), "app", "manifest.ts"), "utf8");
+    // ถ้าใครเปลี่ยน start_url ไปหน้าอื่น เทสข้อนี้ต้องถูกอ่านใหม่ ไม่ใช่ผ่านไปเงียบ ๆ
+    expect(manifest).toContain('start_url: "/"');
+  });
+
+  /**
+   * /share/queue เคยเปิดให้พนักงานที่ยัง active ทุกคน (middleware เดิมกันเฉพาะ /staff)
+   * การที่มันหล่นไป admin-only ตอนเพิ่มด่าน P5-6 เป็นผลข้างเคียงของการลืมประกาศ
+   * ไม่ใช่การตัดสินใจของใคร — เทสข้อนี้กันไม่ให้มันหล่นอีก
+   */
+  it("*** จอแชร์คิวหน้างานต้องเปิดให้ทุกตำแหน่งเหมือนก่อนมีด่าน ***", () => {
+    for (const role of STAFF_ROLES) expect(canRoleAccessPath(role, "/share/queue")).toBe(true);
+  });
+
+  it("รายการเส้นทางสาธารณะต้องตรงกับที่ middleware ใช้จริง", () => {
+    const middleware = fs.readFileSync(path.join(process.cwd(), "middleware.ts"), "utf8");
+    // middleware ต้องอ่านรายการเดียวกันนี้ ไม่ใช่ถือรายการของตัวเองไว้อีกชุด
+    expect(middleware).toContain("isPublicPath");
+    expect(middleware).not.toContain("const PUBLIC_PREFIXES");
+    for (const prefix of ["/login", "/auth", "/api"]) expect(PUBLIC_PREFIXES).toContain(prefix);
+    expect(isPublicPath("/api/documents/process")).toBe(true);
+    expect(isPublicPath("/work/abc123")).toBe(true);
+    expect(isPublicPath("/workshop")).toBe(false);
+    expect(isPublicPath("/")).toBe(false);
+  });
+
+  /** ไฟล์ใน public/ ไม่ใช่ "หน้า" — ถ้ามันผ่านด่าน โลโก้บนทุกหน้าจะกลายเป็นรูปเสีย */
+  it("ไฟล์ที่มีนามสกุลต้องถูกตัดออกจาก matcher ของ middleware", () => {
+    const middleware = fs.readFileSync(path.join(process.cwd(), "middleware.ts"), "utf8");
+    // ไม่ประกอบ regex ใหม่จากไฟล์ (เปราะเกินไป) แต่ยืนยันว่ากติกาการตัดยังอยู่จริง
+    expect(middleware).toContain("matcher:");
+    expect(middleware).toContain("[a-zA-Z0-9]+$");
+    // และไฟล์ทุกไฟล์ใน public/ ต้องมีนามสกุล ไม่งั้นกติกานี้ครอบไม่ถึงมัน
+    for (const asset of fs.readdirSync(path.join(process.cwd(), "public"))) {
+      expect(asset).toMatch(/\.[a-zA-Z0-9]+$/);
+    }
   });
 
   it("จับคู่หน้าลูกกับหน้าแม่ และเลือกอันที่ตรงยาวที่สุด", () => {

@@ -39,6 +39,39 @@ export function canRoleAccessPath(role: StaffRole | null | undefined, pathname: 
 }
 
 /**
+ * เส้นทางที่ไม่ต้องมีเซสชันพนักงาน — ประกาศไว้ที่นี่ ไม่ใช่ใน middleware.ts
+ *
+ * ย้ายมาที่นี่เพราะเทสกันการถอยหลัง (lib/page-access.test.ts) ต้องรู้ให้ครบว่า
+ * "ด่านกันหน้าเอื้อมถึงเส้นทางไหนบ้าง" ถ้ารายการนี้ยังซ่อนอยู่ใน middleware
+ * เทสจะเห็นแค่ครึ่งเดียวของความจริง แล้วหน้าที่ถูกล็อกโดยไม่ตั้งใจก็จะรอดเทสไปได้
+ * (เกิดขึ้นมาแล้วกับ "/" และ /share/queue ใน P5-6)
+ *
+ *   /login /auth   ทางเข้าระบบเอง — ถ้ากันไว้ก็เข้าสู่ระบบไม่ได้เลย
+ *   /work /dispatch /track /status /eval  ลิงก์โทเคนสำหรับช่างหน้างานและลูกค้า
+ *                  คนกลุ่มนี้ไม่มีบัญชีพนักงาน สิทธิ์ถูกกำกับด้วยโทเคนในลิงก์แทน
+ *   /api           ทุกเส้นทางตรวจสิทธิ์ของตัวเองภายใน (service key / โทเคน / RLS)
+ *   manifest + service worker  เบราว์เซอร์ขอไฟล์สองอันนี้ก่อนมีเซสชันเสมอ
+ */
+export const PUBLIC_PREFIXES = [
+  "/login",
+  "/auth",
+  "/work",
+  "/dispatch",
+  "/track",
+  "/status",
+  "/eval",
+  "/api",
+  "/manifest.webmanifest",
+  "/floor-sw.js",
+] as const;
+
+/** true = เส้นทางนี้ไม่ต้องมีเซสชันพนักงาน ด่านสิทธิ์ระดับหน้าจึงไม่เอื้อมถึง */
+export function isPublicPath(pathname: string): boolean {
+  const path = normalizePath(pathname);
+  return PUBLIC_PREFIXES.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
+}
+
+/**
  * middleware ใส่ path ปัจจุบันไว้ใน header นี้ เพื่อให้ server component อ่านได้
  * (layout/page ฝั่งเซิร์ฟเวอร์ไม่มีทางรู้ pathname ได้เอง)
  */

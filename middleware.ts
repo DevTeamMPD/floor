@@ -1,20 +1,10 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { PATHNAME_HEADER, canRoleAccessPath } from "@/lib/page-access";
+import { PATHNAME_HEADER, canRoleAccessPath, isPublicPath } from "@/lib/page-access";
 import type { StaffRole } from "@/lib/staff";
 
-const PUBLIC_PREFIXES = [
-  "/login",
-  "/auth",
-  "/work",
-  "/dispatch",
-  "/track",
-  "/status",
-  "/eval",
-  "/api",
-  "/manifest.webmanifest",
-  "/floor-sw.js",
-];
+// รายการเส้นทางสาธารณะย้ายไปอยู่ที่ lib/page-access.ts แล้ว (PUBLIC_PREFIXES)
+// เพื่อให้เทสกันการถอยหลังอ่านรายการเดียวกับที่ middleware ใช้จริง
 // Active FloorNow staff share visibility of operational data.  Access to state
 // transitions and administration remains enforced by RLS/RPC capability checks.
 const ADMIN_ONLY_PREFIXES = ["/staff"];
@@ -52,7 +42,7 @@ export async function middleware(request: NextRequest) {
   } else if (request.cookies.has("floor_local_demo")) {
     response.cookies.delete("floor_local_demo");
   }
-  const isPublic = isLocalDevelopment || PUBLIC_PREFIXES.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
+  const isPublic = isLocalDevelopment || isPublicPath(path);
   if (!user && !isPublic) {
     const login = request.nextUrl.clone();
     login.pathname = "/login";
@@ -100,5 +90,9 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // ไฟล์ที่มีนามสกุลถูกตัดออกจากด่านทั้งหมด — ไฟล์ใน public/ ไม่ใช่ "หน้า"
+  // ถ้าปล่อยให้ผ่านด่าน โลโก้ /lendi-engineering-logo.png จะถูก rewrite ไป /access-denied
+  // สำหรับทุกตำแหน่งที่ไม่ใช่ admin (โลโก้อยู่บน sidebar ของทุกหน้า) และถูก redirect
+  // ไป /login สำหรับคนที่ยังไม่ได้เข้าระบบ — ซึ่งคือโลโก้บนหน้า /login เอง
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.[a-zA-Z0-9]+$).*)"],
 };
