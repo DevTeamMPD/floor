@@ -5,41 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { ROLE_LABELS, type StaffProfile, type StaffRole } from "@/lib/staff";
-
-interface NavItem { href: string; icon: string; label: string; roles: StaffRole[] }
-
-const CORE_NAV: NavItem[] = [
-  { href: "/home", icon: "🏠", label: "หน้าแรก", roles: ["admin"] },
-  { href: "/sales-queue", icon: "🗓️", label: "จองคิว", roles: ["admin", "sales"] },
-  { href: "/tech-queue", icon: "👷", label: "คิวทีมช่าง", roles: ["admin", "sales"] },
-  { href: "/operations", icon: "📥", label: "ต้องตัดสินใจ", roles: ["admin", "head_technician"] },
-  { href: "/orders", icon: "📋", label: "ใบสั่งงาน", roles: ["admin", "sales", "head_technician", "warehouse"] },
-  { href: "/warehouse", icon: "📦", label: "เตรียมสินค้า", roles: ["admin", "warehouse"] },
-  { href: "/appointments", icon: "📅", label: "ปฏิทินทีม", roles: ["admin", "head_technician"] },
-  { href: "/document-control", icon: "🗂️", label: "ศูนย์เอกสาร", roles: ["admin", "head_technician", "cs"] },
-  { href: "/technicians", icon: "🔑", label: "ทีมช่าง / PIN", roles: ["admin", "head_technician"] },
-  { href: "/job-templates", icon: "🧩", label: "แม่แบบงาน", roles: ["admin", "head_technician"] },
-  { href: "/remnants", icon: "✂️", label: "ตรวจรับเศษ", roles: ["admin", "warehouse"] },
-  { href: "/cs-tracking", icon: "📞", label: "CS รอติดตาม", roles: ["admin", "cs"] },
-  { href: "/csat-automation", icon: "✨", label: "CSAT อัตโนมัติ", roles: ["admin", "cs"] },
-  { href: "/after-sales", icon: "🛟", label: "บริการหลังการขาย", roles: ["admin", "cs", "head_technician"] },
-  { href: "/dashboard", icon: "⭐", label: "คุณภาพและความพึงพอใจ", roles: ["admin", "cs", "executive"] },
-  { href: "/exec", icon: "📈", label: "ภาพรวมผู้บริหาร", roles: ["admin", "executive"] },
-  { href: "/docs", icon: "📘", label: "คู่มือการทำงาน", roles: ["admin"] },
-  { href: "/staff", icon: "👥", label: "บัญชีพนักงาน", roles: ["admin"] },
-];
-
-const EXPERIMENTAL_NAV: NavItem[] = [
-  { href: "/pipeline", icon: "📌", label: "Pipeline แบบเดิม", roles: ["admin", "head_technician"] },
-  { href: "/service", icon: "🛠", label: "บริการ / SKU", roles: ["admin"] },
-  { href: "/inventory", icon: "📦", label: "คลังวัสดุ", roles: ["admin", "warehouse"] },
-  { href: "/waste-cost", icon: "♻️", label: "ต้นทุนเศษ", roles: ["admin", "warehouse"] },
-  { href: "/bom", icon: "📐", label: "BOQ / BOM", roles: ["admin", "warehouse"] },
-  { href: "/providers", icon: "🤝", label: "ผู้ให้บริการภายนอก", roles: ["admin", "warehouse", "head_technician"] },
-  { href: "/purchase-orders", icon: "🛒", label: "ใบสั่งซื้อและตรวจรับ", roles: ["admin", "warehouse"] },
-  { href: "/documents", icon: "📄", label: "เอกสารแบบเดิม", roles: ["admin"] },
-  { href: "/ncr", icon: "🔴", label: "NCR", roles: ["admin", "head_technician"] },
-];
+import { CORE_NAV, EXPERIMENTAL_NAV, type NavItem } from "@/lib/nav";
 
 const MOBILE_NAV_BY_ROLE: Partial<Record<StaffRole, string[]>> = {
   sales: ["/sales-queue", "/orders", "/tech-queue", "/appointments"],
@@ -59,9 +25,10 @@ export default function Sidebar({ staff }: { staff: StaffProfile }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
-  // ทุกฝ่ายเห็นข้อมูลและหน้าปฏิบัติงานชุดเดียวกัน; ยกเว้นการจัดการบัญชีพนักงาน
-  // ซึ่งเป็นการตั้งค่าระบบและยังต้องเป็น Admin-only.
-  const canSee = useMemo(() => (item: NavItem) => item.href !== "/staff" || staff.role === "admin", [staff.role]);
+  // เมนูกรองด้วย NavItem.roles ชุดเดียวกับที่ middleware ใช้กันหน้า (lib/nav.ts)
+  // เดิมบรรทัดนี้กรองแค่ /staff ทำให้เมนูโชว์หน้าที่กดเข้าไปแล้วใช้ไม่ได้จริง
+  // และทำให้ roles ที่ประกาศไว้เป็นข้อมูลตายที่ไม่มีผลกับสิทธิ์เลย
+  const canSee = useMemo(() => (item: NavItem) => !item.hidden && item.roles.includes(staff.role), [staff.role]);
   const core = useMemo(() => CORE_NAV.filter(canSee), [canSee]);
   const experimental = useMemo(() => EXPERIMENTAL_NAV.filter(canSee), [canSee]);
   const mobile = useMemo(() => {

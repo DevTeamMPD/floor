@@ -1,5 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { PATHNAME_HEADER, canRoleAccessPath } from "@/lib/page-access";
+import type { StaffRole } from "@/lib/staff";
 
 const PUBLIC_PREFIXES = [
   "/login",
@@ -16,8 +18,12 @@ const PUBLIC_PREFIXES = [
 // Active FloorNow staff share visibility of operational data.  Access to state
 // transitions and administration remains enforced by RLS/RPC capability checks.
 const ADMIN_ONLY_PREFIXES = ["/staff"];
+// หน้าปฏิเสธสิทธิ์เองต้องเข้าได้เสมอ ไม่งั้นจะ rewrite วนไม่รู้จบ
+const ACCESS_DENIED_PATH = "/access-denied";
+const ACCESS_EXEMPT_PREFIXES = [ACCESS_DENIED_PATH];
 
 export async function middleware(request: NextRequest) {
+  request.headers.set(PATHNAME_HEADER, request.nextUrl.pathname);
   let response = NextResponse.next({ request });
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -73,6 +79,21 @@ export async function middleware(request: NextRequest) {
     if (profile.role !== "admin" && isAdminOnly) {
       const home = request.nextUrl.clone(); home.pathname = "/home"; home.search = "";
       return NextResponse.redirect(home);
+    }
+    // ด่านสิทธิ์ระดับหน้า (P5-6) — ก่อนหน้านี้มีแค่ /staff ที่ถูกกันจริง หน้าที่เหลือ
+    // พึ่ง "เมนูไม่โชว์" ซึ่งไม่ได้กันใครเลยเมื่อพิมพ์ URL ตรง ๆ
+    //
+    // ใช้ rewrite ไม่ใช่ redirect ด้วยเหตุผลสองข้อ:
+    //   1) rewrite ทำให้โค้ดของหน้าที่ถูกกันไม่ถูกรันเลยแม้แต่ฝั่งเซิร์ฟเวอร์
+    //      (redirect ก็ได้ผลเหมือนกัน แต่ผู้ใช้จะเด้งไปหน้าอื่นโดยไม่รู้ว่าเพราะอะไร)
+    //   2) URL เดิมยังอยู่บนแถบที่อยู่ ผู้ใช้จึงเห็นว่าตัวเองพยายามเข้าหน้าไหน
+    //      และหน้าปฏิเสธอ่านค่านั้นไปแสดงพร้อมบอกว่าต้องเป็นตำแหน่งไหนถึงเข้าได้
+    if (!ACCESS_EXEMPT_PREFIXES.some((prefix) => path === prefix || path.startsWith(prefix + "/"))
+        && !canRoleAccessPath(profile.role as StaffRole, path)) {
+      const denied = request.nextUrl.clone();
+      denied.pathname = ACCESS_DENIED_PATH;
+      denied.search = "";
+      return NextResponse.rewrite(denied, { request });
     }
   }
   return response;
