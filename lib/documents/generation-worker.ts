@@ -3,6 +3,7 @@ import "server-only";
 import { createClient } from "@supabase/supabase-js";
 import { renderBoq, renderCsat, renderCustomerAcceptance, renderHandover, renderInstallationReport, renderNcr, renderPickConfirmation, renderRemnantReport, renderWorkOrder } from "@/lib/documents/render";
 import { loadWorkOrderDocumentSnapshot } from "@/lib/documents/source-snapshot";
+import { requiresHumanApproval } from "@/lib/documents/approval-policy";
 import { convertJobDocumentToPdf, ensureJobDocumentFolder, isSharePointConfigured, uploadJobDocument } from "@/lib/sharepoint/floor-job-documents";
 
 const BATCH_SIZE = 10;
@@ -76,9 +77,35 @@ async function finalizeGeneratedDocument(job: GenerationJob, documentId: string)
   const admin = serviceClient();
   const now = new Date().toISOString();
   const { data: document, error: documentReadError } = await admin.from("floor_job_documents")
-    .select("id,job_no,document_type,workflow_stage,version,status")
+    .select("id,job_no,document_type,document_class,workflow_stage,version,status")
     .eq("id", documentId).single();
   if (documentReadError) throw new Error(`unable to read document for approval: ${documentReadError.message}`);
+
+  // ISO 9001:2015 ข้อ 7.5.2 — เอกสารควบคุมต้องมีคนอนุมัติก่อนใช้งาน
+  // worker จึงหยุดที่ under_review แล้วปล่อยให้คนกดอนุมัติที่หน้า /document-approvals
+  // ส่วนบันทึกคุณภาพ (quality_record) ยังอนุมัติอัตโนมัติเหมือนเดิม เพราะเป็นหลักฐาน
+  // ว่าเกิดอะไรขึ้นไปแล้ว ไม่ใช่เอกสารที่ใครจะเอาไปสั่งงานต่อ
+  // เหตุผลเต็มอยู่ใน supabase/migrations/20260902230000_document_approval_7_5_2.sql
+  if (requiresHumanApproval(document.document_class)) {
+    if (document.status === "draft") {
+      const { error: queueError } = await admin.from("floor_job_documents")
+        .update({ status: "under_review", submitted_for_review_at: now, updated_at: now })
+        .eq("id", documentId).eq("status", "draft");
+      if (queueError) throw new Error(`unable to queue document for approval: ${queueError.message}`);
+      const { data: queuedEvent } = await admin.from("floor_job_document_events").select("id")
+        .eq("document_id", documentId).eq("event_type", "submitted_for_review").limit(1).maybeSingle();
+      if (!queuedEvent) {
+        const { error } = await admin.from("floor_job_document_events").insert({
+          document_id: documentId, event_type: "submitted_for_review",
+          detail: { mode: "awaiting_human_approval", generation_job_id: job.id, document_class: document.document_class },
+        });
+        if (error) throw new Error(`unable to write review-queue audit: ${error.message}`);
+      }
+    }
+    // ไม่ supersede ฉบับก่อนหน้าที่นี่ — ฉบับเดิมต้องมีผลใช้งานต่อไปจนกว่าฉบับใหม่จะผ่านการอนุมัติ
+    // ตรรกะ supersede ย้ายไปอยู่ใน RPC approve_job_document() แล้ว
+    return;
+  }
 
   if (document.status !== "approved") {
     const { error: approveError } = await admin.from("floor_job_documents").update({ status: "approved", approved_at: now, effective_from: now })
@@ -148,6 +175,7 @@ async function generateOne(job: GenerationJob) {
   if (previousError) throw new Error(`unable to get document revision: ${previousError.message}`);
 
   const version = Number(previous?.version ?? 0) + 1;
+  const needsApproval = requiresHumanApproval(rendered.documentClass);
   const templateVersion = ["pick_confirmation", "installation_report"].includes(rendered.documentType) ? "P2.4" : ["customer_acceptance", "remnant_report", "handover", "csat", "ncr"].includes(rendered.documentType) ? "P2.5" : "P2.1";
   // A source revision can change without a work-order revision. Keep every controlled copy on SharePoint.
   const fileName = rendered.fileName.replace(/\.html$/i, `-V${version}.html`);
@@ -189,15 +217,17 @@ async function generateOne(job: GenerationJob) {
     mime_type: uploaded.mimeType,
     file_size_bytes: uploaded.fileSizeBytes,
     version,
-    status: "approved",
+    // เอกสารควบคุมเกิดมาเป็น draft แล้ว finalizeGeneratedDocument() จะพาไป under_review
+    // บันทึกคุณภาพยังเกิดมาเป็น approved ทันทีเหมือนเดิม จึงไม่มีคิวใหม่ให้ใครต้องเคลียร์
+    ...(needsApproval
+      ? { status: "draft" as const }
+      : { status: "approved" as const, approved_at: new Date().toISOString(), effective_from: new Date().toISOString() }),
     change_summary: `สร้างอัตโนมัติจาก ${job.source_event}`,
     is_system_generated: true,
     generation_job_id: job.id,
     generated_from_version: snapshot.workOrder.revision,
     template_version: templateVersion,
     source_snapshot_json: snapshot,
-    approved_at: new Date().toISOString(),
-    effective_from: new Date().toISOString(),
   }).select("id").single();
   if (documentError) throw new Error(`unable to register generated document: ${documentError.message}`);
 
