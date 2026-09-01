@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  CANCELLED_TOOL_BADGE,
+  CANCELLED_TOOL_EXPLANATION,
   DEFAULT_OUTSTANDING_SORT,
   callablePhone,
   daysOutLabel,
   holderLabel,
   holderSourceLabel,
+  isCancelledJobHolder,
   isExternalHolder,
   overdueLevel,
   parseOutstandingTools,
@@ -154,10 +157,46 @@ describe("สรุปยอดรวม", () => {
       row({ itemId: "b", teamId: "t1", outstandingQty: 1, daysOut: 1 }),
       row({ itemId: "c", teamId: "t2", outstandingQty: 3, daysOut: 8, teamProviderType: "subcontract", providerId: "s1" }),
     ];
-    expect(summariseOutstandingTools(rows)).toEqual({ lines: 3, totalQty: 6, teams: 2, external: 1, critical: 2, oldestDays: 9 });
+    expect(summariseOutstandingTools(rows)).toEqual({ lines: 3, totalQty: 6, teams: 2, external: 1, critical: 2, cancelled: 0, oldestDays: 9 });
   });
 
   it("ไม่มีของค้างเลย ต้องได้ศูนย์ทุกช่อง", () => {
-    expect(summariseOutstandingTools([])).toEqual({ lines: 0, totalQty: 0, teams: 0, external: 0, critical: 0, oldestDays: 0 });
+    expect(summariseOutstandingTools([])).toEqual({ lines: 0, totalQty: 0, teams: 0, external: 0, critical: 0, cancelled: 0, oldestDays: 0 });
+  });
+});
+
+describe("งานที่ถูกยกเลิกแล้วแต่ของยังไม่กลับคลัง", () => {
+  const base = {
+    item_id: "i1", job_no: "J-1", item_name: "สว่าน", unit: "ตัว",
+    picked_qty: 1, returned_qty: 0, outstanding_qty: 1, days_out: 3, team_name: "ทีม A",
+  };
+
+  it("แถวบนใบสั่งงานที่ยกเลิกแล้วถูกทำเครื่องหมายไว้ ไม่ใช่ปะปนกับแถวปกติ", () => {
+    const [cancelledRow, liveRow] = parseOutstandingTools([
+      { ...base, item_id: "i1", work_order_status: "cancelled" },
+      { ...base, item_id: "i2", work_order_status: "installing" },
+    ]);
+    expect(isCancelledJobHolder(cancelledRow)).toBe(true);
+    expect(isCancelledJobHolder(liveRow)).toBe(false);
+  });
+
+  it("สรุปหัวตารางนับจำนวนแถวของงานที่ยกเลิกแยกออกมา", () => {
+    const rows = parseOutstandingTools([
+      { ...base, item_id: "i1", work_order_status: "cancelled" },
+      { ...base, item_id: "i2", work_order_status: "cancelled" },
+      { ...base, item_id: "i3", work_order_status: "closed" },
+    ]);
+    const summary = summariseOutstandingTools(rows);
+    expect(summary.cancelled).toBe(2);
+    expect(summary.lines).toBe(3);
+  });
+
+  it("ไม่มีงานยกเลิกเลย -> ตัวนับเป็นศูนย์ ไม่ใช่ undefined", () => {
+    expect(summariseOutstandingTools([]).cancelled).toBe(0);
+  });
+
+  it("คำอธิบายบอกเหตุผลว่าทำไมยังอยู่ในรายการ ไม่ใช่แค่ป้ายว่า “ยกเลิก”", () => {
+    expect(CANCELLED_TOOL_EXPLANATION).toContain("ยังไม่กลับคลัง");
+    expect(CANCELLED_TOOL_BADGE).toContain("งานถูกยกเลิก");
   });
 });

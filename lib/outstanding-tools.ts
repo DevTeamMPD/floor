@@ -182,20 +182,43 @@ export interface OutstandingSummary {
   teams: number;
   external: number;
   critical: number;
+  /** จำนวนบรรทัดที่อยู่บนใบสั่งงานที่ถูกยกเลิกแล้ว — ตั้งใจให้ยังอยู่ในรายการ ต้องมองเห็นบนจอ */
+  cancelled: number;
   oldestDays: number;
 }
+
+/**
+ * งานที่ถูกยกเลิกแล้วแต่เครื่องมือยังไม่กลับคลัง
+ *
+ * get_outstanding_tools จงใจนับใบสั่งงานสถานะ cancelled ไว้ในรายการนี้ (ดูหัวไฟล์
+ * supabase/migrations/20260902180040_outstanding_tools_cancelled_explicit.sql)
+ * เพราะการยกเลิกงานเป็นเรื่องของสัญญากับลูกค้า ไม่ใช่เรื่องตำแหน่งทางกายภาพของของ
+ *
+ * แต่การตัดสินใจนั้นมองไม่เห็นบนหน้าจอเลย — แถวของงานที่ยกเลิกหน้าตาเหมือนแถวงานปกติทุกอย่าง
+ * คนคลังที่โทรตามจึงไม่รู้ว่ากำลังตามของของงานที่ไม่มีอยู่แล้ว และอาจสรุปเองว่ารายการนี้ผิด
+ * ป้ายนี้ทำให้เหตุผลนั้นอ่านได้บนจอ ไม่ใช่อ่านได้แค่ใน SQL
+ */
+export function isCancelledJobHolder(row: OutstandingToolRow): boolean {
+  return row.workOrderStatus === "cancelled";
+}
+
+export const CANCELLED_TOOL_BADGE = "งานถูกยกเลิก · ของยังไม่กลับคลัง";
+export const CANCELLED_TOOL_EXPLANATION =
+  "งานถูกยกเลิกแล้ว แต่เครื่องมือที่เบิกออกไปยังไม่กลับคลัง จึงยังอยู่ในรายการนี้โดยตั้งใจ — การยกเลิกงานไม่ได้ทำให้ของเดินกลับมาเอง";
 
 export function summariseOutstandingTools(rows: readonly OutstandingToolRow[]): OutstandingSummary {
   const teams = new Set<string>();
   let totalQty = 0;
   let external = 0;
   let critical = 0;
+  let cancelled = 0;
   let oldestDays = 0;
   for (const row of rows) {
     teams.add(row.teamId ?? row.teamName);
     totalQty += row.outstandingQty;
     if (isExternalHolder(row)) external += 1;
     if (overdueLevel(row.daysOut) === "critical") critical += 1;
+    if (isCancelledJobHolder(row)) cancelled += 1;
     if (row.daysOut > oldestDays) oldestDays = row.daysOut;
   }
   return {
@@ -204,6 +227,7 @@ export function summariseOutstandingTools(rows: readonly OutstandingToolRow[]): 
     teams: rows.length ? teams.size : 0,
     external,
     critical,
+    cancelled,
     oldestDays,
   };
 }

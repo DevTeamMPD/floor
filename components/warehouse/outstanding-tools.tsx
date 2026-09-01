@@ -19,6 +19,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { floorErrorMessage } from "@/lib/floor-error-message";
 import { createClient } from "@/lib/supabase/client";
 import {
+  CANCELLED_TOOL_BADGE,
+  CANCELLED_TOOL_EXPLANATION,
   DEFAULT_OUTSTANDING_SORT,
   OUTSTANDING_TOOLS_RPC,
   OVERDUE_LEVEL_LABELS,
@@ -28,6 +30,7 @@ import {
   daysOutLabel,
   holderLabel,
   holderSourceLabel,
+  isCancelledJobHolder,
   isExternalHolder,
   overdueLevel,
   parseOutstandingTools,
@@ -123,6 +126,7 @@ export default function WarehouseOutstandingTools() {
         </span>
         {summary.critical > 0 ? <span className="rounded-full bg-rose-200 px-2.5 py-1 font-medium text-rose-900">ค้างเกิน 7 วัน {summary.critical}</span> : null}
         {summary.external > 0 ? <span className="rounded-full bg-violet-200 px-2.5 py-1 font-medium text-violet-900">อยู่กับทีมภายนอก {summary.external}</span> : null}
+        {summary.cancelled > 0 ? <span className="rounded-full bg-slate-800 px-2.5 py-1 font-medium text-white" title={CANCELLED_TOOL_EXPLANATION}>งานถูกยกเลิกแล้ว {summary.cancelled}</span> : null}
         {summary.oldestDays > 0 ? <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">นานสุด {daysOutLabel(summary.oldestDays)}</span> : null}
       </div>
 
@@ -147,6 +151,7 @@ export default function WarehouseOutstandingTools() {
         {visible.map((row) => {
           const level = overdueLevel(row.daysOut);
           const phone = callablePhone(row);
+          const cancelledJob = isCancelledJobHolder(row);
           return <article key={row.itemId} className={`rounded-xl border p-3 ${LEVEL_STYLE[level]}`}>
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0">
@@ -156,6 +161,10 @@ export default function WarehouseOutstandingTools() {
                 <div className="mt-0.5 text-xs text-slate-500">
                   #{row.jobNo}{row.customerName ? ` · ${row.customerName}` : ""} · นัดติดตั้ง {thaiDate(row.appointmentStart)}
                 </div>
+                {cancelledJob ? <div className="mt-1.5">
+                  <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] font-semibold text-white">🚫 {CANCELLED_TOOL_BADGE}</span>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-600">{CANCELLED_TOOL_EXPLANATION}</p>
+                </div> : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${LEVEL_BADGE[level]}`}>
