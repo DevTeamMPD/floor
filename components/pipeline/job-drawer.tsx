@@ -39,7 +39,10 @@ import {
   parseAcceptanceGate,
   parseAcceptanceRows,
   parseMeasuringDevices,
+  photoUploadReport,
+  safePhotoFileName,
   shouldShowExternalVerification,
+  uploadPhotoBatch,
   type AcceptanceEntry,
   type AcceptanceEntryMap,
   type AcceptanceGate,
@@ -518,27 +521,35 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     if (!files.length) return;
     if (!canEditQc) { toast.error(QC_ROLE_NOTICE); return; }
     setUploadingCode(code);
-    const added: string[] = [];
-    try {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-        const path = `acceptance/${job.jobNo}/${code}/${Date.now()}-${i}-${safe}`;
-        const { error } = await supabase.storage.from("job-photos").upload(path, file, { upsert: false, contentType: file.type || "image/jpeg" });
-        if (error) throw error;
-        added.push(path);
-      }
+
+    // อัปโหลดต่อจนครบทุกไฟล์ ไม่หยุดที่ไฟล์แรกที่ล้ม — เหตุผลเต็มอยู่ที่ uploadPhotoBatch()
+    // ใจความ: ไฟล์ที่ขึ้นไปแล้วต้องถูกผูกกับผลตรวจรับให้ได้ ไม่งั้นมันกลายเป็นรูปกำพร้าใน bucket
+    // job-photos ซึ่งเป็น public — ไม่มีอะไรอ้างถึง ไม่มีใครลบ และ path เดาได้โดยไม่ต้องล็อกอิน
+    const outcome = await uploadPhotoBatch(
+      files,
+      (file, index) => `acceptance/${job.jobNo}/${code}/${Date.now()}-${index}-${safePhotoFileName(file.name)}`,
+      (path, file) => supabase.storage.from("job-photos").upload(path, file, { upsert: false, contentType: file.type || "image/jpeg" }),
+    );
+
+    // ผูกของที่สำเร็จเข้ากับ state "ก่อน" จะขึ้นข้อความใด ๆ เสมอ
+    // ลำดับนี้ตั้งใจ: ถ้าขึ้น error ก่อนแล้วค่อยผูก คนที่มาแก้ทีหลังจะเผลอ return คั่นกลางได้ง่ายมาก
+    if (outcome.uploaded.length) {
+      const paths = outcome.uploaded.map((item) => item.path);
       setAcceptance((current) => {
         const entry = current[code] ?? emptyAcceptanceEntry();
-        return { ...current, [code]: { ...entry, photoPaths: [...entry.photoPaths, ...added] } };
+        return { ...current, [code]: { ...entry, photoPaths: [...entry.photoPaths, ...paths] } };
       });
-      toast.success(`แนบรูปหลักฐานข้อ ${code} แล้ว ${added.length} รูป — อย่าลืมกดบันทึกผลตรวจรับ`);
-    } catch (e: unknown) {
-      toast.error(floorActionError(`อัปโหลดรูปหลักฐานของเกณฑ์ ${code}`, e));
     }
+
+    // ข้อความต้องระบุ "ไฟล์ไหนขึ้นแล้ว / ไฟล์ไหนยังไม่ขึ้น" เป็นชื่อไฟล์
+    // เพราะ "อัปโหลดไม่สำเร็จ" เฉย ๆ จะทำให้ผู้ใช้ลากทั้งชุดมาใหม่ แล้วได้รูปซ้ำใน bucket
+    const report = photoUploadReport(code, outcome);
+    if (report.level === "success") toast.success(report.message);
+    else if (report.level === "warning") toast.warning(report.message, { duration: 20000 });
+    else toast.error(report.message, { duration: 20000 });
+
     setUploadingCode(null);
   }
-
   function removeAcceptancePhoto(code: string, path: string) {
     setAcceptance((current) => {
       const entry = current[code] ?? emptyAcceptanceEntry();

@@ -12,6 +12,7 @@
  * เพราะ error ตอนกดปิดงานคือ "รู้ตอนสาย" — คนกรอกต้องรู้กฎตั้งแต่ตอนกรอก ไม่ใช่ตอนถูกปฏิเสธ
  */
 
+import { floorErrorMessage } from "@/lib/floor-error-message";
 import type { JobChecklistItem, QCResult } from "@/lib/job-checklist";
 
 export const ACCEPTANCE_SAVE_RPC = "save_job_acceptance_results";
@@ -514,4 +515,146 @@ export function technicianItemStatusLabel(
   const row = status.results[code];
   if (!row || row.result === null) return { tone: "pending", text: "ยังไม่ได้บันทึกผล" };
   return { tone: row.result, text: TECHNICIAN_RESULT_LABELS[row.result] };
+}
+
+// ---------------------------------------------------------------------------
+// อัปโหลดรูปหลักฐานหลายไฟล์ — ผลลัพธ์ต้องเป็น "ไฟล์ต่อไฟล์" ไม่ใช่ "สำเร็จ/ล้มเหลว" ทั้งชุด
+// ---------------------------------------------------------------------------
+
+/**
+ * ทำไมต้องแยกตรรกะนี้ออกมาจากหน้าจอ
+ *
+ * เดิมหน้าจอวนอัปโหลดแล้ว `throw` ทันทีที่ไฟล์ใดล้ม ผลคือไฟล์ที่ "ขึ้นไปแล้ว" ก่อนหน้านั้น
+ * ไม่ถูกผูกเข้ากับผลตรวจรับเลย มันไปนอนอยู่ใน bucket job-photos (ซึ่งเป็น public)
+ * โดยไม่มีอะไรในระบบอ้างถึง = รูปกำพร้าที่ลบก็ไม่มีใครลบ เจอก็ไม่มีใครเจอ
+ * และผู้ใช้เห็นแค่ "อัปโหลดไม่สำเร็จ" ทั้งที่ครึ่งหนึ่งสำเร็จไปแล้ว
+ *
+ * กติกาที่ฟังก์ชันนี้บังคับ
+ *   1) ไฟล์ที่สำเร็จต้องถูกคืนออกมาเสมอ แม้ไฟล์อื่นในชุดเดียวกันจะล้ม
+ *      (คนเรียกมีหน้าที่เอาไปผูกกับ state ก่อนจะขึ้นข้อความ error)
+ *   2) ล้มหนึ่งไฟล์ไม่หยุดทั้งชุด — ทำต่อจนครบ เพื่อให้ตอบผู้ใช้ได้ว่า
+ *      "ไฟล์ไหนขึ้นแล้ว ไฟล์ไหนยังไม่ขึ้น" ครบทุกไฟล์ ไม่ใช่แค่ถึงไฟล์แรกที่พัง
+ *   3) ไม่ลบไฟล์ที่อัปโหลดสำเร็จทิ้ง — เหตุผลเต็มอยู่ที่ ACCEPTANCE_UPLOAD_KEEP_RATIONALE
+ */
+export interface PhotoUploadFile {
+  name: string;
+  type?: string;
+}
+
+export interface PhotoUploadOk {
+  name: string;
+  path: string;
+}
+
+export interface PhotoUploadFail {
+  name: string;
+  reason: string;
+}
+
+export interface PhotoUploadOutcome {
+  uploaded: PhotoUploadOk[];
+  failed: PhotoUploadFail[];
+}
+
+/**
+ * ทำไมถึง "ไม่" ลบไฟล์ที่ขึ้นไปแล้วเมื่อชุดนั้นมีไฟล์ล้ม
+ *
+ * ตัวเลือกมีสองทาง และทั้งคู่แย่คนละแบบ จึงต้องเลือกทางที่แย่น้อยกว่าอย่างมีเหตุผล
+ *   ก) ลบทิ้ง  -> ไม่มีรูปกำพร้าใน bucket public แต่ระบบไป "ลบหลักฐานของผู้ใช้"
+ *                 เอง โดยผู้ใช้ไม่ได้สั่ง รูปตรวจรับจำนวนมากถ่ายจากมือถือหน้างาน
+ *                 ถ่ายซ้ำไม่ได้เพราะงานปิดไปแล้ว/ของถูกติดตั้งทับไปแล้ว
+ *                 และการลบยังเป็นการเรียกเน็ตเวิร์กรอบใหม่ที่ล้มได้อีก
+ *                 ถ้าลบไม่สำเร็จก็ได้ทั้งรูปกำพร้าและข้อความสับสน
+ *   ข) เก็บไว้ -> เสี่ยงรูปกำพร้าเฉพาะกรณีที่ผู้ใช้ปิดลิ้นชักทิ้งโดยไม่กดบันทึก
+ *                 เพราะไฟล์ที่สำเร็จถูกผูกเข้ากับรายการหลักฐานบนจอทันที
+ *                 มันจึง "ไม่กำพร้า" ตั้งแต่วินาทีที่อัปโหลดเสร็จ และจะถูกบันทึกลง
+ *                 job_acceptance_results เมื่อกดบันทึกผลตรวจรับตามปกติ
+ *
+ * เลือก (ข) เพราะการทำลายหลักฐานที่ผู้ใช้เพิ่งถ่ายมาเป็นความเสียหายที่กู้คืนไม่ได้
+ * ส่วนรูปกำพร้าเป็นความเสียหายที่กู้คืนได้ (กวาดทีหลังได้) และเป็นความเสี่ยงที่มีอยู่
+ * ก่อนหน้านี้แล้วในเส้นทางรูปสำรวจหน้างาน — ไม่ใช่ของใหม่ที่การแก้ครั้งนี้สร้างขึ้น
+ * รากของปัญหาจริงคือ bucket job-photos เป็น public ซึ่งเป็นการตัดสินใจของผู้ใช้
+ * ไม่ใช่ของโค้ด จึงถูกยกไปเป็นข้อบังคับใน MERGE_CHECKLIST.md แทนที่จะแก้เงียบ ๆ ที่นี่
+ */
+export const ACCEPTANCE_UPLOAD_KEEP_RATIONALE =
+  "รูปที่อัปโหลดสำเร็จจะถูกเก็บไว้และผูกกับข้อนั้นให้แล้ว ระบบไม่ลบทิ้งเอง เพราะรูปหน้างานส่วนใหญ่ถ่ายซ้ำไม่ได้";
+
+/** ชื่อไฟล์ที่ปลอดภัยพอจะเป็นส่วนหนึ่งของ path ใน storage */
+export function safePhotoFileName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+/**
+ * อัปโหลดทีละไฟล์จนครบ แล้วคืนผลแยกเป็นสองกอง
+ * ไม่ throw ไม่ว่ากรณีใด — การ throw คือสิ่งที่ทำให้ไฟล์ที่สำเร็จหายไปตั้งแต่แรก
+ */
+export async function uploadPhotoBatch<T extends PhotoUploadFile>(
+  files: T[],
+  makePath: (file: T, index: number) => string,
+  upload: (path: string, file: T) => Promise<{ error?: unknown } | void>,
+): Promise<PhotoUploadOutcome> {
+  const uploaded: PhotoUploadOk[] = [];
+  const failed: PhotoUploadFail[] = [];
+  for (let index = 0; index < files.length; index++) {
+    const file = files[index];
+    const path = makePath(file, index);
+    try {
+      const result = await upload(path, file);
+      const error = result && typeof result === "object" ? (result as { error?: unknown }).error : null;
+      if (error) failed.push({ name: file.name, reason: floorErrorMessage(error) });
+      else uploaded.push({ name: file.name, path });
+    } catch (cause: unknown) {
+      failed.push({ name: file.name, reason: floorErrorMessage(cause) });
+    }
+  }
+  return { uploaded, failed };
+}
+
+export interface PhotoUploadReport {
+  /** success = ขึ้นครบ · warning = ขึ้นบางส่วน · error = ไม่ขึ้นเลย */
+  level: "success" | "warning" | "error";
+  message: string;
+}
+
+function nameList(items: { name: string }[]): string {
+  return items.map((item) => item.name).join(", ");
+}
+
+/** เหตุผลของไฟล์ที่ล้ม — ถ้าเหตุผลเดียวกันทุกไฟล์ (เช่น เซสชันหมดอายุ) ให้พูดครั้งเดียว */
+function failureDetail(failed: PhotoUploadFail[]): string {
+  const reasons = Array.from(new Set(failed.map((item) => item.reason)));
+  if (reasons.length === 1) return `${nameList(failed)} (${reasons[0]})`;
+  return failed.map((item) => `${item.name} (${item.reason})`).join(" · ");
+}
+
+/**
+ * ข้อความรายงานผลอัปโหลด — ต้องบอกชื่อไฟล์ที่ขึ้นแล้วและที่ยังไม่ขึ้นแบบระบุตัวได้
+ *
+ * "อัปโหลดไม่สำเร็จ" เฉย ๆ เป็นคำตอบที่ผิดเมื่อบางไฟล์สำเร็จ เพราะผู้ใช้จะลากไฟล์
+ * ทั้งชุดมาใหม่ แล้วได้รูปซ้ำใน bucket ทุกรอบที่ลอง — ต้องบอกให้ชัดว่าลองใหม่เฉพาะไฟล์ไหน
+ */
+export function photoUploadReport(code: string, outcome: PhotoUploadOutcome): PhotoUploadReport {
+  const { uploaded, failed } = outcome;
+  if (!failed.length) {
+    return {
+      level: "success",
+      message: `แนบรูปหลักฐานข้อ ${code} แล้ว ${uploaded.length} รูป — อย่าลืมกดบันทึกผลตรวจรับ`,
+    };
+  }
+  if (!uploaded.length) {
+    return {
+      level: "error",
+      message: `แนบรูปหลักฐานข้อ ${code} ไม่สำเร็จทั้ง ${failed.length} รูป — ไม่มีไฟล์ใดขึ้นไปเลย\nไฟล์ที่ไม่สำเร็จ: ${failureDetail(failed)}`,
+    };
+  }
+  const total = uploaded.length + failed.length;
+  return {
+    level: "warning",
+    message: [
+      `แนบรูปหลักฐานข้อ ${code} ได้ ${uploaded.length} จาก ${total} รูป`,
+      `ขึ้นแล้วและแนบไว้ในข้อนี้ให้เรียบร้อย: ${nameList(uploaded)} — อย่าลืมกดบันทึกผลตรวจรับ`,
+      `ยังไม่ขึ้น: ${failureDetail(failed)}`,
+      `ลองใหม่เฉพาะไฟล์ที่ยังไม่ขึ้น อย่าเลือกทั้งชุดซ้ำ ไม่อย่างนั้นรูปที่ขึ้นแล้วจะซ้ำ · ${ACCEPTANCE_UPLOAD_KEEP_RATIONALE}`,
+    ].join("\n"),
+  };
 }

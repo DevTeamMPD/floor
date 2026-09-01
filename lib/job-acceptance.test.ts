@@ -18,6 +18,9 @@ import {
   gateHeadline,
   gateMissingSummary,
   parseAcceptanceGate,
+  photoUploadReport,
+  safePhotoFileName,
+  uploadPhotoBatch,
   parseAcceptanceRows,
   parseAcceptanceVerifications,
   parseMeasuringDeviceUsage,
@@ -257,5 +260,86 @@ describe("ทะเบียนเครื่องมือวัด", () => {
     expect(usage).toHaveLength(1);
     expect(usage[0].itemCodes).toEqual(["QC01", "QC02"]);
     expect(usage[0].readings).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// อัปโหลดรูปหลักฐานหลายไฟล์ — เส้นทาง "ล้มกลางทาง"
+//
+// เดิมหน้าจอ throw ทันทีที่ไฟล์ใดล้ม ไฟล์ที่ขึ้นไปแล้วก่อนหน้านั้นจึงไม่ถูกผูกกับอะไรเลย
+// กลายเป็นรูปกำพร้าใน bucket job-photos (public) เทสชุดนี้ตรึงพฤติกรรมใหม่ไว้ว่า
+// ของที่สำเร็จต้องถูกคืนออกมาเสมอ และข้อความต้องระบุชื่อไฟล์ทั้งสองฝั่ง
+// ---------------------------------------------------------------------------
+describe("uploadPhotoBatch / photoUploadReport", () => {
+  const files = [{ name: "a.jpg" }, { name: "b.jpg" }, { name: "c.jpg" }];
+  const path = (file: { name: string }, index: number) => `acceptance/J-1/QC01/${index}-${file.name}`;
+
+  it("ไฟล์ที่สำเร็จก่อนไฟล์ที่ล้ม ต้องไม่หายไปกับความล้มเหลว", async () => {
+    const outcome = await uploadPhotoBatch(files, path, async (_p, file) =>
+      file.name === "b.jpg" ? { error: { message: "storage is full" } } : { error: null });
+
+    expect(outcome.uploaded.map((item) => item.name)).toEqual(["a.jpg", "c.jpg"]);
+    expect(outcome.uploaded.map((item) => item.path)).toEqual([
+      "acceptance/J-1/QC01/0-a.jpg",
+      "acceptance/J-1/QC01/2-c.jpg",
+    ]);
+    expect(outcome.failed.map((item) => item.name)).toEqual(["b.jpg"]);
+  });
+
+  it("ไฟล์ที่ล้มไม่หยุดทั้งชุด — ต้องพยายามครบทุกไฟล์เพื่อตอบได้ว่าไฟล์ไหนขึ้นแล้วบ้าง", async () => {
+    const attempted: string[] = [];
+    await uploadPhotoBatch(files, path, async (_p, file) => {
+      attempted.push(file.name);
+      return file.name === "a.jpg" ? { error: { message: "network" } } : { error: null };
+    });
+    expect(attempted).toEqual(["a.jpg", "b.jpg", "c.jpg"]);
+  });
+
+  it("upload ที่ throw ต้องถูกนับเป็นไฟล์ล้ม ไม่ใช่ทำให้ทั้งชุดพัง", async () => {
+    const outcome = await uploadPhotoBatch(files, path, async (_p, file) => {
+      if (file.name === "b.jpg") throw new Error("boom");
+      return { error: null };
+    });
+    expect(outcome.uploaded).toHaveLength(2);
+    expect(outcome.failed).toHaveLength(1);
+    expect(outcome.failed[0].name).toBe("b.jpg");
+  });
+
+  it("ข้อความตอนล้มบางส่วนต้องระบุชื่อไฟล์ทั้งฝั่งที่ขึ้นแล้วและฝั่งที่ยังไม่ขึ้น", async () => {
+    const outcome = await uploadPhotoBatch(files, path, async (_p, file) =>
+      file.name === "b.jpg" ? { error: { message: "storage is full" } } : { error: null });
+    const report = photoUploadReport("QC01", outcome);
+
+    expect(report.level).toBe("warning");
+    expect(report.message).toContain("ได้ 2 จาก 3 รูป");
+    expect(report.message).toContain("a.jpg, c.jpg");
+    expect(report.message).toContain("b.jpg");
+    // ต้องบอกด้วยว่าของที่ขึ้นแล้วถูกแนบไว้ให้แล้ว มิฉะนั้นผู้ใช้จะลากทั้งชุดมาใหม่แล้วได้รูปซ้ำ
+    expect(report.message).toContain("อย่าลืมกดบันทึกผลตรวจรับ");
+    expect(report.message).toContain("ลองใหม่เฉพาะไฟล์ที่ยังไม่ขึ้น");
+  });
+
+  it("ขึ้นครบ = success · ไม่ขึ้นเลย = error และต้องไม่อ้างว่ามีไฟล์ขึ้นแล้ว", async () => {
+    const allOk = await uploadPhotoBatch(files, path, async () => ({ error: null }));
+    expect(photoUploadReport("QC01", allOk).level).toBe("success");
+    expect(photoUploadReport("QC01", allOk).message).toContain("แล้ว 3 รูป");
+
+    const allBad = await uploadPhotoBatch(files, path, async () => ({ error: { message: "denied" } }));
+    const report = photoUploadReport("QC01", allBad);
+    expect(report.level).toBe("error");
+    expect(report.message).toContain("ไม่มีไฟล์ใดขึ้นไปเลย");
+    expect(report.message).not.toContain("อย่าลืมกดบันทึกผลตรวจรับ");
+  });
+
+  it("ชุดว่างต้องไม่ล้ม", async () => {
+    const outcome = await uploadPhotoBatch([], path, async () => ({ error: null }));
+    expect(outcome).toEqual({ uploaded: [], failed: [] });
+  });
+
+  it("ชื่อไฟล์ถูกล้างให้ปลอดภัยก่อนเอาไปประกอบเป็น path", () => {
+    const cleaned = safePhotoFileName("รูป หน้างาน (1).jpg");
+    expect(cleaned).toMatch(/^[a-zA-Z0-9._-]+$/);
+    expect(cleaned.endsWith("1_.jpg")).toBe(true);
+    expect(safePhotoFileName("ok-name_2.JPG")).toBe("ok-name_2.JPG");
   });
 });
