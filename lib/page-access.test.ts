@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { ALL_NAV, CORE_NAV, EXPERIMENTAL_NAV, UNLISTED_NAV, DEFAULT_PAGE_ROLES } from "@/lib/nav";
+import { ALL_NAV, CORE_NAV, EXPERIMENTAL_NAV, UNLISTED_NAV, DEFAULT_PAGE_ROLES, PAGE_ACTION_HREF, PAGE_ACTION_ROLES, canRoleDoAction, type PageAction } from "@/lib/nav";
 import { PUBLIC_PREFIXES, canRoleAccessPath, isPublicPath, matchNavItem, normalizePath, rolesForPath } from "@/lib/page-access";
 import { STAFF_ROLES } from "@/lib/staff";
 
@@ -187,5 +187,72 @@ describe("page access — แหล่งความจริงเดียว
   it("เมนูหลัก/เมนูเสริม/หน้าที่ไม่อยู่ในเมนู รวมกันเป็น ALL_NAV", () => {
     expect(ALL_NAV.length).toBe(CORE_NAV.length + EXPERIMENTAL_NAV.length + UNLISTED_NAV.length);
     for (const item of UNLISTED_NAV) expect(item.hidden).toBe(true);
+  });
+
+  /**
+   * *** เมนูสัญญาอะไรไว้ ปุ่มต้องทำได้อย่างนั้น ***
+   * roles ของหน้า = "ใครเปิดหน้านี้ได้" ซึ่งกว้างกว่า "ใครกดปุ่มนี้ได้" เสมอ
+   * เมื่อสองอย่างไม่ตรงกัน คนจะเห็นปุ่มที่กดแล้วเด้ง error ทุกครั้ง — คน role staff 37 คน
+   * เจอแบบนั้นที่ /providers /capa และ /ncr มาตลอด
+   */
+  it("สิทธิ์ลงมือทำต้องไม่กว้างกว่าสิทธิ์เปิดหน้า", () => {
+    for (const action of Object.keys(PAGE_ACTION_ROLES) as PageAction[]) {
+      const pageRoles = rolesForPath(PAGE_ACTION_HREF[action]);
+      for (const role of PAGE_ACTION_ROLES[action]) {
+        expect(pageRoles, `${action} บนหน้า ${PAGE_ACTION_HREF[action]}`).toContain(role);
+      }
+    }
+  });
+
+  it("ตำแหน่งที่กดปุ่มได้ ต้องตรงกับ array ที่ RPC ใช้จริงในไฟล์ migration", () => {
+    const read = (file: string) => fs.readFileSync(path.join(process.cwd(), "supabase", "migrations", file), "utf8");
+    const providerRegister = read("20260902220000_provider_register.sql");
+    const providerSuspension = read("20260902220040_provider_suspension.sql");
+    const claimLink = read("20260902220030_supplier_claims_register_link.sql");
+    const capa = read("20260902230010_capa_register_10_2.sql");
+    const ncr = read("20260902200010_create_floor_ncr_cause_code.sql");
+
+    const sqlArray = (roles: readonly string[]) => `array[${roles.map((r) => `'${r}'`).join(",")}]`;
+
+    expect(providerRegister).toContain(`${sqlArray(PAGE_ACTION_ROLES["providers.upsert"])}, 'จัดการทะเบียนผู้ให้บริการ'`);
+    expect(providerRegister).toContain(`${sqlArray(PAGE_ACTION_ROLES["providers.decide"])}, 'อนุมัติผู้ให้บริการ'`);
+    expect(providerSuspension).toContain(`${sqlArray(PAGE_ACTION_ROLES["providers.suspend"])}, 'ระงับผู้ให้บริการ'`);
+    expect(providerRegister).toContain(`${sqlArray(PAGE_ACTION_ROLES["providers.link"])}, 'ผูกทีมช่างกับบริษัทผู้รับเหมา'`);
+    expect(claimLink).toContain(`${sqlArray(PAGE_ACTION_ROLES["providers.claims"])}, 'ผูกใบเคลมกับผู้ให้บริการ'`);
+
+    // capa_guard ประกาศ role ไว้เป็นตัวแปร และ capa_snapshot ส่ง canEdit ด้วยชุดเดียวกัน
+    const capaRoles = PAGE_ACTION_ROLES["capa.write"].map((r) => `'${r}'`).join(", ");
+    expect(capa).toContain(`v_roles text[] := array[${capaRoles}]`);
+    expect(capa).toContain(`p.role = any(array[${PAGE_ACTION_ROLES["capa.write"].map((r) => `'${r}'`).join(",")}])`);
+    expect(ncr).toContain(`role in (${PAGE_ACTION_ROLES["ncr.create"].map((r) => `'${r}'`).join(", ")})`);
+  });
+
+  it("role staff เปิดสามหน้านี้อ่านได้ แต่กดปุ่มที่ RPC ปฏิเสธไม่ได้", () => {
+    for (const href of ["/providers", "/capa", "/ncr"]) {
+      expect(canRoleAccessPath("staff", href)).toBe(true);
+    }
+    expect(canRoleDoAction("staff", "providers.upsert")).toBe(false);
+    expect(canRoleDoAction("staff", "capa.write")).toBe(false);
+    expect(canRoleDoAction("staff", "ncr.create")).toBe(false);
+    // executive เข้าทะเบียนผู้ให้บริการเพื่ออ่านได้ แต่ไม่มีปุ่มไหนกดได้เลย
+    expect(canRoleAccessPath("executive", "/providers")).toBe(true);
+    for (const action of Object.keys(PAGE_ACTION_ROLES) as PageAction[]) {
+      if (PAGE_ACTION_HREF[action] === "/providers") {
+        expect(canRoleDoAction("executive", action)).toBe(false);
+      }
+    }
+    // และตำแหน่งที่ RPC ยอมรับจริง ต้องกดได้
+    expect(canRoleDoAction("warehouse", "providers.upsert")).toBe(true);
+    expect(canRoleDoAction("admin", "providers.suspend")).toBe(true);
+    expect(canRoleDoAction("cs", "ncr.create")).toBe(true);
+    expect(canRoleDoAction(null, "capa.write")).toBe(false);
+  });
+
+  it("หน้าจอต้องอ่านสิทธิ์ลงมือทำจากที่เดียวกัน ไม่ใช่เดาเอง", () => {
+    const providers = fs.readFileSync(path.join(process.cwd(), "app", "(admin)", "providers", "page.tsx"), "utf8");
+    const ncrPage = fs.readFileSync(path.join(process.cwd(), "app", "(admin)", "ncr", "page.tsx"), "utf8");
+    for (const source of [providers, ncrPage]) expect(source).toContain("useCanDo(");
+    expect(providers).toContain('useCanDo("providers.upsert")');
+    expect(ncrPage).toContain('useCanDo("ncr.create")');
   });
 });

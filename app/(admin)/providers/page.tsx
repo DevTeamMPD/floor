@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { floorErrorMessage } from "@/lib/floor-error-message";
+import { useCanDo } from "@/components/layout/viewer-role";
 import {
   PROVIDER_REGISTER_SNAPSHOT_RPC, UPSERT_PROVIDER_RPC, DECIDE_PROVIDER_APPROVAL_RPC,
   SET_TEAM_PROVIDER_RPC, SET_TECHNICIAN_PROVIDER_RPC, PROVIDER_SCORE_BOARD_RPC,
@@ -95,6 +96,15 @@ export default function ProvidersPage() {
     () => register.providers.filter(canTakeInstallers),
     [register.providers],
   );
+
+  // สิทธิ์ "ลงมือทำ" ต้องตรงกับตำแหน่งที่ RPC ยอมรับจริง (ดู PAGE_ACTION_ROLES ใน lib/nav.ts)
+  // หน้านี้เปิดให้อ่านกว้างโดยตั้งใจ แต่ปุ่มที่ RPC จะปฏิเสธต้องไม่ถูกยื่นให้คนกด
+  const canUpsert = useCanDo("providers.upsert");
+  const canDecide = useCanDo("providers.decide");
+  const canSuspend = useCanDo("providers.suspend");
+  const canLink = useCanDo("providers.link");
+  const canClaims = useCanDo("providers.claims");
+  const readOnly = !canUpsert && !canDecide && !canSuspend && !canLink && !canClaims;
 
   function openCreate() {
     setForm(EMPTY_FORM);
@@ -270,11 +280,20 @@ export default function ProvidersPage() {
             ทะเบียนผู้ขายวัสดุและทีมรับเหมาติดตั้ง พร้อมเหตุผลที่อนุมัติและขอบเขตที่อนุมัติ (ISO 9001 ข้อ 8.4.1)
           </p>
         </div>
-        <button onClick={openCreate}
-          className="ml-auto rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
-          + เพิ่มผู้ให้บริการ
-        </button>
+        {canUpsert && (
+          <button onClick={openCreate}
+            className="ml-auto rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+            + เพิ่มผู้ให้บริการ
+          </button>
+        )}
       </div>
+
+      {readOnly && (
+        <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          ตำแหน่งของคุณเปิดทะเบียนนี้เพื่ออ่านได้ แต่การเพิ่ม/แก้ อนุมัติ ระงับ และผูกทีมกับบริษัท
+          เป็นสิทธิ์ของผู้ดูแลระบบและฝ่ายคลัง/จัดซื้อ จึงไม่แสดงปุ่มเหล่านั้นให้กด
+        </div>
+      )}
 
       <div className="mb-5 flex flex-wrap gap-1 border-b border-slate-200">
         {TABS.map((item) => (
@@ -313,24 +332,26 @@ export default function ProvidersPage() {
                       </span>
                       {!provider.isActive && <span className="text-xs text-slate-400">ปิดการใช้งาน</span>}
                       <div className="ml-auto flex flex-wrap gap-2">
-                        <button onClick={() => openEdit(provider)}
-                          className="rounded-lg border border-slate-200 px-3 py-1 text-xs text-slate-600 hover:bg-slate-50">แก้ไข</button>
-                        {provider.approvalStatus !== "approved" && provider.approvalStatus !== "suspended" && (
+                        {canUpsert && (
+                          <button onClick={() => openEdit(provider)}
+                            className="rounded-lg border border-slate-200 px-3 py-1 text-xs text-slate-600 hover:bg-slate-50">แก้ไข</button>
+                        )}
+                        {canDecide && provider.approvalStatus !== "approved" && provider.approvalStatus !== "suspended" && (
                           <button onClick={() => decide(provider, "approved")} disabled={!canApprove(provider) || saving}
                             title={blockers.join(" · ")}
                             className="rounded-lg bg-emerald-600 px-3 py-1 text-xs text-white hover:bg-emerald-700 disabled:opacity-40">
                             อนุมัติ
                           </button>
                         )}
-                        {provider.approvalStatus === "pending" && (
+                        {canDecide && provider.approvalStatus === "pending" && (
                           <button onClick={() => decide(provider, "rejected")} disabled={saving}
                             className="rounded-lg border border-red-200 px-3 py-1 text-xs text-red-600 hover:bg-red-50">ไม่อนุมัติ</button>
                         )}
-                        {provider.approvalStatus === "approved" && (
+                        {canSuspend && provider.approvalStatus === "approved" && (
                           <button onClick={() => { setSuspendTarget(provider); setSuspendReason(""); }}
                             className="rounded-lg border border-red-200 px-3 py-1 text-xs text-red-600 hover:bg-red-50">ระงับ</button>
                         )}
-                        {provider.approvalStatus === "suspended" && (
+                        {canSuspend && provider.approvalStatus === "suspended" && (
                           <button onClick={() => { setReinstateTarget(provider); setSuspendReason(""); }}
                             className="rounded-lg bg-slate-700 px-3 py-1 text-xs text-white hover:bg-slate-800">คืนสิทธิ์</button>
                         )}
@@ -431,7 +452,7 @@ export default function ProvidersPage() {
                         <td className="px-4 py-2 text-slate-500">{team.memberCount} คน</td>
                         <td className="px-4 py-2">
                           <select value={team.providerType === "subcontract" ? (team.providerId ?? "") : (team.providerType ?? "")}
-                            onChange={(event) => linkTeam(team.id, event.target.value)} disabled={saving}
+                            onChange={(event) => linkTeam(team.id, event.target.value)} disabled={saving || !canLink}
                             className="rounded-lg border border-slate-200 px-2 py-1 text-sm">
                             <option value="">— ยังไม่ระบุ —</option>
                             <option value="in_house">ทีมภายในของบริษัท</option>
@@ -465,7 +486,7 @@ export default function ProvidersPage() {
                         </td>
                         <td className="px-4 py-2 text-slate-500">{tech.teamName ?? "ยังไม่มีทีม"}</td>
                         <td className="px-4 py-2">
-                          <select value={tech.providerId ?? ""} disabled={saving}
+                          <select value={tech.providerId ?? ""} disabled={saving || !canLink}
                             onChange={(event) => linkTechnician(tech.id, event.target.value)}
                             className="rounded-lg border border-slate-200 px-2 py-1 text-sm">
                             <option value="">ช่างของบริษัทเราเอง</option>
@@ -555,10 +576,10 @@ export default function ProvidersPage() {
             <section className="space-y-4">
               <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
                 <span>{claimMatchSummary(claims)}</span>
-                <button onClick={runClaimMatch} disabled={saving}
+                {canClaims && <button onClick={runClaimMatch} disabled={saving}
                   className="ml-auto rounded-lg bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50">
                   จับคู่กับทะเบียนอัตโนมัติ
-                </button>
+                </button>}
               </div>
               <p className="text-xs text-slate-500">
                 การจับคู่เทียบชื่อแบบตรงเป๊ะเท่านั้น (ไม่สนตัวพิมพ์และช่องว่างซ้ำ) — ชื่อที่ชี้ไปหาบริษัทมากกว่าหนึ่งราย
@@ -586,7 +607,7 @@ export default function ProvidersPage() {
                         </td>
                         <td className="px-4 py-2 text-xs text-slate-500">{claimMatchStatus(claim)}</td>
                         <td className="px-4 py-2">
-                          <select value={claim.supplierId ?? ""} disabled={saving}
+                          <select value={claim.supplierId ?? ""} disabled={saving || !canClaims}
                             onChange={(event) => linkClaim(claim.id, event.target.value)}
                             className="rounded-lg border border-slate-200 px-2 py-1 text-sm">
                             <option value="">— ยังไม่ผูก —</option>

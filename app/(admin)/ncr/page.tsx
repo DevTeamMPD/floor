@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { floorActionError } from "@/lib/floor-error-message";
+import { useCanDo } from "@/components/layout/viewer-role";
 import {
   CREATE_NCR_RPC,
   EMPTY_NCR_FORM_OPTIONS,
@@ -169,6 +170,9 @@ function NcrPageInner() {
   const [selected, setSelected] = useState<NcrReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [localPreview, setLocalPreview] = useState(false);
+  // create_floor_ncr รับเฉพาะ admin/head_technician/warehouse/cs — role staff เปิดหน้านี้อ่านได้
+  // แต่เดิมเห็นปุ่ม "+ เปิด NCR" ที่กดแล้วเด้ง error ทุกครั้ง (ดู PAGE_ACTION_ROLES ใน lib/nav.ts)
+  const canCreateNcr = useCanDo("ncr.create");
   const [filter, setFilter] = useState<"active" | "overdue" | "critical" | "all">("active");
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -270,9 +274,10 @@ function NcrPageInner() {
       <div className="mx-auto max-w-7xl space-y-5">
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-red-600">Quality Management · ISO 9001</p><h1 className="mt-1 text-2xl font-bold text-slate-950">ศูนย์ควบคุม NCR</h1><p className="mt-1 text-sm text-slate-500">ควบคุมสิ่งที่ไม่เป็นไปตามข้อกำหนด วิเคราะห์สาเหตุ และป้องกันการเกิดซ้ำ</p></div>
-          <div className="flex flex-wrap gap-2"><a href="/after-sales" className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">← บริการหลังการขาย</a><button disabled={localPreview} onClick={() => setShowForm(true)} className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40">+ เปิด NCR</button></div>
+          <div className="flex flex-wrap gap-2"><a href="/after-sales" className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">← บริการหลังการขาย</a>{canCreateNcr && <button disabled={localPreview} onClick={() => setShowForm(true)} className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40">+ เปิด NCR</button>}</div>
         </header>
 
+        {!canCreateNcr && <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">คุณดูทะเบียน NC ได้ แต่การเปิดใบ NC และเดินขั้นตอนต่อ จำกัดเฉพาะผู้ดูแลระบบ หัวหน้าช่าง คลัง และ CS</div>}
         {localPreview && <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-800">Local preview — ข้อมูลจำลองสำหรับรีวิว flow เท่านั้น ไม่บันทึกหรือเปลี่ยนข้อมูลจริง</div>}
 
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -321,7 +326,7 @@ function NcrPageInner() {
               <aside className="space-y-5">
                 <section className="rounded-xl border border-slate-200 p-4"><div className="flex items-center justify-between"><h3 className="text-sm font-black text-slate-900">หลักฐาน ISO</h3><span className="text-xs font-bold text-slate-500">{selectedDetail.evidence.filter((item) => item.complete).length}/{selectedDetail.evidence.length} ครบ</span></div><div className="mt-3 space-y-2">{selectedDetail.evidence.map((item) => <div key={item.label} className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2.5"><span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${item.complete ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{item.complete ? "✓" : "!"}</span><span className="text-xs font-medium leading-relaxed text-slate-700">{item.label}</span></div>)}</div></section>
                 <section className="rounded-xl border border-slate-200 p-4"><h3 className="text-sm font-black text-slate-900">Audit trail</h3><div className="mt-4 space-y-4">{selectedDetail.timeline.map((event, index) => <div key={`${event.title}-${event.at}`} className="relative pl-5"><span className="absolute left-0 top-1.5 h-2.5 w-2.5 rounded-full bg-blue-500" />{index < selectedDetail.timeline.length - 1 && <span className="absolute left-[4px] top-4 h-[calc(100%+8px)] w-px bg-slate-200" />}<p className="text-xs font-bold text-slate-800">{event.title}</p><p className="mt-0.5 text-xs leading-relaxed text-slate-500">{event.detail}</p><p className="mt-1 text-[10px] text-slate-400">{event.at}</p></div>)}</div></section>
-                <section className="rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-bold text-slate-500">Quality gate ถัดไป</p><p className="mt-1 text-sm font-black text-slate-900">{selectedDetail.isoStage === "root_cause" ? "ยืนยัน Root cause และเสนอ CAPA" : selectedDetail.isoStage === "capa_plan" ? "Quality Manager อนุมัติ CAPA" : selectedDetail.isoStage === "effectiveness" ? "บันทึกผลตรวจและอนุมัติปิด" : "ดำเนินการตามขั้นตอน ISO"}</p><button disabled={localPreview || selected.status === "closed"} onClick={() => void advanceSelected()} className="mt-3 w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-35">{localPreview ? "Local preview — ปิดการบันทึก" : NEXT_LEGACY_LABEL[selected.status] || "รอข้อมูลขั้นถัดไป"}</button></section>
+                <section className="rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-bold text-slate-500">Quality gate ถัดไป</p><p className="mt-1 text-sm font-black text-slate-900">{selectedDetail.isoStage === "root_cause" ? "ยืนยัน Root cause และเสนอ CAPA" : selectedDetail.isoStage === "capa_plan" ? "Quality Manager อนุมัติ CAPA" : selectedDetail.isoStage === "effectiveness" ? "บันทึกผลตรวจและอนุมัติปิด" : "ดำเนินการตามขั้นตอน ISO"}</p><button disabled={localPreview || !canCreateNcr || selected.status === "closed"} onClick={() => void advanceSelected()} className="mt-3 w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-35">{localPreview ? "Local preview — ปิดการบันทึก" : NEXT_LEGACY_LABEL[selected.status] || "รอข้อมูลขั้นถัดไป"}</button></section>
               </aside>
             </div>
           </div>

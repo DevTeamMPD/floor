@@ -92,5 +92,59 @@ export const UNLISTED_NAV: NavItem[] = [
 
 export const ALL_NAV: NavItem[] = [...CORE_NAV, ...EXPERIMENTAL_NAV, ...UNLISTED_NAV];
 
+/**
+ * สิทธิ์ "ลงมือทำ" ของแต่ละหน้า — ต้องตรงกับตำแหน่งที่ RPC ยอมรับจริงเสมอ
+ *
+ * ปัญหาที่แก้: roles ของหน้าเป็น "ใครเปิดหน้านี้ได้" ซึ่งกว้างกว่า "ใครกดปุ่มนี้ได้" เสมอ
+ * เมื่อสองอย่างนี้ไม่ตรงกัน คนจะเห็นปุ่มที่กดแล้วเด้ง error ทุกครั้ง
+ * ของจริงที่พบ: /providers เปิดให้ staff กับ executive แต่ upsert_provider รับแค่ admin/warehouse
+ * และ decide/suspend รับแค่ admin — คน role staff 37 คนเห็นปุ่มที่ใช้ไม่ได้เลยสักปุ่ม
+ * เช่นเดียวกับ /capa และ /ncr ที่เปิดให้ staff แต่ capa_guard กับ create_floor_ncr ไม่รับ staff
+ *
+ * ทำไมเลือก "แคบที่ปุ่ม" ไม่ใช่ "แคบที่หน้า" หรือ "ขยาย RPC":
+ *   หน้าเหล่านี้เป็นทะเบียนที่คนหน้างานควรอ่านได้ — ช่างและคลังต้องรู้ว่าใบ NC ใบไหนเปิดค้างอยู่
+ *   บนงานของตัวเอง และ CAPA ข้อไหนกำลังแก้เรื่องอะไร การปิดหน้าทิ้งจะเอาข้อมูลที่เขาต้องใช้ไปด้วย
+ *   ส่วนการ "เปิดใบ" และ "อนุมัติ/ระงับผู้ให้บริการ" เป็นหน้าที่ควบคุมคุณภาพและงานจัดซื้อ
+ *   ที่มีคนรับผิดชอบชัดเจนอยู่แล้ว การขยาย RPC ให้ staff ทั้ง 37 คนทำได้ คือการเปลี่ยนว่า
+ *   ใครรับผิดชอบ ซึ่งไม่มีใครขอ และไม่มีหลักฐานว่ามีใครต้องการ
+ *
+ * ค่าในนี้ต้องตรงกับ array ใน migration ตัวจริง — มีเทสอ่านไฟล์ SQL มาเทียบ
+ */
+export const PAGE_ACTION_ROLES = {
+  /** upsert_provider — provider_registry_guard(array['admin','warehouse']) */
+  "providers.upsert": ["admin", "warehouse"],
+  /** decide_provider_approval — provider_registry_guard(array['admin']) */
+  "providers.decide": ["admin"],
+  /** suspend_provider / reinstate_provider — provider_registry_guard(array['admin']) */
+  "providers.suspend": ["admin"],
+  /** set_tech_team_provider / set_technician_provider — array['admin','head_technician'] */
+  "providers.link": ["admin", "head_technician"],
+  /** match/link supplier claims — provider_registry_guard(array['admin','warehouse']) */
+  "providers.claims": ["admin", "warehouse"],
+  /** create_capa และ RPC อื่นในทะเบียน CAPA — capa_guard */
+  "capa.write": ["admin", "head_technician", "warehouse", "cs"],
+  /** create_floor_ncr */
+  "ncr.create": ["admin", "head_technician", "warehouse", "cs"],
+} satisfies Record<string, StaffRole[]>;
+
+export type PageAction = keyof typeof PAGE_ACTION_ROLES;
+
+/** หน้าที่แต่ละการกระทำอยู่ — ใช้ตรวจว่า "ใครกดได้" ต้องไม่กว้างกว่า "ใครเปิดหน้าได้" */
+export const PAGE_ACTION_HREF: Record<PageAction, string> = {
+  "providers.upsert": "/providers",
+  "providers.decide": "/providers",
+  "providers.suspend": "/providers",
+  "providers.link": "/providers",
+  "providers.claims": "/providers",
+  "capa.write": "/capa",
+  "ncr.create": "/ncr",
+};
+
+/** true = ตำแหน่งนี้กดปุ่มนั้นได้จริง (RPC จะไม่ปฏิเสธ) */
+export function canRoleDoAction(role: StaffRole | null | undefined, action: PageAction): boolean {
+  if (!role) return false;
+  return (PAGE_ACTION_ROLES[action] as readonly StaffRole[]).includes(role);
+}
+
 /** หน้าที่ไม่ได้ประกาศไว้เลย = admin เท่านั้น เพื่อให้การลืมประกาศพลาดไปทางปลอดภัย */
 export const DEFAULT_PAGE_ROLES: StaffRole[] = ["admin"];

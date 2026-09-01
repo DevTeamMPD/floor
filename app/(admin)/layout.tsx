@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getCurrentStaff } from "@/lib/staff-server";
 import NotificationCenter from "@/components/notifications/notification-center";
+import { ViewerRoleProvider } from "@/components/layout/viewer-role";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const isLocalDemo = (await cookies()).get("floor_local_demo")?.value === "1";
@@ -20,7 +21,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                  pb-20 to clear the fixed bottom nav
       */}
       <main className="min-w-0 flex-1 px-3 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-[4.25rem] sm:px-4 md:ml-[252px] md:p-6">
-        {children}
+        {/* หน้า client อ่านตำแหน่งของผู้ดูจากที่นี่ เพื่อไม่ยื่นปุ่มที่ RPC จะปฏิเสธให้คนกด */}
+        <ViewerRoleProvider role={visibleStaff.role}>{children}</ViewerRoleProvider>
       </main>
       <Toaster richColors position="top-center" />
     </div>
