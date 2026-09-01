@@ -8,7 +8,8 @@ import { floorErrorMessage } from "@/lib/floor-error-message";
 import { createClient } from "@/lib/supabase/client";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import TechnicianAssignmentButton from "@/components/appointments/technician-assignment";
-import { WORK_ITEM_CATEGORIES, WORK_ITEM_CATEGORY_LABELS, WORK_ORDER_STATUS_LABELS, type WorkItemCategory, type WorkOrder, type WorkOrderEvent, type WorkOrderItem, workOrderEventLabel, workOrderStatusClass } from "@/lib/work-orders";
+import { WORK_ITEM_CATEGORIES, WORK_ITEM_CATEGORY_LABELS, WORK_ORDER_STATUS_LABELS, type WorkItemCategory, type WorkOrder, type WorkOrderEvent, workOrderEventLabel, workOrderStatusClass } from "@/lib/work-orders";
+import { JOB_PREP_SOURCE_LABELS, fetchJobPrepList, isLegacyPrepList, type JobPrepDraftItem } from "@/lib/job-prep-list";
 import type { StaffRole } from "@/lib/staff";
 import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
 import { InlineWorkOrderJobContext } from "@/components/work-orders/inline-work-order-context";
@@ -18,7 +19,7 @@ import JobDocumentPanel from "@/components/documents/job-document-panel";
 interface Job {
   job_no: string; source: string | null; bill_no: string | null; customer_name: string | null; customer_phone: string | null;
   address: string | null; location_url: string | null; product_name: string | null; survey_data: string | null;
-  raw_payload: unknown; site_photos: string[] | null; pick_plan: unknown; status: string | null;
+  raw_payload: unknown; site_photos: string[] | null; status: string | null;
   product_skus: string[] | null; flag_note: string | null;
 }
 interface Appointment { id: string; job_id: string; tech_id: string | null; slot_start: string; slot_end: string; status: string; notes: string | null; requirement: string | null }
@@ -26,7 +27,8 @@ interface Team { id: string; name: string }
 interface Material { id: string; sku: string; name: string; unit: string | null; qty_on_hand: number | null }
 type Technician = FloorTechnician & { personal_token: string };
 type Assignment = TechnicianAssignment;
-interface DraftItem { id?: string; category: WorkItemCategory; itemName: string; sku: string; specification: string; plannedQty: string; actualQty: string; unit: string; sourceType: string; note: string }
+// รูปแบบบรรทัดบนฟอร์มมาจาก lib/job-prep-list.ts เพื่อให้หน้าจอกับทางอ่านรวมพูดภาษาเดียวกัน
+type DraftItem = JobPrepDraftItem;
 interface WarehouseFilePreview { id: string; file: File; url: string }
 
 // Floor service SKUs supplied by the sales catalogue. They remain selectable
@@ -45,7 +47,7 @@ function jsonObject(value: unknown): Record<string, unknown> {
   try { const parsed = typeof value === "string" ? JSON.parse(value) : value; return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}; } catch { return {}; }
 }
 function emptyItem(category: WorkItemCategory = "floor_material"): DraftItem {
-  return { category, itemName: "", sku: "", specification: "", plannedQty: "", actualQty: "", unit: category === "floor_material" || category === "remnant" ? "แผ่น" : "ชิ้น", sourceType: category === "remnant" ? "remnant" : "new", note: "" };
+  return { source: "manual", category, itemName: "", sku: "", specification: "", plannedQty: "", actualQty: "", unit: category === "floor_material" || category === "remnant" ? "แผ่น" : "ชิ้น", sourceType: category === "remnant" ? "remnant" : "new", note: "", materialId: null, itemKind: null, templateItemId: null, isManualOverride: false, pickedQty: "", returnedQty: "", usedQty: "" };
 }
 // A freeform instruction is deliberately stored as a non-stock "tool" row.
 // It remains part of the central work order and technician view, but has zero
@@ -54,21 +56,12 @@ function isFreeformNote(item: DraftItem) {
   return item.category === "tool" && item.sourceType === "other" && item.sku === "" && item.plannedQty === "0" && item.unit === "รายการ" && item.itemName === "โน้ต Freeform จากหัวหน้าช่าง";
 }
 function emptyFreeformNote(): DraftItem {
-  return { category: "tool", itemName: "โน้ต Freeform จากหัวหน้าช่าง", sku: "", specification: "", plannedQty: "0", actualQty: "0", unit: "รายการ", sourceType: "other", note: "" };
-}
-function fromSaved(item: WorkOrderItem): DraftItem {
-  return { id: item.id, category: item.category, itemName: item.item_name, sku: item.sku ?? "", specification: item.specification ?? "", plannedQty: String(item.planned_qty), actualQty: item.actual_qty == null ? "" : String(item.actual_qty), unit: item.unit, sourceType: item.source_type, note: item.note ?? "" };
-}
-function legacyItems(value: unknown): DraftItem[] {
-  const plan = jsonObject(value); const rows: DraftItem[] = [];
-  if (Array.isArray(plan.newItems)) for (const raw of plan.newItems) { const item = jsonObject(raw); rows.push({ ...emptyItem("floor_material"), itemName: "วัสดุปูพื้น", specification: `หน้ากว้าง ${item.width ?? "—"} ซม. × ยาว ${item.length_cm ?? "—"} ซม.`, plannedQty: String(item.qty ?? ""), note: String(item.note ?? "") }); }
-  if (Array.isArray(plan.remnants)) for (const raw of plan.remnants) { const item = jsonObject(raw); rows.push({ ...emptyItem("remnant"), itemName: String(item.mat_type ?? "เศษวัสดุ"), specification: `กว้าง ${item.width_bin ?? "—"} × ยาว ${item.length_cm ?? "—"} ซม.`, plannedQty: "1", note: String(item.note ?? "") }); }
-  return rows;
+  return { ...emptyItem("tool"), itemName: "โน้ต Freeform จากหัวหน้าช่าง", plannedQty: "0", actualQty: "0", unit: "รายการ", sourceType: "other" };
 }
 function skuItems(job: Job | null, materials: Material[]): DraftItem[] {
   if (!job) return [];
   const skus = Array.from(new Set((job.product_skus ?? []).filter((value): value is string => Boolean(value?.trim()))));
-  return skus.map((sku) => { const material = materials.find((row) => row.sku === sku); return { ...emptyItem("floor_material"), sku, itemName: material?.name || job.product_name || "วัสดุปูพื้น", unit: material?.unit || "แผ่น" }; });
+  return skus.map((sku) => { const material = materials.find((row) => row.sku === sku); return { ...emptyItem("floor_material"), source: "sku_catalog" as const, sku, itemName: material?.name || job.product_name || "วัสดุปูพื้น", unit: material?.unit || "แผ่น" }; });
 }
 function bbpsMaterialText(value: unknown) {
   const payload = jsonObject(value); const orders = Array.isArray(payload.workOrders) ? payload.workOrders : [];
@@ -97,7 +90,7 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
     const { data: { user } } = await supabase.auth.getUser();
     const decodedJobNo = decodeURIComponent(jobNo);
     const [jobResult, apptResult, orderResult, profileResult, techResult, teamResult, materialResult] = await Promise.all([
-      supabase.from("install_jobs").select("job_no,source,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,raw_payload,site_photos,pick_plan,status,product_skus,flag_note").eq("job_no", decodedJobNo).maybeSingle(),
+      supabase.from("install_jobs").select("job_no,source,bill_no,customer_name,customer_phone,address,location_url,product_name,survey_data,raw_payload,site_photos,status,product_skus,flag_note").eq("job_no", decodedJobNo).maybeSingle(),
       supabase.from("appointments").select("id,job_id,tech_id,slot_start,slot_end,status,notes,requirement").eq("job_id", decodedJobNo).neq("status", "cancelled").order("slot_start", { ascending: false }),
       supabase.from("floor_work_orders").select("*").eq("job_no", decodedJobNo).order("created_at", { ascending: false }).limit(1).maybeSingle(),
       user ? supabase.from("floor_staff_profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
@@ -126,13 +119,20 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
     setJob(loadedJob); setAppointment(appt); setRole((profileResult.data?.role as StaffRole | undefined) ?? null); setTechnicians((techResult.data ?? []) as Technician[]); setTeams((teamResult.data ?? []) as Team[]); setMaterials(loadedMaterials);
     setOrder(wo); setNote(wo?.note ?? "");
     if (appt && wo) {
-      const [assignmentResult, itemResult, eventResult] = await Promise.all([
+      const [assignmentResult, prepResult, eventResult] = await Promise.all([
         supabase.from("appointment_technicians").select("*").eq("appointment_id", appt.id).eq("is_active", true),
-        supabase.from("floor_work_order_items").select("*").eq("work_order_id", wo.id).order("sort_order"),
+        // ทางอ่านเดียว: RPC ตัดสินเองว่าจะให้บรรทัดจริงจาก floor_work_order_items
+        // หรือถอยไปแผนยุคเดิมใน install_jobs.pick_plan — หน้าจอไม่ต้องรู้แล้ว
+        fetchJobPrepList(supabase, decodedJobNo),
         supabase.from("floor_work_order_events").select("*").eq("work_order_id", wo.id).order("occurred_at", { ascending: false }),
       ]);
       setAssignments((assignmentResult.data ?? []) as Assignment[]);
-      const saved = (itemResult.data ?? []) as WorkOrderItem[]; const legacy = legacyItems(loadedJob?.pick_plan); setItems(saved.length ? saved.map(fromSaved) : legacy.length ? legacy : skuItems(loadedJob, loadedMaterials)); setEvents((eventResult.data ?? []) as WorkOrderEvent[]);
+      // อ่านไม่สำเร็จต้องบอกให้รู้ ไม่ใช่แสดงรายการว่างเปล่าเหมือนงานนี้ไม่มีของต้องเตรียม
+      if (prepResult.error) toast.error(floorErrorMessage(prepResult.error));
+      // เหลือ fallback ฝั่งหน้าจอไว้ชั้นเดียว: ร่างจาก SKU ต้นทาง ซึ่งไม่ใช่ข้อมูลที่เก็บในฐานข้อมูล
+      // จึงไม่ใช่ "แหล่งที่สาม" ของใบเบิกของ และรวมเข้า RPC ไม่ได้
+      setItems(prepResult.items.length ? prepResult.items : skuItems(loadedJob, loadedMaterials));
+      setEvents((eventResult.data ?? []) as WorkOrderEvent[]);
     } else { setAssignments([]); setItems([]); setEvents([]); }
     setLoading(false);
   }, [jobNo, supabase]);
@@ -196,6 +196,11 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
   const survey = jsonObject(job.survey_data); const canEdit = Boolean(role) && order.status === "head_review";
   const canWarehouse = Boolean(role); const canManageExternal = Boolean(role);
   const materialNotes = bbpsMaterialText(job.raw_payload); const hasLead = assignments.some((row) => row.is_active && row.is_lead);
+  // ติดป้ายให้ผู้ใช้รู้ว่ารายการที่เห็นยังไม่ใช่บรรทัดจริงในใบสั่งงาน จะได้ไม่เข้าใจผิดว่าคลังเห็นตรงกัน
+  const prepSourceNotice = items.length > 0 && items.every((item) => item.source !== "work_order_item")
+    ? JOB_PREP_SOURCE_LABELS[isLegacyPrepList(items) ? "pick_plan_legacy" : "sku_catalog"]
+    : null;
+
   const missing = [!job.customer_phone ? "เบอร์โทร" : null, !job.address && !job.location_url ? "สถานที่/แผนที่" : null, !job.product_name && !appointment.requirement ? "สินค้า/ขอบเขตงาน" : null, !hasLead ? "หัวหน้าทีมติดตั้ง" : null, !items.length ? "รายการวัสดุ/อุปกรณ์" : null, items.some((item) => item.category === "floor_material" && !item.sku.trim()) ? "SKU วัสดุปูพื้น" : null, items.some((item) => item.plannedQty === "") ? "จำนวนตามแผน" : null].filter((value): value is string => Boolean(value));
 
   return <div className={`${embedded ? "space-y-5" : "mx-auto max-w-7xl space-y-5"}`}>
@@ -215,6 +220,7 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
           {job.source === "bbps" ? <div className="mt-5"><BbpsWorkOrderDetails rawPayload={job.raw_payload} /></div> : null}
         </Card>
         <Card title="3. วัสดุ อุปกรณ์ และของที่ต้องเตรียม" subtitle="หัวหน้ากำหนด SKU และจำนวนตามแผน คลังกรอกเฉพาะจำนวนหยิบจริง">
+          {prepSourceNotice ? <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4"><div className="text-sm font-semibold text-amber-900">รายการนี้ยังไม่ได้บันทึกเป็นบรรทัดในใบสั่งงาน</div><p className="mt-1 text-sm text-amber-800">ที่มา: {prepSourceNotice}</p><p className="mt-1 text-xs text-amber-700">ตรวจและแก้ให้ตรงหน้างานก่อน แล้วกดยืนยันใบสั่งงานเพื่อบันทึกเป็นรายการจริง</p></div> : null}
           {materialNotes.length ? <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4"><div className="text-sm font-semibold text-indigo-950">ข้อความวัสดุจาก BBPS</div><div className="mt-2 space-y-1">{materialNotes.map((text) => <p key={text} className="whitespace-pre-wrap text-sm text-indigo-800">{text}</p>)}</div><p className="mt-2 text-xs text-indigo-600">หัวหน้าช่างต้องเลือก SKU และจำนวนจริงด้านล่างก่อนอนุมัติ</p></div> : null}
           <div className="space-y-3">{items.map((item, index) => { const stock = materials.find((row) => row.sku === item.sku); const freeform = isFreeformNote(item); return <div key={item.id ?? index} className={`rounded-xl border p-4 ${freeform ? "border-violet-200 bg-violet-50/50" : item.category === "floor_material" && !item.sku ? "border-amber-300 bg-amber-50/50" : "border-slate-200"}`}>
             <div className="mb-3 flex items-center justify-between"><div className="font-medium text-slate-900">รายการที่ {index + 1}</div>{canEdit ? <button onClick={() => removeItem(index)} className="text-xs font-medium text-red-500">ลบรายการ</button> : null}</div>

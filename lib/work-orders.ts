@@ -41,6 +41,10 @@ export interface WorkOrderItem {
   id: string; work_order_id: string; category: WorkItemCategory; item_name: string; sku: string | null;
   specification: string | null; planned_qty: number; actual_qty: number | null; unit: string;
   source_type: string; note: string | null; sort_order: number;
+  // P3-1: คอลัมน์ที่เพิ่มมาให้ใบเบิกของผูกกับทะเบียนวัสดุ/แม่แบบ และเก็บวงจรหยิบ–คืน–ใช้จริง
+  // ทุกตัวเป็น null ได้ เพราะแถวเดิมก่อน branch นี้ไม่เคยมีค่า
+  material_id?: string | null; item_kind?: "consumable" | "tool" | null; template_item_id?: string | null;
+  is_manual_override?: boolean; picked_qty?: number | null; returned_qty?: number | null; used_qty?: number | null;
 }
 
 export interface WorkOrderEvent {
