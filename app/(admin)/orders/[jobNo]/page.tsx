@@ -10,6 +10,7 @@ import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-detail
 import TechnicianAssignmentButton from "@/components/appointments/technician-assignment";
 import { WORK_ITEM_CATEGORIES, WORK_ITEM_CATEGORY_LABELS, WORK_ORDER_STATUS_LABELS, type WorkItemCategory, type WorkOrder, type WorkOrderEvent, workOrderEventLabel, workOrderStatusClass } from "@/lib/work-orders";
 import { JOB_PREP_SOURCE_LABELS, fetchJobPrepList, isLegacyPrepList, type JobPrepDraftItem } from "@/lib/job-prep-list";
+import { STOCK_LINE_STATUS_LABELS, bangkokDateKey, daysUntilLabel, fetchJobStockCheck, type JobStockShortageResult, type StockLineStatus } from "@/lib/stock-shortage";
 import { PREP_CHANGE_LABELS, addJobPrepItem, fetchJobPrepOverrides, generateJobPrepItems, latestOverrideByItem, prepGenerateMessage, removeJobPrepItem, removedOverrides, saveJobPrepItemOverride, type JobPrepOverride } from "@/lib/job-prep-overrides";
 import type { StaffRole } from "@/lib/staff";
 import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
@@ -73,12 +74,49 @@ function Card({ title, subtitle, children }: { title: string; subtitle?: string;
 }
 function Field({ label, value }: { label: string; value: React.ReactNode }) { return <div><div className="text-xs font-medium text-slate-400">{label}</div><div className="mt-1 whitespace-pre-wrap text-sm text-slate-800">{value || "—"}</div></div>; }
 
+// ป้ายผลตรวจสต็อกต่อบรรทัด — สีต้องสื่อว่า "ตรวจสอบไม่ได้" ไม่ใช่ทั้งดีและไม่ดี จึงใช้สีกลาง
+const STOCK_STATUS_CLASS: Record<StockLineStatus, string> = {
+  short: "border-rose-200 bg-rose-50 text-rose-900",
+  enough: "border-emerald-200 bg-emerald-50 text-emerald-900",
+  unknown: "border-amber-200 bg-amber-50 text-amber-900",
+  not_required: "border-slate-200 bg-white text-slate-500",
+};
+function qty(value: number | null) { return value === null ? "—" : Number(value).toLocaleString("th-TH"); }
+
+/**
+ * ผลตรวจสต็อกของงานใบนี้
+ * ตั้งใจไม่ซ่อนรายการที่ "ตรวจสอบไม่ได้" ไว้หลังคำว่าไม่มีปัญหา เพราะวันนี้ทะเบียนวัสดุมีแค่ 2 แถว
+ * บรรทัดจริงส่วนใหญ่จึงจับคู่สต็อกไม่ได้ ถ้าแสดงเป็น "ของพอ" หน้าจอจะโกหกคนใช้ทุกวัน
+ */
+function StockCheckPanel({ result, daysUntil }: { result: JobStockShortageResult | null; daysUntil: number | null }) {
+  if (!result || !result.groups.length) return null;
+  const counts = result.counts;
+  const shown = result.groups.filter((group) => group.status !== "not_required");
+  return <div className={`mb-4 rounded-xl border p-4 ${result.hasShortage ? "border-rose-300 bg-rose-50" : "border-slate-200 bg-slate-50"}`}>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className={`text-sm font-semibold ${result.hasShortage ? "text-rose-900" : "text-slate-900"}`}>{result.hasShortage ? `ของไม่พอ ${counts.short} รายการ` : "ตรวจแล้วไม่พบรายการที่ของขาด"}</div>
+      {daysUntil === null ? null : <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">ติดตั้ง{daysUntilLabel(daysUntil)}</span>}
+    </div>
+    <p className="mt-1 text-xs text-slate-600">เทียบกับสต็อกคลังจริง{result.snapshotDate ? ` ณ วันที่ ${result.snapshotDate}` : ""} · ของพอ {counts.enough} · ตรวจสอบไม่ได้ {counts.unknown} · ไม่ต้องเบิกเพิ่ม {counts.notRequired}</p>
+    {counts.unknown ? <p className="mt-1 text-xs text-amber-700">รายการที่ตรวจสอบไม่ได้ คือ SKU ที่ไม่มีทั้งในทะเบียนวัสดุและในสต็อกคลัง ระบบไม่เดาให้ว่าพอหรือไม่พอ ต้องเช็คกับคลังเอง</p> : null}
+    {shown.length ? <div className="mt-3 space-y-1.5">{shown.map((group, index) => <div key={group.stockKey ?? `line-${index}`} className={`rounded-lg border px-3 py-2 text-xs ${STOCK_STATUS_CLASS[group.status]}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium">{group.itemNames[0] || group.stockKey || "รายการไม่ระบุชื่อ"}{group.stockKey ? <span className="ml-1 font-mono text-[11px] opacity-70">{group.stockKey}</span> : null}</span>
+        <span className="font-semibold">{STOCK_LINE_STATUS_LABELS[group.status]}{group.status === "short" ? ` ${qty(group.shortageQty)} ${group.unit}` : ""}</span>
+      </div>
+      <div className="mt-1 opacity-80">ต้องเบิกอีก {qty(group.outstandingQty)} {group.unit} · คงเหลือ {qty(group.availableQty)} {group.availableQty === null ? "" : group.unit}{group.itemIds.length > 1 ? ` · รวมจาก ${group.itemIds.length} บรรทัด` : ""}</div>
+    </div>)}</div> : null}
+  </div>;
+}
+
 function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { jobNo: string; embedded?: boolean; onChanged?: () => void }) {
   const supabase = useMemo(() => createClient(), []);
   const [job, setJob] = useState<Job | null>(null); const [appointment, setAppointment] = useState<Appointment | null>(null);
   const [order, setOrder] = useState<WorkOrder | null>(null); const [items, setItems] = useState<DraftItem[]>([]); const [events, setEvents] = useState<WorkOrderEvent[]>([]);
   // ส่วนต่างจากแม่แบบ — โหลดคู่กับรายการเสมอ เพื่อให้ป้ายบนบรรทัดไม่หลุดจากตัวเลขที่แสดง
   const [overrides, setOverrides] = useState<JobPrepOverride[]>([]);
+  // ผลตรวจสต็อก — โหลดคู่กับรายการเสมอ เพื่อไม่ให้ตัวเลขบนป้ายกับบรรทัดที่แสดงเป็นคนละรอบ
+  const [stockCheck, setStockCheck] = useState<JobStockShortageResult | null>(null);
   const [technicians, setTechnicians] = useState<Technician[]>([]); const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [teams, setTeams] = useState<Team[]>([]); const [materials, setMaterials] = useState<Material[]>([]);
   const [role, setRole] = useState<StaffRole | null>(null); const [note, setNote] = useState(""); const [warehouseFiles, setWarehouseFiles] = useState<WarehouseFilePreview[]>([]);
@@ -122,12 +160,14 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
     setJob(loadedJob); setAppointment(appt); setRole((profileResult.data?.role as StaffRole | undefined) ?? null); setTechnicians((techResult.data ?? []) as Technician[]); setTeams((teamResult.data ?? []) as Team[]); setMaterials(loadedMaterials);
     setOrder(wo); setNote(wo?.note ?? "");
     if (appt && wo) {
-      const [assignmentResult, prepResult, overrideResult, eventResult] = await Promise.all([
+      const [assignmentResult, prepResult, overrideResult, stockResult, eventResult] = await Promise.all([
         supabase.from("appointment_technicians").select("*").eq("appointment_id", appt.id).eq("is_active", true),
         // ทางอ่านเดียว: RPC ตัดสินเองว่าจะให้บรรทัดจริงจาก floor_work_order_items
         // หรือถอยไปแผนยุคเดิมใน install_jobs.pick_plan — หน้าจอไม่ต้องรู้แล้ว
         fetchJobPrepList(supabase, decodedJobNo),
         fetchJobPrepOverrides(supabase, decodedJobNo),
+        // เช็คสต็อกอ่านผ่าน RPC เดียวกับที่งาน cron ใช้ หน้าจอกับแจ้งเตือนจึงเห็นตัวเลขชุดเดียวกัน
+        fetchJobStockCheck(supabase, decodedJobNo),
         supabase.from("floor_work_order_events").select("*").eq("work_order_id", wo.id).order("occurred_at", { ascending: false }),
       ]);
       setAssignments((assignmentResult.data ?? []) as Assignment[]);
@@ -138,9 +178,12 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
       setItems(prepResult.items.length ? prepResult.items : skuItems(loadedJob, loadedMaterials));
       // อ่านส่วนต่างไม่สำเร็จต้องเตือน ไม่ใช่แสดงรายการโดยไม่มีป้าย ซึ่งอ่านได้ว่า "ตรงตามแม่แบบทุกบรรทัด"
       if (overrideResult.error) toast.error(floorErrorMessage(overrideResult.error));
+      // เช็คสต็อกไม่สำเร็จต้องบอก ไม่ใช่ซ่อนกล่องไปเฉย ๆ ซึ่งอ่านได้ว่า "ตรวจแล้วไม่มีปัญหา"
+      if (stockResult.error) toast.error(floorErrorMessage(stockResult.error));
+      setStockCheck(stockResult.error ? null : stockResult.result);
       setOverrides(overrideResult.overrides);
       setEvents((eventResult.data ?? []) as WorkOrderEvent[]);
-    } else { setAssignments([]); setItems([]); setOverrides([]); setEvents([]); }
+    } else { setAssignments([]); setItems([]); setOverrides([]); setStockCheck(null); setEvents([]); }
     setLoading(false);
   }, [jobNo, supabase]);
   useEffect(() => { void load(); }, [load]);
@@ -271,6 +314,9 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
   const prepSourceNotice = items.length > 0 && items.every((item) => item.source !== "work_order_item")
     ? JOB_PREP_SOURCE_LABELS[isLegacyPrepList(items) ? "pick_plan_legacy" : "sku_catalog"]
     : null;
+  // จำนวนวันจนถึงวันติดตั้ง นับตาม "วัน" เวลาไทย ไม่ใช่ 24 ชั่วโมงเต็ม เพราะคนนับวันแบบปฏิทิน
+  const installDayKey = bangkokDateKey(new Date(appointment.slot_start));
+  const daysUntilInstall = Math.round((Date.parse(`${installDayKey}T00:00:00Z`) - Date.parse(`${bangkokDateKey()}T00:00:00Z`)) / 86_400_000);
   // ส่วนต่างล่าสุดต่อบรรทัด (ตัวเลขของแม่แบบมาจากครั้งแรกที่แก้ ไม่ใช่ค่าที่คนแก้ไว้เอง)
   const overrideByItem = latestOverrideByItem(overrides);
   const removedFromTemplate = removedOverrides(overrides);
@@ -309,6 +355,7 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
             <div className="text-sm font-semibold text-rose-900">ลบออกจากแม่แบบ {removedFromTemplate.length} รายการ</div>
             <div className="mt-2 space-y-1">{removedFromTemplate.map((row) => <p key={row.id} className="text-xs text-rose-800">• {row.templateItemName} · แม่แบบว่า {row.templateQty ?? "—"} {row.templateUnit} — {row.reason} <span className="text-rose-600">({row.changedByName || "ไม่ระบุผู้แก้"} · {row.changedAt ? thaiDate(row.changedAt) : "—"})</span></p>)}</div>
           </div> : null}
+          <StockCheckPanel result={stockCheck} daysUntil={daysUntilInstall} />
           {prepSourceNotice ? <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4"><div className="text-sm font-semibold text-amber-900">รายการนี้ยังไม่ได้บันทึกเป็นบรรทัดในใบสั่งงาน</div><p className="mt-1 text-sm text-amber-800">ที่มา: {prepSourceNotice}</p><p className="mt-1 text-xs text-amber-700">ตรวจและแก้ให้ตรงหน้างานก่อน แล้วกดยืนยันใบสั่งงานเพื่อบันทึกเป็นรายการจริง</p></div> : null}
           {materialNotes.length ? <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4"><div className="text-sm font-semibold text-indigo-950">ข้อความวัสดุจาก BBPS</div><div className="mt-2 space-y-1">{materialNotes.map((text) => <p key={text} className="whitespace-pre-wrap text-sm text-indigo-800">{text}</p>)}</div><p className="mt-2 text-xs text-indigo-600">หัวหน้าช่างต้องเลือก SKU และจำนวนจริงด้านล่างก่อนอนุมัติ</p></div> : null}
           <div className="space-y-3">{items.map((item, index) => { const stock = materials.find((row) => row.sku === item.sku); const freeform = isFreeformNote(item); const diff = item.id ? overrideByItem.get(item.id) : undefined; return <div key={item.id ?? index} className={`rounded-xl border p-4 ${freeform ? "border-violet-200 bg-violet-50/50" : item.category === "floor_material" && !item.sku ? "border-amber-300 bg-amber-50/50" : "border-slate-200"}`}>
