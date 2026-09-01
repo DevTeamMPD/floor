@@ -60,13 +60,19 @@ export default function QualityReviewPage() {
         supabase.from("floor_after_sales_cases").select("id,case_no,job_no,source,category,priority,status,summary,assigned_team,due_at,opened_at,resolved_at,closed_at,linked_ncr_id").order("opened_at", { ascending: false }),
         supabase.from("floor_after_sales_actions").select("id,case_id,title,status,due_at,completed_at,acceptance_criteria,outcome"),
         supabase.from("job_evaluations").select("id,job_no,satisfaction_score,call_date,created_at,updated_at").not("satisfaction_score", "is", null),
-        supabase.from("install_jobs").select("job_no,customer,team"),
+        supabase.from("install_jobs").select("job_no,customer_name"),
         supabase.from("floor_job_documents").select("id,job_no,document_type,document_code,status,provider_web_url").eq("status", "approved"),
         supabase.from("floor_after_sales_events").select("id,case_id,event_type,detail,occurred_at").order("occurred_at", { ascending: true }),
       ]);
       const failed = [ncrs, cases, actions, evaluations, jobs, docs, caseEvents].find((result) => result.error);
       if (failed?.error) throw failed.error;
-      setData({ ncrs: ncrs.data || [], cases: cases.data || [], actions: actions.data || [], evaluations: evaluations.data || [], jobs: jobs.data || [] } as QualityDataset);
+      const caseRows = (cases.data || []) as QualityDataset["cases"];
+      const jobRows = (jobs.data || []).map((job) => ({
+        job_no: String(job.job_no),
+        customer: typeof job.customer_name === "string" ? job.customer_name : null,
+        team: caseRows.find((item) => item.job_no === job.job_no && item.assigned_team)?.assigned_team || null,
+      }));
+      setData({ ncrs: ncrs.data || [], cases: caseRows, actions: actions.data || [], evaluations: evaluations.data || [], jobs: jobRows } as QualityDataset);
       setDocuments((docs.data || []) as DocumentRow[]); setEvents((caseEvents.data || []) as EventRow[]);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "โหลดข้อมูลคุณภาพไม่สำเร็จ"); }
     finally { setLoading(false); }
