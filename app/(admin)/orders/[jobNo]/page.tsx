@@ -11,7 +11,7 @@ import TechnicianAssignmentButton from "@/components/appointments/technician-ass
 import { WORK_ITEM_CATEGORIES, WORK_ITEM_CATEGORY_LABELS, WORK_ORDER_STATUS_LABELS, type WorkItemCategory, type WorkOrder, type WorkOrderEvent, workOrderEventLabel, workOrderStatusClass } from "@/lib/work-orders";
 import { JOB_PREP_SOURCE_LABELS, fetchJobPrepList, isLegacyPrepList, type JobPrepDraftItem } from "@/lib/job-prep-list";
 import { STOCK_LINE_STATUS_LABELS, bangkokDateKey, daysUntilLabel, fetchJobStockCheck, type JobStockShortageResult, type StockLineStatus } from "@/lib/stock-shortage";
-import { PREP_CHANGE_LABELS, addJobPrepItem, fetchJobPrepOverrides, generateJobPrepItems, latestOverrideByItem, prepGenerateMessage, removeJobPrepItem, removedOverrides, saveJobPrepItemOverride, type JobPrepOverride } from "@/lib/job-prep-overrides";
+import { PREP_CHANGE_LABELS, addJobPrepItem, fetchJobPrepOverrides, generateJobPrepItems, latestOverrideByItem, prepGenerateMessage, prepNameConflictMessage, removeJobPrepItem, removedOverrides, saveJobPrepItemOverride, type JobPrepOverride } from "@/lib/job-prep-overrides";
 import type { StaffRole } from "@/lib/staff";
 import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
 import { InlineWorkOrderJobContext } from "@/components/work-orders/inline-work-order-context";
@@ -74,6 +74,68 @@ function Card({ title, subtitle, children }: { title: string; subtitle?: string;
 }
 function Field({ label, value }: { label: string; value: React.ReactNode }) { return <div><div className="text-xs font-medium text-slate-400">{label}</div><div className="mt-1 whitespace-pre-wrap text-sm text-slate-800">{value || "—"}</div></div>; }
 
+/**
+ * ฟอร์มเดียวสำหรับ "แก้ / เพิ่ม / ลบ รายการเตรียมของ พร้อมเหตุผล"
+ *
+ * ของเดิมเป็น window.prompt ต่อกันสี่ชั้น (ชื่อ → จำนวน → หน่วย → ชนิด → เหตุผล)
+ * กดยกเลิกกลางทางแล้วสิ่งที่พิมพ์ไปหายทั้งหมดโดยไม่มีคำเตือน และ prompt ก็เตี้ยเกินกว่าจะอธิบาย
+ * ว่าทำไมต้องกรอกเหตุผล ฟอร์มนี้แสดงทุกช่องพร้อมกัน แก้ย้อนได้ และบอกเหตุผลของการบังคับกรอกไว้ตรงนั้น
+ * รวมช่องชื่อและหน่วยเข้ามาด้วย ซึ่ง RPC และตารางส่วนต่างรองรับมาตั้งแต่ต้น (human_item_name / human_unit)
+ * แต่หน้าจอเดิมยังส่งไปแค่จำนวน
+ */
+type PrepDialogMode = "edit" | "add" | "remove";
+interface PrepDialogState {
+  mode: PrepDialogMode;
+  itemId?: string;
+  itemName: string;
+  unit: string;
+  plannedQty: string;
+  itemKind: "consumable" | "tool";
+  reason: string;
+}
+const PREP_DIALOG_TITLES: Record<PrepDialogMode, string> = {
+  edit: "แก้รายการให้ต่างจากแม่แบบ",
+  add: "เพิ่มรายการที่ไม่มีในแม่แบบ",
+  remove: "ลบรายการออกจากใบสั่งงาน",
+};
+const PREP_DIALOG_HINTS: Record<PrepDialogMode, string> = {
+  edit: "ตัวเลขของแม่แบบจะถูกเก็บไว้คู่กับตัวเลขใหม่และเหตุผล เพื่อให้ย้อนดูได้ว่าทำไมหน้างานจริงจึงไม่เท่าแม่แบบ",
+  add: "บรรทัดที่เพิ่มเองแปลว่าแม่แบบยังไม่ครอบคลุม เหตุผลที่กรอกจะถูกใช้ปรับปรุงแม่แบบรุ่นถัดไป",
+  remove: "บรรทัดที่ลบจะยังแสดงบนหน้าจอพร้อมเหตุผล เพื่อให้ยังรู้ว่าแม่แบบเคยสั่งอะไรไว้",
+};
+function PrepItemDialog({ state, saving, onChange, onCancel, onSubmit }: {
+  state: PrepDialogState;
+  saving: boolean;
+  onChange: (patch: Partial<PrepDialogState>) => void;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  const editable = state.mode !== "remove";
+  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-4 sm:items-center" role="dialog" aria-modal="true" aria-label={PREP_DIALOG_TITLES[state.mode]}>
+    <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
+      <h3 className="font-semibold text-slate-950">{PREP_DIALOG_TITLES[state.mode]}</h3>
+      <p className="mt-1 text-xs text-slate-500">{PREP_DIALOG_HINTS[state.mode]}</p>
+      <form className="mt-4 space-y-3" onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
+        {state.mode === "remove"
+          ? <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-800">{state.itemName} · {state.plannedQty || "—"} {state.unit}</div>
+          : <>
+            <label className="block text-xs font-medium text-slate-500">ชื่อรายการ *<input autoFocus value={state.itemName} onChange={(e) => onChange({ itemName: e.target.value })} placeholder="เช่น กาวยาง" className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm" /></label>
+            <div className="grid grid-cols-[1fr_120px] gap-2">
+              <label className="block text-xs font-medium text-slate-500">จำนวนตามแผน *<input type="number" min="0" step="0.01" value={state.plannedQty} onChange={(e) => onChange({ plannedQty: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm" /></label>
+              <label className="block text-xs font-medium text-slate-500">หน่วย *<input value={state.unit} onChange={(e) => onChange({ unit: e.target.value })} placeholder="ชิ้น" className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm" /></label>
+            </div>
+            {state.mode === "add" ? <label className="block text-xs font-medium text-slate-500">ชนิดของ *<select value={state.itemKind} onChange={(e) => onChange({ itemKind: e.target.value === "tool" ? "tool" : "consumable" })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm"><option value="consumable">ของสิ้นเปลือง (ใช้แล้วหมด)</option><option value="tool">เครื่องมือ (ต้องคืนคลัง)</option></select></label> : null}
+          </>}
+        <label className="block text-xs font-medium text-slate-500">เหตุผล * (บังคับกรอก)<textarea value={state.reason} onChange={(e) => onChange({ reason: e.target.value })} rows={3} placeholder="เช่น พื้นปูนขัดมัน กาวกินมากกว่าปกติ" className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm" /></label>
+        <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
+          <button type="button" onClick={onCancel} className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700">ยกเลิก</button>
+          <button type="submit" disabled={saving} className={`rounded-xl px-4 py-2.5 text-sm font-semibold text-white disabled:bg-slate-200 disabled:text-slate-500 ${state.mode === "remove" ? "bg-red-600" : "bg-blue-600"}`}>{saving ? "กำลังบันทึก…" : editable ? "บันทึกพร้อมเหตุผล" : "ลบพร้อมบันทึกเหตุผล"}</button>
+        </div>
+      </form>
+    </div>
+  </div>;
+}
+
 // ป้ายผลตรวจสต็อกต่อบรรทัด — สีต้องสื่อว่า "ตรวจสอบไม่ได้" ไม่ใช่ทั้งดีและไม่ดี จึงใช้สีกลาง
 const STOCK_STATUS_CLASS: Record<StockLineStatus, string> = {
   short: "border-rose-200 bg-rose-50 text-rose-900",
@@ -122,6 +184,8 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
   const [role, setRole] = useState<StaffRole | null>(null); const [note, setNote] = useState(""); const [warehouseFiles, setWarehouseFiles] = useState<WarehouseFilePreview[]>([]);
   const warehouseFilesRef = useRef<WarehouseFilePreview[]>([]);
   const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false);
+  // ฟอร์มแก้/เพิ่ม/ลบรายการเตรียมของ — กล่องเดียวแทน window.prompt ที่เคยต่อกันสี่ชั้น
+  const [prepDialog, setPrepDialog] = useState<PrepDialogState | null>(null);
 
   useEffect(() => { warehouseFilesRef.current = warehouseFiles; }, [warehouseFiles]);
   useEffect(() => () => { warehouseFilesRef.current.forEach((item) => URL.revokeObjectURL(item.url)); }, []);
@@ -217,70 +281,70 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
     setSaving(false);
     if (error) { toast.error(floorErrorMessage(error)); return; }
     toast.success(result ? prepGenerateMessage(result) : "สร้างรายการจากแม่แบบแล้ว");
+    // ชื่อชนกันต้องเด้งเป็นคำเตือนแยกต่างหาก ไม่ใช่ต่อท้ายข้อความว่า "สำเร็จ"
+    // เพราะผลลัพธ์คือ "ตอนนี้มีสองบรรทัดชื่อเดียวกันในใบ" ซึ่งคนต้องไปตัดสินเองว่าอันไหนคือของจริง
+    const conflict = result ? prepNameConflictMessage(result) : null;
+    if (conflict) toast.warning(conflict, { duration: 15000 });
     void refreshAfterChange();
   }
-  function askReason(question: string) {
-    const reason = window.prompt(question);
-    if (reason === null) return null;
-    if (!reason.trim()) { toast.error("ต้องระบุเหตุผล เพื่อให้ตรวจย้อนกลับได้ว่าทำไมจึงไม่ใช้ตัวเลขของแม่แบบ"); return null; }
-    return reason.trim();
-  }
-  async function editItemWithReason(item: DraftItem) {
+  function openEditItemDialog(item: DraftItem) {
     if (!item.id) return;
-    const qtyText = window.prompt(`จำนวนใหม่ของ “${item.itemName}” (ตอนนี้ ${item.plannedQty} ${item.unit})`, item.plannedQty);
-    if (qtyText === null) return;
-    const qty = Number(qtyText);
-    if (!Number.isFinite(qty) || qty < 0) { toast.error("จำนวนต้องเป็นตัวเลขไม่ติดลบ"); return; }
-    const reason = askReason("เหตุผลที่แก้ต่างจากแม่แบบ (บังคับกรอก)");
-    if (!reason) return;
-    setSaving(true);
-    const { error } = await saveJobPrepItemOverride(supabase, { itemId: item.id, plannedQty: qty, reason });
-    setSaving(false);
-    if (error) toast.error(floorErrorMessage(error));
-    else { toast.success("บันทึกจำนวนใหม่และเหตุผลแล้ว"); void refreshAfterChange(); }
+    setPrepDialog({ mode: "edit", itemId: item.id, itemName: item.itemName, unit: item.unit, plannedQty: item.plannedQty, itemKind: item.itemKind === "tool" ? "tool" : "consumable", reason: "" });
   }
-  async function removeItemWithReason(item: DraftItem) {
+  function openRemoveItemDialog(item: DraftItem) {
     if (!item.id) return;
-    const reason = askReason(`เหตุผลที่ลบ “${item.itemName}” ออกจากรายการ (บังคับกรอก)`);
-    if (!reason) return;
-    setSaving(true);
-    const { error } = await removeJobPrepItem(supabase, { itemId: item.id, reason });
-    setSaving(false);
-    if (error) toast.error(floorErrorMessage(error));
-    else { toast.success("ลบรายการและบันทึกเหตุผลแล้ว"); void refreshAfterChange(); }
+    setPrepDialog({ mode: "remove", itemId: item.id, itemName: item.itemName, unit: item.unit, plannedQty: item.plannedQty, itemKind: item.itemKind === "tool" ? "tool" : "consumable", reason: "" });
   }
-  async function addItemOutsideTemplate() {
-    if (!order) return;
-    const itemName = window.prompt("ชื่อรายการที่ไม่มีในแม่แบบ");
-    if (!itemName?.trim()) return;
-    const qtyText = window.prompt(`จำนวนของ “${itemName.trim()}”`, "1");
-    if (qtyText === null) return;
-    const qty = Number(qtyText);
-    if (!Number.isFinite(qty) || qty < 0) { toast.error("จำนวนต้องเป็นตัวเลขไม่ติดลบ"); return; }
-    const unit = window.prompt("หน่วย", "ชิ้น");
-    if (unit === null) return;
-    const isTool = window.confirm("เป็นเครื่องมือหรือไม่?\n\nตกลง = เครื่องมือ · ยกเลิก = ของสิ้นเปลือง");
-    const reason = askReason("เหตุผลที่ต้องเพิ่มรายการนอกแม่แบบ (บังคับกรอก)");
-    if (!reason) return;
+  function openAddItemDialog() {
+    setPrepDialog({ mode: "add", itemName: "", unit: "ชิ้น", plannedQty: "1", itemKind: "consumable", reason: "" });
+  }
+  async function submitPrepDialog() {
+    const form = prepDialog;
+    if (!form || !order) return;
+    const reason = form.reason.trim();
+    if (!reason) { toast.error("ต้องระบุเหตุผล เพื่อให้ตรวจย้อนกลับได้ว่าทำไมจึงไม่ใช้ตัวเลขของแม่แบบ"); return; }
+    const itemName = form.itemName.trim();
+    const unit = form.unit.trim();
+    const qty = Number(form.plannedQty);
+    if (form.mode !== "remove") {
+      if (!itemName) { toast.error("ต้องระบุชื่อรายการ"); return; }
+      if (!unit) { toast.error("ต้องระบุหน่วย"); return; }
+      if (!Number.isFinite(qty) || qty < 0) { toast.error("จำนวนต้องเป็นตัวเลขไม่ติดลบ"); return; }
+    }
     setSaving(true);
-    const { error } = await addJobPrepItem(supabase, { workOrderId: order.id, itemName: itemName.trim(), unit: unit.trim() || "ชิ้น", plannedQty: qty, itemKind: isTool ? "tool" : "consumable", reason });
+    const { error } = form.mode === "add"
+      ? await addJobPrepItem(supabase, { workOrderId: order.id, itemName, unit, plannedQty: qty, itemKind: form.itemKind, reason })
+      : form.mode === "edit" && form.itemId
+        // ส่งชื่อและหน่วยไปด้วย ไม่ใช่แค่จำนวน — RPC เก็บ human_item_name / human_unit ไว้อยู่แล้ว
+        ? await saveJobPrepItemOverride(supabase, { itemId: form.itemId, plannedQty: qty, itemName, unit, reason })
+        : await removeJobPrepItem(supabase, { itemId: form.itemId as string, reason });
     setSaving(false);
-    if (error) toast.error(floorErrorMessage(error));
-    else { toast.success("เพิ่มรายการนอกแม่แบบและบันทึกเหตุผลแล้ว"); void refreshAfterChange(); }
+    if (error) { toast.error(floorErrorMessage(error)); return; }
+    setPrepDialog(null);
+    toast.success(form.mode === "add" ? "เพิ่มรายการนอกแม่แบบและบันทึกเหตุผลแล้ว" : form.mode === "edit" ? "บันทึกรายการที่แก้และเหตุผลแล้ว" : "ลบรายการและบันทึกเหตุผลแล้ว");
+    void refreshAfterChange();
   }
 
   function selectMaterial(index: number, sku: string) {
     const material = materials.find((row) => row.sku === sku);
     patchItem(index, { sku, ...(material ? { itemName: material.name, unit: material.unit || "ชิ้น" } : {}) });
   }
-  function rpcItems(unknownSkus: Set<string>) { return items.map((item) => { const isException = item.category === "floor_material" && unknownSkus.has(item.sku.trim()); return { category: item.category, itemName: item.itemName.trim(), sku: item.sku.trim(), specification: item.specification.trim(), plannedQty: Number(item.plannedQty), unit: item.unit.trim(), sourceType: isException ? "other" : item.sourceType, note: isException ? `[อนุมัติ SKU นอกคลัง]${item.note.trim() ? ` ${item.note.trim()}` : ""}` : item.note.trim() }; }); }
+  // ส่ง id ของบรรทัดเดิมไปด้วย เพื่อให้ confirm_floor_work_order_v3 แก้ทับที่เดิมแทนการลบแล้วสร้างใหม่
+  // ถ้าไม่ส่ง id ทุกบรรทัดจะกลายเป็นบรรทัดใหม่ และคอลัมน์ที่ payload ไม่ได้พูดถึง
+  // (template_item_id / material_id / item_kind / is_manual_override / picked_qty) จะหายทั้งใบ
+  function rpcItems(unknownSkus: Set<string>) { return items.map((item) => { const isException = item.category === "floor_material" && unknownSkus.has(item.sku.trim()); return { ...(item.id ? { id: item.id } : {}), category: item.category, itemName: item.itemName.trim(), sku: item.sku.trim(), specification: item.specification.trim(), plannedQty: Number(item.plannedQty), unit: item.unit.trim(), sourceType: isException ? "other" : item.sourceType, note: isException ? `[อนุมัติ SKU นอกคลัง]${item.note.trim() ? ` ${item.note.trim()}` : ""}` : item.note.trim() }; }); }
 
   async function confirmOrder() {
     if (!order) return; if (!items.length || items.some((item) => isFreeformNote(item) ? !item.note.trim() : !item.itemName.trim() || !item.unit.trim() || item.plannedQty === "" || Number(item.plannedQty) < 0 || (item.category === "floor_material" && !item.sku.trim()))) { toast.error("กรอก SKU ชื่อรายการ จำนวน และหน่วยให้ครบทุกบรรทัด หรือพิมพ์ข้อความในโน้ต Freeform"); return; }
     const unknownSkus = new Set(items.filter((item) => item.category === "floor_material" && item.sku.trim() && !materials.some((material) => material.sku === item.sku.trim())).map((item) => item.sku.trim()));
     if (unknownSkus.size && !window.confirm(`พบ SKU ที่ไม่มีในคลัง:\n• ${Array.from(unknownSkus).join("\n• ")}\n\nยืนยันใช้เป็นข้อยกเว้นหรือไม่? ระบบจะบันทึกว่าเป็น SKU นอกคลัง`)) return;
     const exceptionNote = unknownSkus.size ? `อนุมัติข้อยกเว้น SKU นอกคลัง: ${Array.from(unknownSkus).join(", ")}` : null;
-    setSaving(true); const { error } = await supabase.rpc("confirm_floor_work_order_v2", { p_work_order_id: order.id, p_items: rpcItems(unknownSkus), p_note: [note.trim(), exceptionNote].filter(Boolean).join("\n") || null }); setSaving(false);
+    // v3 แทน v2: v2 ลบทุกบรรทัดแล้วเขียนใหม่ จึงล้าง template_item_id / material_id / item_kind /
+    // is_manual_override / picked_qty ทิ้งทุกครั้งที่ยืนยัน ซึ่งเป็นคอลัมน์ที่กลไกกันของที่คนแก้
+    // ไม่ให้ถูกแม่แบบเขียนทับทั้งหมดยืนอยู่บนนั้น (supabase/migrations/20260902130020_confirm_floor_work_order_v3.sql)
+    // ข้อจำกัดที่ยังเหลือ: ถ้าแก้จำนวนของบรรทัดแม่แบบ "บนฟอร์มนี้" แทนที่จะใช้ปุ่มแก้รายการที่บันทึกเหตุผล
+    // v3 จะไม่ตั้ง is_manual_override ให้ (เพราะจะกลายเป็นส่วนต่างที่ไม่มีเหตุผลกำกับ) — ให้ใช้ปุ่มแก้รายการ
+    setSaving(true); const { error } = await supabase.rpc("confirm_floor_work_order_v3", { p_work_order_id: order.id, p_items: rpcItems(unknownSkus), p_note: [note.trim(), exceptionNote].filter(Boolean).join("\n") || null }); setSaving(false);
     if (error) toast.error(floorErrorMessage(error)); else { toast.success("ยืนยันใบสั่งงานและส่งให้คลังแล้ว"); void refreshAfterChange(); }
   }
   async function returnOrder() {
@@ -324,6 +388,7 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
   const missing = [!job.customer_phone ? "เบอร์โทร" : null, !job.address && !job.location_url ? "สถานที่/แผนที่" : null, !job.product_name && !appointment.requirement ? "สินค้า/ขอบเขตงาน" : null, !hasLead ? "หัวหน้าทีมติดตั้ง" : null, !items.length ? "รายการวัสดุ/อุปกรณ์" : null, items.some((item) => item.category === "floor_material" && !item.sku.trim()) ? "SKU วัสดุปูพื้น" : null, items.some((item) => item.plannedQty === "") ? "จำนวนตามแผน" : null].filter((value): value is string => Boolean(value));
 
   return <div className={`${embedded ? "space-y-5" : "mx-auto max-w-7xl space-y-5"}`}>
+    {prepDialog ? <PrepItemDialog state={prepDialog} saving={saving} onChange={(patch) => setPrepDialog((current) => current ? { ...current, ...patch } : current)} onCancel={() => setPrepDialog(null)} onSubmit={() => void submitPrepDialog()} /> : null}
     {!embedded && <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><Link href="/operations" className="text-sm text-blue-600">← กลับรายการงาน</Link><div className="mt-3 text-xs font-semibold uppercase tracking-wider text-blue-600">FloorNow · ใบสั่งงานกลาง</div><h1 className="mt-1 text-2xl font-bold text-slate-950">{job.customer_name || job.job_no}</h1><p className="mt-1 text-sm text-slate-500">งาน #{job.job_no}{job.bill_no ? ` · บิล ${job.bill_no}` : ""} · Revision {order.revision}</p></div><span className={`w-fit rounded-full px-4 py-2 text-sm font-semibold ${workOrderStatusClass(order.status)}`}>{WORK_ORDER_STATUS_LABELS[order.status]}</span></div>}
 
     {order.status === "returned_sales" ? <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4"><div className="font-semibold text-amber-900">{job.source === "bbps" ? "ส่งกลับให้ BBPS แก้ไขแล้ว" : "ส่งกลับให้ฝ่ายขายแก้ไขแล้ว"}</div><p className="mt-1 whitespace-pre-wrap text-sm text-amber-800">{order.returned_reason || job.flag_note || "ไม่ระบุเหตุผล"}</p>{job.source === "bbps" ? <p className="mt-2 text-xs text-amber-700">ต้องแก้ข้อมูลที่ BBPS CRM เมื่อ Sync revision ใหม่กลับมา งานจะเข้าคิวหัวหน้าช่างอีกครั้ง</p> : null}</div> : null}
@@ -367,8 +432,8 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
                   : item.templateItemId ? <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">ตรงตามแม่แบบ</span> : null}
               </div>
               {canEdit ? (item.id ? <div className="flex gap-2">
-                <button onClick={() => void editItemWithReason(item)} disabled={saving} className="text-xs font-medium text-amber-700">แก้จำนวน (บันทึกเหตุผล)</button>
-                <button onClick={() => void removeItemWithReason(item)} disabled={saving} className="text-xs font-medium text-red-500">ลบ (บันทึกเหตุผล)</button>
+                <button onClick={() => openEditItemDialog(item)} disabled={saving} className="text-xs font-medium text-amber-700">แก้รายการ (บันทึกเหตุผล)</button>
+                <button onClick={() => openRemoveItemDialog(item)} disabled={saving} className="text-xs font-medium text-red-500">ลบ (บันทึกเหตุผล)</button>
               </div> : <button onClick={() => removeItem(index)} className="text-xs font-medium text-red-500">ลบรายการ</button>) : null}
             </div>
             {diff ? <p className="-mt-1 mb-3 text-xs text-amber-800">เหตุผล: {diff.reason} <span className="text-amber-600">({diff.changedByName || "ไม่ระบุผู้แก้"} · {diff.changedAt ? thaiDate(diff.changedAt) : "—"})</span></p> : null}
@@ -384,7 +449,7 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
             </div>}
           </div>; })}</div>
           <datalist id="floor-material-skus">{materials.map((material) => <option key={material.id} value={material.sku}>{material.name}</option>)}</datalist>
-          {canEdit ? <div className="mt-3 flex flex-wrap gap-2">{WORK_ITEM_CATEGORIES.map((category) => <button key={category} onClick={() => addItem(category)} className="rounded-lg border border-dashed border-blue-300 px-3 py-2 text-xs text-blue-700">+ {WORK_ITEM_CATEGORY_LABELS[category]}</button>)}<button onClick={addFreeformNote} className="rounded-lg border border-dashed border-violet-300 bg-violet-50 px-3 py-2 text-xs font-medium text-violet-700">+ โน้ต Freeform</button><button onClick={() => void addItemOutsideTemplate()} disabled={saving} className="rounded-lg border border-dashed border-amber-400 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">+ เพิ่มรายการนอกแม่แบบ (บันทึกเหตุผล)</button></div> : null}
+          {canEdit ? <div className="mt-3 flex flex-wrap gap-2">{WORK_ITEM_CATEGORIES.map((category) => <button key={category} onClick={() => addItem(category)} className="rounded-lg border border-dashed border-blue-300 px-3 py-2 text-xs text-blue-700">+ {WORK_ITEM_CATEGORY_LABELS[category]}</button>)}<button onClick={addFreeformNote} className="rounded-lg border border-dashed border-violet-300 bg-violet-50 px-3 py-2 text-xs font-medium text-violet-700">+ โน้ต Freeform</button><button onClick={openAddItemDialog} disabled={saving} className="rounded-lg border border-dashed border-amber-400 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">+ เพิ่มรายการนอกแม่แบบ (บันทึกเหตุผล)</button></div> : null}
         </Card>
       </div>
 

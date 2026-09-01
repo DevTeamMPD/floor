@@ -128,16 +128,51 @@ export async function fetchJobPrepOverrides(
   return { overrides: toJobPrepOverrides(data), error: null };
 }
 
+/**
+ * เหตุผลที่ผูกบรรทัดเดิมกลับเข้าแม่แบบด้วย "ชื่อ" ไม่ได้
+ * ต้องตรงกับค่าที่ generate_job_prep_items ใส่ใน name_conflicts[].reason
+ * (supabase/migrations/20260902130000_job_prep_generate_name_adoption.sql)
+ */
+export type PrepNameConflictReason = "human_line" | "template_duplicate_name" | "ambiguous";
+
+export const PREP_NAME_CONFLICT_LABELS: Record<PrepNameConflictReason, string> = {
+  human_line: "ชื่อชนกับบรรทัดที่คนเพิ่มเอง",
+  template_duplicate_name: "แม่แบบมีสองบรรทัดชื่อนี้",
+  ambiguous: "มีหลายบรรทัดชื่อนี้ที่ยังไม่ผูกกับแม่แบบ",
+};
+
+export interface PrepNameConflict {
+  itemName: string;
+  reason: PrepNameConflictReason;
+}
+
 /** ผลสรุปที่ RPC สร้างรายการคืนกลับมา ใช้บอกผู้ใช้เป็นภาษาไทยว่าเกิดอะไรขึ้น */
 export interface PrepGenerateResult {
   areaSqm: number | null;
   unitCount: number | null;
   inserted: number;
   updated: number;
+  /** บรรทัดเดิมที่ถูกผูกกลับเข้าแม่แบบด้วยชื่อ (template_item_id ถูกเขียนกลับให้แล้ว) */
+  adopted: number;
   keptManual: number;
   keptPicked: number;
   keptRemoved: number;
-  keptUntracked: number;
+  /**
+   * ชื่อที่ชนกันจนผูกกลับด้วยชื่อไม่ได้ — บรรทัดของแม่แบบ "ถูกสร้างเพิ่มแล้ว" ไม่ได้ถูกข้าม
+   * หน้าจอต้องเตือนให้คนไปดูว่าบรรทัดไหนคือของจริง
+   */
+  nameConflicts: PrepNameConflict[];
+}
+
+function conflictReason(value: unknown): PrepNameConflictReason {
+  return value === "template_duplicate_name" || value === "ambiguous" ? value : "human_line";
+}
+
+export function toPrepNameConflicts(data: unknown): PrepNameConflict[] {
+  if (!Array.isArray(data)) return [];
+  return data
+    .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object")
+    .map((row) => ({ itemName: str(row.item_name), reason: conflictReason(row.reason) }));
 }
 
 export function toPrepGenerateResult(data: unknown): PrepGenerateResult {
@@ -148,10 +183,11 @@ export function toPrepGenerateResult(data: unknown): PrepGenerateResult {
     unitCount: num(row.unit_count),
     inserted: count(row.inserted),
     updated: count(row.updated),
+    adopted: count(row.adopted),
     keptManual: count(row.kept_manual),
     keptPicked: count(row.kept_picked),
     keptRemoved: count(row.kept_removed),
-    keptUntracked: count(row.kept_untracked),
+    nameConflicts: toPrepNameConflicts(row.name_conflicts),
   };
 }
 
@@ -160,14 +196,27 @@ export function prepGenerateMessage(result: PrepGenerateResult): string {
   const parts: string[] = [];
   if (result.inserted) parts.push(`เพิ่ม ${result.inserted} รายการ`);
   if (result.updated) parts.push(`ปรับจำนวนตามแม่แบบ ${result.updated} รายการ`);
-  if (!result.inserted && !result.updated) parts.push("ไม่มีอะไรต้องเปลี่ยน");
+  if (result.adopted) parts.push(`ผูกบรรทัดเดิมกลับเข้าแม่แบบ ${result.adopted} รายการ`);
+  if (!result.inserted && !result.updated && !result.adopted) parts.push("ไม่มีอะไรต้องเปลี่ยน");
   const kept: string[] = [];
   if (result.keptManual) kept.push(`คนแก้ไว้ ${result.keptManual}`);
   if (result.keptPicked) kept.push(`คลังหยิบแล้ว ${result.keptPicked}`);
   if (result.keptRemoved) kept.push(`คนลบทิ้งแล้ว ${result.keptRemoved}`);
-  if (result.keptUntracked) kept.push(`มีบรรทัดชื่อเดียวกันอยู่แล้ว ${result.keptUntracked}`);
   const basis = `พื้นที่ ${result.areaSqm ?? "—"} ตร.ม. · ${result.unitCount ?? "—"} แผ่น`;
   return `${parts.join(" · ")}${kept.length ? ` · คงไว้ไม่แตะ: ${kept.join(", ")}` : ""} (${basis})`;
+}
+
+/**
+ * คำเตือนเรื่องชื่อชน — ต้องบอกให้ชัดว่า "ระบบสร้างบรรทัดของแม่แบบให้แล้ว ไม่ได้ข้าม"
+ * เพราะข้อความเดิม ("มีบรรทัดชื่อเดียวกันอยู่แล้ว") อ่านได้ว่าไม่ต้องทำอะไรต่อ
+ * ทั้งที่ความจริงคือมีสองบรรทัดชื่อเดียวกันอยู่ในใบ และคนต้องไปตัดสินเองว่าอันไหนคือของจริง
+ */
+export function prepNameConflictMessage(result: PrepGenerateResult): string | null {
+  if (!result.nameConflicts.length) return null;
+  const detail = result.nameConflicts
+    .map((row) => `${row.itemName} (${PREP_NAME_CONFLICT_LABELS[row.reason]})`)
+    .join(" · ");
+  return `มีชื่อรายการชนกัน ${result.nameConflicts.length} รายการ — ระบบสร้างบรรทัดของแม่แบบเพิ่มให้แล้วตามจำนวนที่คำนวณได้ ไม่ได้ข้ามไป กรุณาตรวจว่าบรรทัดไหนคือของจริงแล้วลบบรรทัดที่ซ้ำ: ${detail}`;
 }
 
 export async function generateJobPrepItems(
