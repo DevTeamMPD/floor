@@ -10,6 +10,7 @@ import { WORK_ORDER_STATUS_LABELS, workOrderEventLabel, workOrderStatusClass, ty
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import TicketChat from "@/components/tickets/ticket-chat";
 import LendiSkeleton from "@/components/brand/lendi-skeleton";
+import { canBypassBookingPolicy, hasUnrestrictedHolidayBookingPrivilege, isHolidayBooking } from "@/lib/booking-policy";
 
 interface Team { id: string; name: string }
 interface Appt {
@@ -185,7 +186,6 @@ const WORK_END = "17:00";
 const QUEUE_DRAFT_KEY = "floornow:share-queue:draft:v1";
 const BOOKING_MIN_LEAD_DAYS = 3;
 const TEAM_B_MAX_LEAD_DAYS = 10;
-const UNRESTRICTED_BOOKING_EMAIL = "supakrit.k@mpdgroup.co";
 const DC_MEETING_MARKS: Record<string, string> = {
   "2026-09-10": "09:00–12:00 Meeting พี่พั๊นกับทีม DC · รับคิวบ่ายไม่เกิน 15 ตร.ม.",
   "2026-10-15": "09:00–12:00 Meeting พี่พั๊นกับทีม DC · รับคิวบ่ายไม่เกิน 15 ตร.ม.",
@@ -439,7 +439,8 @@ export default function ShareQueuePage() {
   const canSell = Boolean(staffRole);
   const canCancel = Boolean(staffRole);
   const canDecide = Boolean(staffRole);
-  const canBypassBookingRules = staffEmail === UNRESTRICTED_BOOKING_EMAIL;
+  const canBypassBookingRules = canBypassBookingPolicy(staffEmail, form);
+  const hasHolidayBookingPrivilege = hasUnrestrictedHolidayBookingPrivilege(staffEmail);
   const selectedFormTeam = form ? teams.find((team) => team.id === form.tech_id) : undefined;
   const selectedFormRuleError = form ? bookingRuleError(form, selectedFormTeam, canBypassBookingRules) : null;
   // ทีมที่เลือกไม่ได้ต้องยัง "เห็น" อยู่พร้อมเหตุผล  ถ้าเอาออกจากรายการเฉย ๆ
@@ -712,7 +713,7 @@ export default function ShareQueuePage() {
     const dateRuleError = bookingRuleError(form, teams.find((team) => team.id === form.tech_id), canBypassBookingRules);
     if (dateRuleError) { setBookingNotice({ title: "ยังบันทึกคิวไม่ได้", message: dateRuleError }); return; }
     if ((form.end || "12:00") <= (form.start || "09:00")) { alert("เวลาสิ้นสุดต้องหลังเวลาเริ่ม"); return; }
-    const holidayMode = /วันหยุด|หยุด|ลาพัก|ไม่รับงาน/.test(form.notes) && !form.bill_no.trim() && !form.customer_name.trim();
+    const holidayMode = isHolidayBooking(form);
     if (!holidayMode) {
       const missing: string[] = [];
       if (!form.bill_no.trim()) missing.push("เลขบิล");
@@ -985,7 +986,7 @@ export default function ShareQueuePage() {
   function goNext() { if (view === "month") { const d = new Date(mYear, mMonth + 1, 1); setMYear(d.getFullYear()); setMMonth(d.getMonth()); } else setOffset((o) => o + 1); }
   function goToday() { const t = new Date(); setMYear(t.getFullYear()); setMMonth(t.getMonth()); setOffset(0); }
 
-  const isHol = form ? (/วันหยุด|หยุด|ลาพัก|ไม่รับงาน/.test(form.notes) && !form.bill_no.trim() && !form.customer_name.trim()) : false;
+  const isHol = form ? isHolidayBooking(form) : false;
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -1436,7 +1437,7 @@ export default function ShareQueuePage() {
                     <option value="">— เลือกทีมช่าง —</option>
                     {formTeamOptions.map(({ team: t, disabledReason }) => <option key={t.id} value={t.id} disabled={Boolean(disabledReason)}>{t.name}{disabledReason ? ` — ${disabledReason}` : ""}</option>)}
                   </select>
-                  <p className="mt-1 text-[11px] text-slate-500">{canBypassBookingRules ? "✓ บัญชีนี้ได้รับสิทธิ์ลงคิวได้ทุกวันและทุกทีม" : `คลังต้องเตรียมสินค้า: ทุกทีมจองได้ตั้งแต่ ${BOOKING_MIN_LEAD_DAYS} วันล่วงหน้า${isTeamB(selectedFormTeam) ? ` · ทีม B เลือกได้ไม่เกิน ${TEAM_B_MAX_LEAD_DAYS} วันล่วงหน้า` : ""}`}</p>
+                  <p className="mt-1 text-[11px] text-slate-500">{canBypassBookingRules ? (hasHolidayBookingPrivilege ? "✓ บัญชีนี้ลงวันหยุดได้ทุกวัน โดยไม่จำกัด 10 วัน" : "✓ บัญชีนี้ได้รับสิทธิ์ลงคิวได้ทุกวันและทุกทีม") : `คลังต้องเตรียมสินค้า: ทุกทีมจองได้ตั้งแต่ ${BOOKING_MIN_LEAD_DAYS} วันล่วงหน้า${isTeamB(selectedFormTeam) ? ` · ทีม B เลือกได้ไม่เกิน ${TEAM_B_MAX_LEAD_DAYS} วันล่วงหน้า` : ""}${hasHolidayBookingPrivilege ? " · เลือก ‘ตั้งเป็นวันหยุด’ เพื่อปลดข้อจำกัดวันหยุด" : ""}`}</p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
