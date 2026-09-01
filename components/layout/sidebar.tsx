@@ -23,6 +23,7 @@ const CORE_NAV: NavItem[] = [
   { href: "/csat-automation", icon: "✨", label: "CSAT อัตโนมัติ", roles: ["admin", "cs"] },
   { href: "/after-sales", icon: "🛟", label: "บริการหลังการขาย", roles: ["admin", "cs", "head_technician"] },
   { href: "/dashboard", icon: "⭐", label: "คุณภาพและความพึงพอใจ", roles: ["admin", "cs", "executive"] },
+  { href: "/quality-review", icon: "📊", label: "ทบทวนคุณภาพ", roles: ["admin", "cs", "head_technician", "executive"] },
   { href: "/exec", icon: "📈", label: "ภาพรวมผู้บริหาร", roles: ["admin", "executive"] },
   { href: "/docs", icon: "📘", label: "คู่มือการทำงาน", roles: ["admin"] },
   { href: "/staff", icon: "👥", label: "บัญชีพนักงาน", roles: ["admin"] },
