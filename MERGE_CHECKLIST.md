@@ -75,8 +75,35 @@ ls supabase/migrations/ | sed -E 's/^[0-9]+_//; s/\.sql$//' | sort
 ให้รันซ้ำได้ ตามแบบไฟล์ใน `ac0989e`) — **ห้ามแก้ไฟล์ migration ที่ apply ไปแล้ว**
 ฐานข้อมูลที่ไม่มีใคร replay ได้ คือฐานข้อมูลที่กู้คืนไม่ได้
 
-หมายเหตุ: ฐานข้อมูลนี้ใช้ร่วมกับ repo อื่น (bbps-crm, HR, IIM) ชื่อที่ไม่ใช่ของ floor
-เช่น `hr_*`, `errmon_*`, `csat_*`, `add_iim_*` ไม่ใช่ drift ของ repo นี้
+หมายเหตุ: ฐานข้อมูลนี้ใช้ร่วมกับ repo อื่น (bbps-crm, HR, IIM, Error Monitor)
+ชื่อที่ไม่ใช่ของ floor ไม่ใช่ drift ของ repo นี้ ชื่อที่ยืนยันแล้วว่าเป็นของ repo อื่น ณ วันที่เขียน:
+`add_b2b_b2c_commercial_context` · `shift_type_late_grace` · `errmon_init` ·
+`errmon_lock_down_increment_rpc` · `add_hospital_media_attributions` ·
+`index_hospital_media_batch` · `add_cross_sell_campaign_audience` · `add_iim_message_media_urls`
+
+ระวังกับดักการเทียบชื่อ: `ncr_reports_read_policy_and_catalog_definer` ในฐานข้อมูล
+คือไฟล์ `20260902140020_ncr_reports_read_policy.sql` (ชื่อไม่ตรงเป๊ะแต่เนื้อตรง —
+ตรวจแล้วว่ามีทั้ง policy และ `floor_receipt_reason_catalog()` ครบ) ไม่ใช่ drift
+
+### 🔴 drift ของ floor ที่ยังค้างอยู่ ณ วันที่เขียนเอกสารนี้
+
+สองตัวนี้เป็นของ floor แน่นอน (สร้าง `public.floor_csat_automation_jobs` และเพิ่มคอลัมน์
+`source_evaluation_id` ให้ `public.floor_after_sales_cases`) apply ลงฐานข้อมูลไปแล้ว
+แต่ **ไม่มีไฟล์ใดใน `supabase/migrations/` ทั้ง repo**:
+
+| version | name |
+|---|---|
+| `20260901014326` | `csat_after_sales_automation` |
+| `20260901014516` | `csat_automation_fk_indexes` |
+
+ที่มา: มาจาก PR #125 (NCR/After-sales/CSAT) ซึ่งอยู่บน **main** อยู่ก่อนสาขานี้แล้ว
+(คอมมิต `3c164c0` เป็นบรรพบุรุษของ `b42ce0b`) จึง **ไม่ใช่ drift ที่สาขานี้ทำให้เกิด**
+และตั้งใจไม่กู้ในสาขานี้ เพราะเป็นของทีมอื่นและการเอามาปนจะทำให้ diff ของสาขานี้อ่านยากขึ้น
+
+ต้องกู้อยู่ดี — หน้า `/csat-automation` ในโค้ดพึ่งตารางนี้ ใครที่ตั้งสภาพแวดล้อมใหม่จาก
+`supabase/migrations/` จะได้ระบบที่หน้านั้นพังทันที ให้ทำเป็นงานแยกบน main
+(อ่าน `supabase_migrations.schema_migrations.statements` ของสองแถวนั้นแล้วเขียนเป็นไฟล์
+ทั้งคู่เขียน `if not exists` มาแต่เดิมอยู่แล้ว จึงรันซ้ำได้โดยไม่ต้องแก้อะไร)
 
 ---
 
@@ -242,7 +269,9 @@ where n.nspname = 'public'
 - [ ] 1. ตั้ง `STOCK_SHORTAGE_CRON_SECRET` บน Vercel production แล้ว
 - [ ] 2. ตั้ง `PROVIDER_EVAL_CRON_SECRET` บน Vercel production แล้ว
 - [ ] 3. พิจารณา `STOCK_SHORTAGE_LOOKAHEAD_DAYS` แล้ว (ตั้ง หรือจงใจใช้ค่าปริยาย 7)
-- [ ] 4. กวาด drift ระหว่าง `schema_migrations` กับ `supabase/migrations/` แล้ว ไม่เหลือของ floor ที่ไม่มีไฟล์
+- [ ] 4. กวาด drift ระหว่าง `schema_migrations` กับ `supabase/migrations/` แล้ว
+        (ณ วันที่เขียน เหลือของ floor ที่ยังไม่มีไฟล์ 2 ตัว คือ `csat_after_sales_automation`
+        และ `csat_automation_fk_indexes` ซึ่งเป็นของ main ไม่ใช่ของสาขานี้ — ดูข้อ 2)
 - [ ] 5. `npx tsc --noEmit` exit 0 และ `npx vitest run` ผ่านทั้งหมด
 - [ ] 6. เนื้อสาขาขึ้นถึง remote จริงแล้ว (ไม่ใช่แค่อยู่บนเครื่องหรือใน bundle)
 - [ ] 7. deploy production Ready และเป็น alias จริงแล้ว
