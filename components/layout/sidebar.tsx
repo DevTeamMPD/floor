@@ -35,7 +35,8 @@ const EXPERIMENTAL_NAV: NavItem[] = [
   { href: "/inventory", icon: "📦", label: "คลังวัสดุ", roles: ["admin", "warehouse"] },
   { href: "/waste-cost", icon: "♻️", label: "ต้นทุนเศษ", roles: ["admin", "warehouse"] },
   { href: "/bom", icon: "📐", label: "BOQ / BOM", roles: ["admin", "warehouse"] },
-  { href: "/purchase-orders", icon: "🛒", label: "ใบสั่งซื้อ", roles: ["admin", "warehouse"] },
+  { href: "/providers", icon: "🤝", label: "ผู้ให้บริการภายนอก", roles: ["admin", "warehouse", "head_technician"] },
+  { href: "/purchase-orders", icon: "🛒", label: "ใบสั่งซื้อและตรวจรับ", roles: ["admin", "warehouse"] },
   { href: "/documents", icon: "📄", label: "เอกสารแบบเดิม", roles: ["admin"] },
   { href: "/ncr", icon: "🔴", label: "NCR", roles: ["admin", "head_technician"] },
 ];

@@ -1,470 +1,587 @@
 "use client";
-export const dynamic = 'force-dynamic';
-import { useEffect, useState, useCallback } from "react";
+export const dynamic = "force-dynamic";
+
+/**
+ * P5-8 / P5-9 — ใบสั่งซื้อและการตรวจรับของ
+ *
+ * หน้าเดิมเขียนตาราง purchase_orders / po_items / materials / stock_movements ตรงจาก client
+ * ทีละคำสั่ง ไม่มีธุรกรรม ไม่มีด่านสิทธิ์ และไม่มีที่บันทึกว่า "ตรวจแล้วผ่านหรือไม่ผ่าน"
+ * ตอนนี้ทุกการเขียนไปที่ RPC ตัวเดียวที่จบในธุรกรรมเดียว และตารางเหล่านั้นถอนสิทธิ์เขียน
+ * ของ client ออกไปแล้ว — หน้าจอจึงเขียนตรงไม่ได้อีกแม้จะเผลอเขียนโค้ดแบบนั้น
+ *
+ * สิ่งที่หน้าจอนี้ต้องซื่อสัตย์:
+ *   - ผู้ขายที่เลือกได้มีเฉพาะรายที่อนุมัติแล้วและไม่ถูกระงับ ถ้าไม่มีเลยต้องบอกว่าเพราะอะไร
+ *   - ก่อนกดยืนยันการตรวจรับ ต้องบอกล่วงหน้าว่ากดแล้วจะเกิดใบ NC หรือไม่
+ */
+
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { floorErrorMessage } from "@/lib/floor-error-message";
+import {
+  PO_SNAPSHOT_RPC, PO_FORM_OPTIONS_RPC, CREATE_PO_RPC, ISSUE_PO_RPC, CANCEL_PO_RPC, RECORD_RECEIPT_RPC,
+  PO_STATUS_LABELS, RECEIPT_RESULT_LABELS, RECEIPT_NCR_TYPES, NCR_SEVERITIES,
+  EMPTY_PO_FORM_OPTIONS, parsePurchaseOrders, parsePoFormOptions, poDraftError, poDraftTotal,
+  remainingQty, receiptDraftCheck, receiptOutcomeMessage, poFormEmptyMessage,
+  type PurchaseOrder, type PoDraft, type ReceiptDraft,
+} from "@/lib/purchase-order";
 
-interface Supplier {
-  id: string;
-  name: string;
-  contact_name: string | null;
-  phone: string | null;
-  payment_terms: string | null;
-  lead_time_days: number | null;
+const STATUS_STYLE: Record<string, string> = {
+  draft: "bg-slate-100 text-slate-600",
+  ordered: "bg-blue-100 text-blue-700",
+  partial: "bg-amber-100 text-amber-700",
+  received: "bg-emerald-100 text-emerald-700",
+  cancelled: "bg-red-100 text-red-600",
+};
+
+const RESULT_STYLE: Record<string, string> = {
+  pass: "bg-emerald-50 text-emerald-700",
+  partial_fail: "bg-amber-50 text-amber-800",
+  fail: "bg-red-50 text-red-700",
+};
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
 }
 
-interface Material {
-  id: string;
-  sku: string;
-  name: string;
-  unit: string | null;
-  unit_cost: number | null;
-}
-
-interface PoItem {
-  id?: string;
-  material_id: string;
-  qty_ordered: number;
-  qty_received: number;
-  unit_price: number;
-  note: string;
-  material?: Material;
-}
-
-interface PurchaseOrder {
-  id: string;
-  po_number: string;
-  supplier_id: string | null;
-  status: string;
-  eta: string | null;
-  total_amount: number | null;
-  notes: string | null;
-  created_at: string;
-  supplier?: Supplier;
-  po_items?: PoItem[];
-}
-
-const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
-  draft:     { label: 'Draft', cls: 'bg-slate-100 text-slate-600' },
-  ordered:   { label: 'สั่งแล้ว', cls: 'bg-blue-100 text-blue-700' },
-  partial:   { label: 'รับบางส่วน', cls: 'bg-amber-100 text-amber-700' },
-  received:  { label: 'รับครบ', cls: 'bg-emerald-100 text-emerald-700' },
-  cancelled: { label: 'ยกเลิก', cls: 'bg-red-100 text-red-600' },
+const EMPTY_DRAFT: PoDraft = {
+  supplierId: "", requiredDate: "", acceptanceRequirements: "", eta: "", jobNo: "", notes: "", items: [],
 };
 
 export default function PurchaseOrdersPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [materials, setMaterials] = useState<Material[]>([]);
+  const [options, setOptions] = useState(EMPTY_PO_FORM_OPTIONS);
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
-  const [selectedPo, setSelectedPo] = useState<PurchaseOrder | null>(null);
-  const [showAddSupplier, setShowAddSupplier] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // PO form
-  const [poForm, setPoForm] = useState({ supplier_id: '', eta: '', notes: '' });
-  const [poItems, setPoItems] = useState<PoItem[]>([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [draft, setDraft] = useState<PoDraft>(EMPTY_DRAFT);
 
-  // Supplier form
-  const [supForm, setSupForm] = useState({ name: '', contact_name: '', phone: '', lead_time_days: '', payment_terms: '' });
-
-  // Receive modal
-  const [showReceive, setShowReceive] = useState(false);
-  const [receiveQtys, setReceiveQtys] = useState<Record<string, number>>({});
+  const [receiveFor, setReceiveFor] = useState<PurchaseOrder | null>(null);
+  const [receiptDraft, setReceiptDraft] = useState<ReceiptDraft>({});
+  const [receiptNote, setReceiptNote] = useState("");
+  const [receiptSamplePct, setReceiptSamplePct] = useState("");
+  const [receiptJobNo, setReceiptJobNo] = useState("");
+  const [defectSummary, setDefectSummary] = useState("");
+  const [ncrType, setNcrType] = useState<string>("quality");
+  const [ncrSeverity, setNcrSeverity] = useState<string>("medium");
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: poData }, { data: supData }, { data: matData }] = await Promise.all([
-      supabase.from('purchase_orders').select('*, supplier:suppliers(*), po_items(*, material:materials(*))').order('created_at', { ascending: false }),
-      supabase.from('suppliers').select('*').order('name'),
-      supabase.from('materials').select('*').order('name'),
+    const [snapshot, opts] = await Promise.all([
+      supabase.rpc(PO_SNAPSHOT_RPC),
+      supabase.rpc(PO_FORM_OPTIONS_RPC),
     ]);
-    setPos(poData ?? []);
-    setSuppliers(supData ?? []);
-    setMaterials(matData ?? []);
+    if (snapshot.error) toast.error(floorErrorMessage(snapshot.error));
+    setPos(parsePurchaseOrders(snapshot.data));
+    setOptions(parsePoFormOptions(opts.data));
     setLoading(false);
   }, [supabase]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
-  // auto-generate PO number
-  function genPoNumber() {
-    const now = new Date();
-    const yy = String(now.getFullYear()).slice(-2);
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    const rand = String(Math.floor(Math.random() * 900) + 100);
-    return `PO${yy}${mm}${dd}-${rand}`;
-  }
+  const formBlocked = poFormEmptyMessage(options);
 
   function openCreate() {
-    setPoForm({ supplier_id: suppliers[0]?.id ?? '', eta: '', notes: '' });
-    setPoItems([{ material_id: materials[0]?.id ?? '', qty_ordered: 1, qty_received: 0, unit_price: materials[0]?.unit_cost ?? 0, note: '' }]);
+    setDraft({
+      ...EMPTY_DRAFT,
+      supplierId: options.providers[0]?.id ?? "",
+      items: options.materials[0]
+        ? [{ materialId: options.materials[0].id, qty: "1",
+             unitPrice: options.materials[0].unitCost?.toString() ?? "", acceptanceSpec: "", note: "" }]
+        : [],
+    });
     setShowCreate(true);
   }
 
-  function addPoItem() {
-    setPoItems((prev) => [...prev, { material_id: materials[0]?.id ?? '', qty_ordered: 1, qty_received: 0, unit_price: materials[0]?.unit_cost ?? 0, note: '' }]);
+  function addItem() {
+    const material = options.materials[0];
+    if (!material) return;
+    setDraft((prev) => ({ ...prev, items: [...prev.items,
+      { materialId: material.id, qty: "1", unitPrice: material.unitCost?.toString() ?? "", acceptanceSpec: "", note: "" }] }));
   }
 
-  function updatePoItem(i: number, patch: Partial<PoItem>) {
-    setPoItems((prev) => prev.map((item, idx) => {
-      if (idx !== i) return item;
-      const updated = { ...item, ...patch };
-      // Auto-fill price when material changes
-      if (patch.material_id) {
-        const mat = materials.find((m) => m.id === patch.material_id);
-        if (mat?.unit_cost) updated.unit_price = mat.unit_cost;
-      }
-      return updated;
+  function patchItem(index: number, patch: Partial<PoDraft["items"][number]>) {
+    setDraft((prev) => ({
+      ...prev,
+      items: prev.items.map((item, i) => {
+        if (i !== index) return item;
+        const next = { ...item, ...patch };
+        if (patch.materialId) {
+          const material = options.materials.find((m) => m.id === patch.materialId);
+          if (material?.unitCost != null) next.unitPrice = material.unitCost.toString();
+        }
+        return next;
+      }),
     }));
   }
 
   async function savePo() {
-    if (poItems.length === 0) { toast.error('กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ'); return; }
+    const error = poDraftError(draft, todayISO());
+    if (error) { toast.error(error); return; }
     setSaving(true);
-    const total = poItems.reduce((s, it) => s + it.qty_ordered * it.unit_price, 0);
-    const { data: poData, error: poErr } = await supabase.from('purchase_orders').insert({
-      po_number: genPoNumber(),
-      supplier_id: poForm.supplier_id || null,
-      status: 'draft',
-      eta: poForm.eta || null,
-      total_amount: total,
-      notes: poForm.notes || null,
-    }).select().single();
-    if (poErr || !poData) { setSaving(false); toast.error(poErr?.message ?? 'Error'); return; }
-
-    const { error: itemErr } = await supabase.from('po_items').insert(
-      poItems.map((it) => ({ po_id: poData.id, material_id: it.material_id, qty_ordered: it.qty_ordered, qty_received: 0, unit_price: it.unit_price, note: it.note || null }))
-    );
-    setSaving(false);
-    if (itemErr) { toast.error(itemErr.message); return; }
-    toast.success(`สร้าง ${poData.po_number} เรียบร้อย`);
-    setShowCreate(false);
-    load();
-  }
-
-  async function saveSupplier() {
-    if (!supForm.name.trim()) { toast.error('กรุณาระบุชื่อ Supplier'); return; }
-    setSaving(true);
-    const { error } = await supabase.from('suppliers').insert({
-      name: supForm.name.trim(),
-      contact_name: supForm.contact_name.trim() || null,
-      phone: supForm.phone.trim() || null,
-      lead_time_days: supForm.lead_time_days ? Number(supForm.lead_time_days) : null,
-      payment_terms: supForm.payment_terms.trim() || null,
+    const { data, error: rpcError } = await supabase.rpc(CREATE_PO_RPC, {
+      p_supplier_id: draft.supplierId,
+      p_required_date: draft.requiredDate,
+      p_acceptance_requirements: draft.acceptanceRequirements.trim(),
+      p_items: draft.items.map((item) => ({
+        materialId: item.materialId,
+        qty: Number(item.qty),
+        unitPrice: item.unitPrice.trim() === "" ? null : Number(item.unitPrice),
+        acceptanceSpec: item.acceptanceSpec || null,
+        note: item.note || null,
+      })),
+      p_eta: draft.eta || null,
+      p_notes: draft.notes || null,
+      p_job_no: draft.jobNo || null,
     });
     setSaving(false);
+    if (rpcError) { toast.error(floorErrorMessage(rpcError)); return; }
+    const result = data as { poNumber?: string } | null;
+    toast.success(`สร้างใบสั่งซื้อ ${result?.poNumber ?? ""} เป็นร่างแล้ว — กด "ส่งให้ผู้ขาย" เมื่อพร้อม`);
+    setShowCreate(false);
+    await load();
+  }
+
+  async function issuePo(po: PurchaseOrder) {
+    setSaving(true);
+    const { error } = await supabase.rpc(ISSUE_PO_RPC, { p_po_id: po.id });
+    setSaving(false);
     if (error) { toast.error(floorErrorMessage(error)); return; }
-    toast.success('เพิ่ม Supplier เรียบร้อย');
-    setShowAddSupplier(false);
-    setSupForm({ name: '', contact_name: '', phone: '', lead_time_days: '', payment_terms: '' });
-    load();
+    toast.success(`ส่งใบ ${po.poNumber} ให้ผู้ขายแล้ว`);
+    await load();
+  }
+
+  async function cancelPo(po: PurchaseOrder) {
+    const reason = window.prompt(`ยกเลิกใบ ${po.poNumber} เพราะอะไร (บังคับกรอก)`) ?? "";
+    if (!reason.trim()) { toast.error("การยกเลิกใบสั่งซื้อต้องระบุเหตุผล"); return; }
+    setSaving(true);
+    const { error } = await supabase.rpc(CANCEL_PO_RPC, { p_po_id: po.id, p_reason: reason.trim() });
+    setSaving(false);
+    if (error) { toast.error(floorErrorMessage(error)); return; }
+    toast.success(`ยกเลิกใบ ${po.poNumber} แล้ว`);
+    await load();
   }
 
   function openReceive(po: PurchaseOrder) {
-    setSelectedPo(po);
-    const init: Record<string, number> = {};
-    po.po_items?.forEach((it) => { if (it.id) init[it.id] = 0; });
-    setReceiveQtys(init);
-    setShowReceive(true);
+    setReceiveFor(po);
+    setReceiptDraft(Object.fromEntries(po.items.map((item) => [item.id, { accepted: "", rejected: "", defectNote: "" }])));
+    setReceiptNote("");
+    setReceiptSamplePct(po.inspectionSamplePct?.toString() ?? "");
+    setReceiptJobNo("");
+    setDefectSummary("");
+    setNcrType("quality");
+    setNcrSeverity("medium");
   }
 
-  async function saveReceive() {
-    if (!selectedPo) return;
+  const receiptCheck = receiveFor ? receiptDraftCheck(receiveFor, receiptDraft, receiptJobNo) : null;
+
+  async function saveReceipt() {
+    if (!receiveFor || !receiptCheck) return;
+    if (receiptCheck.error) { toast.error(receiptCheck.error); return; }
     setSaving(true);
-    for (const item of selectedPo.po_items ?? []) {
-      if (!item.id) continue;
-      const received = receiveQtys[item.id] ?? 0;
-      if (received <= 0) continue;
-      const newReceived = item.qty_received + received;
-      await supabase.from('po_items').update({ qty_received: newReceived }).eq('id', item.id);
-      // Update material stock
-      const { data: mat } = await supabase.from('materials').select('qty_on_hand').eq('id', item.material_id).single();
-      if (mat) {
-        await supabase.from('materials').update({ qty_on_hand: mat.qty_on_hand + received }).eq('id', item.material_id);
-        await supabase.from('stock_movements').insert({ material_id: item.material_id, type: 'in', qty: received, ref_po_id: selectedPo.id, note: `รับจาก ${selectedPo.po_number}` });
-      }
-    }
-    // Update PO status
-    const { data: freshItems } = await supabase.from('po_items').select('qty_ordered,qty_received').eq('po_id', selectedPo.id);
-    const allReceived = freshItems?.every((it) => it.qty_received >= it.qty_ordered);
-    const anyReceived = freshItems?.some((it) => it.qty_received > 0);
-    const newStatus = allReceived ? 'received' : anyReceived ? 'partial' : 'ordered';
-    await supabase.from('purchase_orders').update({ status: newStatus }).eq('id', selectedPo.id);
-    setSaving(false);
-    toast.success('บันทึกการรับสินค้าเรียบร้อย');
-    setShowReceive(false);
-    load();
-  }
+    const lines = receiveFor.items
+      .map((item) => {
+        const line = receiptDraft[item.id];
+        if (!line) return null;
+        const accepted = line.accepted.trim() === "" ? 0 : Number(line.accepted);
+        const rejected = line.rejected.trim() === "" ? 0 : Number(line.rejected);
+        if (accepted + rejected === 0) return null;
+        return { poItemId: item.id, qtyAccepted: accepted, qtyRejected: rejected, defectNote: line.defectNote || null };
+      })
+      .filter((line): line is NonNullable<typeof line> => line !== null);
 
-  async function updatePoStatus(poId: string, status: string) {
-    await supabase.from('purchase_orders').update({ status }).eq('id', poId);
-    toast.success('อัปเดตสถานะเรียบร้อย');
-    load();
+    const { data, error } = await supabase.rpc(RECORD_RECEIPT_RPC, {
+      p_po_id: receiveFor.id,
+      p_lines: lines,
+      p_note: receiptNote || null,
+      p_sample_pct: receiptSamplePct.trim() === "" ? null : Number(receiptSamplePct),
+      p_ncr_job_no: receiptJobNo || null,
+      p_defect_summary: defectSummary || null,
+      p_ncr_severity: ncrSeverity,
+      p_ncr_type: ncrType,
+    });
+    setSaving(false);
+    if (error) { toast.error(floorErrorMessage(error)); return; }
+    const result = data as { receiptNo?: string; ncrId?: string | null; qtyRejected?: number } | null;
+    toast.success(result?.ncrId
+      ? `บันทึกใบตรวจรับ ${result.receiptNo} แล้ว — เปิดใบ NC ให้ 1 ใบเพราะมีของไม่ผ่าน ${result.qtyRejected} หน่วย`
+      : `บันทึกใบตรวจรับ ${result?.receiptNo ?? ""} แล้ว — ผ่านทั้งหมด`);
+    setReceiveFor(null);
+    await load();
   }
 
   return (
-    <div>
-      <div className="flex items-center gap-4 mb-6">
+    <div className="pb-16">
+      <div className="mb-6 flex flex-wrap items-start gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">ใบสั่งซื้อ (PO)</h1>
-          <p className="text-slate-500 text-sm mt-0.5">Purchase Orders · สั่งซื้อวัสดุจาก Supplier</p>
+          <h1 className="text-2xl font-semibold">ใบสั่งซื้อและการตรวจรับ</h1>
+          <p className="mt-0.5 text-sm text-slate-500">
+            ข้อกำหนดที่ส่งถึงผู้ขายก่อนสั่ง และผลการตรวจรับตอนของมาถึง (ISO 9001 ข้อ 8.4.2 / 8.4.3)
+          </p>
         </div>
-        <div className="ml-auto flex gap-2">
-          <button onClick={() => { setSupForm({ name: '', contact_name: '', phone: '', lead_time_days: '', payment_terms: '' }); setShowAddSupplier(true); }}
-            className="px-4 py-1.5 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50">
-            + Supplier
-          </button>
-          <button onClick={openCreate} disabled={materials.length === 0}
-            className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-            + สร้าง PO
-          </button>
-        </div>
+        <button onClick={openCreate} disabled={Boolean(formBlocked)}
+          className="ml-auto rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">
+          + สร้างใบสั่งซื้อ
+        </button>
       </div>
 
+      {formBlocked && (
+        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{formBlocked}</div>
+      )}
+
       {loading ? (
-        <div className="text-slate-400 text-sm animate-pulse">โหลดข้อมูล…</div>
+        <div className="animate-pulse text-sm text-slate-400">โหลดข้อมูล…</div>
       ) : pos.length === 0 ? (
-        <div className="bg-white rounded-xl border border-slate-100 p-12 text-center text-slate-300">
-          <div className="text-4xl mb-3">🛒</div>
-          <div className="font-medium">ยังไม่มีใบสั่งซื้อ</div>
+        <div className="rounded-xl border border-slate-100 bg-white p-12 text-center text-slate-400">
+          <div className="mb-3 text-4xl">🛒</div>
+          <div className="font-medium text-slate-500">ยังไม่มีใบสั่งซื้อในระบบ</div>
+          <p className="mx-auto mt-2 max-w-lg text-sm">
+            ใบสั่งซื้อใบแรกจะเป็นจุดที่บริษัทบอกผู้ขายเป็นลายลักษณ์อักษรว่าต้องได้ของเมื่อไร และของแบบไหนถึงจะรับ
+          </p>
         </div>
       ) : (
         <div className="space-y-4">
-          {pos.map((po) => {
-            const st = STATUS_LABEL[po.status] ?? { label: po.status, cls: 'bg-slate-100 text-slate-500' };
-            return (
-              <div key={po.id} className="bg-white rounded-xl border border-slate-100 overflow-hidden">
-                <div className="flex items-center gap-4 px-5 py-4">
-                  <div>
-                    <div className="font-semibold font-mono">{po.po_number}</div>
-                    <div className="text-xs text-slate-400">
-                      {po.supplier?.name ?? 'ไม่ระบุ Supplier'}
-                      {po.eta && <> · ETA: {po.eta}</>}
-                      {' · '}{new Date(po.created_at).toLocaleDateString('th-TH')}
-                    </div>
-                  </div>
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${st.cls}`}>{st.label}</span>
-                  {po.total_amount != null && (
-                    <div className="text-sm font-semibold text-slate-700">฿{po.total_amount.toLocaleString()}</div>
-                  )}
-                  <div className="ml-auto flex gap-2">
-                    {po.status === 'draft' && (
-                      <button onClick={() => updatePoStatus(po.id, 'ordered')}
-                        className="px-3 py-1 text-xs bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100">สั่งแล้ว</button>
-                    )}
-                    {(po.status === 'ordered' || po.status === 'partial') && (
-                      <button onClick={() => openReceive(po)}
-                        className="px-3 py-1 text-xs bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100">▲ รับสินค้า</button>
-                    )}
-                    {po.status !== 'cancelled' && po.status !== 'received' && (
-                      <button onClick={() => updatePoStatus(po.id, 'cancelled')}
-                        className="px-3 py-1 text-xs bg-red-50 text-red-600 rounded-lg hover:bg-red-100">ยกเลิก</button>
-                    )}
+          {pos.map((po) => (
+            <article key={po.id} className="overflow-hidden rounded-xl border border-slate-100 bg-white">
+              <div className="flex flex-wrap items-center gap-3 px-5 py-4">
+                <div>
+                  <div className="font-mono font-semibold">{po.poNumber}</div>
+                  <div className="text-xs text-slate-400">
+                    {po.supplierName ?? "ไม่ระบุผู้ขาย"}
+                    {po.supplierApprovalStatus === "suspended" && <span className="ml-1 text-red-600">· ผู้ขายรายนี้ถูกระงับอยู่</span>}
+                    {po.requiredDate && ` · ต้องได้ของ ${po.requiredDate}`}
+                    {po.eta && ` · ผู้ขายแจ้ง ${po.eta}`}
+                    {po.jobNo && ` · เพื่องาน ${po.jobNo}`}
                   </div>
                 </div>
-                {(po.po_items?.length ?? 0) > 0 && (
-                  <table className="w-full text-sm border-t border-slate-50">
-                    <thead className="bg-slate-50">
-                      <tr>
-                        {['วัสดุ', 'สั่ง', 'รับแล้ว', 'ราคา/หน่วย', 'รวม'].map((h) => (
-                          <th key={h} className="text-left px-4 py-2 text-xs font-medium text-slate-400">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {po.po_items?.map((it) => (
-                        <tr key={it.id}>
-                          <td className="px-4 py-2">{it.material?.name ?? '—'} <span className="text-xs text-slate-400">{it.material?.sku}</span></td>
-                          <td className="px-4 py-2 tabular-nums">{it.qty_ordered} {it.material?.unit ?? ''}</td>
-                          <td className={`px-4 py-2 tabular-nums ${it.qty_received >= it.qty_ordered ? 'text-emerald-600 font-medium' : 'text-amber-600'}`}>
-                            {it.qty_received} / {it.qty_ordered}
-                          </td>
-                          <td className="px-4 py-2 tabular-nums text-slate-500">฿{it.unit_price.toLocaleString()}</td>
-                          <td className="px-4 py-2 tabular-nums font-medium">฿{(it.qty_ordered * it.unit_price).toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
+                <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[po.status] ?? "bg-slate-100 text-slate-500"}`}>
+                  {PO_STATUS_LABELS[po.status] ?? po.status}
+                </span>
+                {po.totalAmount != null && <span className="text-sm font-semibold text-slate-700">฿{po.totalAmount.toLocaleString()}</span>}
+                <div className="ml-auto flex flex-wrap gap-2">
+                  {po.status === "draft" && (
+                    <button onClick={() => issuePo(po)} disabled={saving}
+                      className="rounded-lg bg-blue-50 px-3 py-1 text-xs text-blue-600 hover:bg-blue-100">ส่งให้ผู้ขาย</button>
+                  )}
+                  {(po.status === "ordered" || po.status === "partial") && (
+                    <button onClick={() => openReceive(po)}
+                      className="rounded-lg bg-emerald-50 px-3 py-1 text-xs text-emerald-700 hover:bg-emerald-100">ตรวจรับของ</button>
+                  )}
+                  {po.status !== "cancelled" && po.status !== "received" && (
+                    <button onClick={() => cancelPo(po)} disabled={saving}
+                      className="rounded-lg bg-red-50 px-3 py-1 text-xs text-red-600 hover:bg-red-100">ยกเลิก</button>
+                  )}
+                </div>
               </div>
-            );
-          })}
+
+              <div className="border-t border-slate-50 bg-slate-50/60 px-5 py-3 text-sm">
+                <div className="text-xs font-medium text-slate-400">ข้อกำหนดการตรวจรับที่แจ้งผู้ขาย</div>
+                <div className="text-slate-700">{po.acceptanceRequirements ?? "— ยังไม่ระบุ —"}</div>
+                <div className="mt-1 text-xs text-slate-400">
+                  {po.createdByName && `สร้างโดย ${po.createdByName}`}
+                  {po.issuedByName && ` · ส่งให้ผู้ขายโดย ${po.issuedByName}`}
+                  {po.inspectionSamplePct != null && ` · สุ่มตรวจ ${po.inspectionSamplePct}%`}
+                  {po.cancelReason && ` · ยกเลิกเพราะ ${po.cancelReason}`}
+                </div>
+              </div>
+
+              <table className="w-full border-t border-slate-50 text-sm">
+                <thead className="bg-slate-50 text-xs text-slate-400">
+                  <tr>
+                    <th className="px-4 py-2 text-left font-medium">วัสดุ</th>
+                    <th className="px-4 py-2 text-left font-medium">สั่ง</th>
+                    <th className="px-4 py-2 text-left font-medium">รับแล้ว</th>
+                    <th className="px-4 py-2 text-left font-medium">ปฏิเสธ</th>
+                    <th className="px-4 py-2 text-left font-medium">ค้างรับ</th>
+                    <th className="px-4 py-2 text-left font-medium">ราคา/หน่วย</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {po.items.map((item) => (
+                    <tr key={item.id}>
+                      <td className="px-4 py-2">
+                        {item.materialName ?? "—"} <span className="text-xs text-slate-400">{item.sku}</span>
+                        {item.acceptanceSpec && <div className="text-xs text-slate-400">ข้อกำหนด: {item.acceptanceSpec}</div>}
+                      </td>
+                      <td className="px-4 py-2 tabular-nums">{item.qtyOrdered} {item.unit ?? ""}</td>
+                      <td className="px-4 py-2 tabular-nums text-emerald-700">{item.qtyReceived}</td>
+                      <td className={`px-4 py-2 tabular-nums ${item.qtyRejected > 0 ? "text-red-600" : "text-slate-400"}`}>{item.qtyRejected}</td>
+                      <td className="px-4 py-2 tabular-nums text-slate-500">{remainingQty(item)}</td>
+                      <td className="px-4 py-2 tabular-nums text-slate-500">{item.unitPrice != null ? `฿${item.unitPrice.toLocaleString()}` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {po.receipts.length > 0 && (
+                <div className="border-t border-slate-50 px-5 py-3">
+                  <div className="mb-2 text-xs font-medium text-slate-400">ประวัติการตรวจรับ</div>
+                  <ul className="space-y-2">
+                    {po.receipts.map((receipt) => (
+                      <li key={receipt.id} className="rounded-lg bg-slate-50 p-3 text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs">{receipt.receiptNo}</span>
+                          <span className={`rounded px-2 py-0.5 text-xs ${RESULT_STYLE[receipt.inspectionResult]}`}>
+                            {RECEIPT_RESULT_LABELS[receipt.inspectionResult] ?? receipt.inspectionResult}
+                          </span>
+                          {receipt.ncrId && <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">เปิดใบ NC แล้ว</span>}
+                          <span className="text-xs text-slate-400">
+                            {receipt.receivedByName}
+                            {receipt.receivedAt && ` · ${new Date(receipt.receivedAt).toLocaleString("th-TH")}`}
+                            {receipt.samplePct != null && ` · สุ่มตรวจ ${receipt.samplePct}%`}
+                          </span>
+                        </div>
+                        {receipt.lines.some((line) => line.qtyRejected > 0) && (
+                          <ul className="mt-1 text-xs text-red-700">
+                            {receipt.lines.filter((line) => line.qtyRejected > 0).map((line) => {
+                              const item = po.items.find((i) => i.id === line.poItemId);
+                              return (
+                                <li key={line.poItemId}>
+                                  ปฏิเสธ {line.qtyRejected} {item?.unit ?? ""} · {item?.materialName ?? "ไม่ระบุ"} — {line.defectNote}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                        {receipt.defectSummary && <div className="mt-1 text-xs text-slate-500">สรุปโดยผู้ตรวจรับ: {receipt.defectSummary}</div>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </article>
+          ))}
         </div>
       )}
 
-      {/* ===== CREATE PO MODAL ===== */}
       {showCreate && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowCreate(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="p-5 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowCreate(false)}>
+          <div className="flex max-h-[92vh] w-full max-w-3xl flex-col rounded-2xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="border-b border-slate-100 p-5">
               <h2 className="font-semibold">สร้างใบสั่งซื้อ</h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                ใบใหม่จะเป็น &quot;ร่าง&quot; ก่อน — ยังไม่ถือว่าสื่อสารกับผู้ขาย จนกว่าจะกด &quot;ส่งให้ผู้ขาย&quot;
+              </p>
             </div>
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-slate-500 mb-1 block">Supplier</label>
-                  <select value={poForm.supplier_id} onChange={(e) => setPoForm({ ...poForm, supplier_id: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="">— ไม่ระบุ —</option>
-                    {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-slate-500 mb-1 block">ETA</label>
-                  <input type="date" value={poForm.eta} onChange={(e) => setPoForm({ ...poForm, eta: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-500 mb-1 block">หมายเหตุ</label>
-                <input value={poForm.notes} onChange={(e) => setPoForm({ ...poForm, notes: e.target.value })}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-medium text-slate-500">รายการวัสดุ</label>
-                  <button onClick={addPoItem} className="text-xs text-blue-600 hover:underline">+ เพิ่ม</button>
-                </div>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100">
-                      {['วัสดุ', 'จำนวน', 'ราคา/หน่วย', ''].map((h) => (
-                        <th key={h} className="text-left py-1 px-1 text-xs font-medium text-slate-400">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {poItems.map((item, i) => (
-                      <tr key={i}>
-                        <td className="py-1.5 px-1">
-                          <select value={item.material_id} onChange={(e) => updatePoItem(i, { material_id: e.target.value })}
-                            className="w-36 border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none">
-                            {materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                          </select>
-                        </td>
-                        <td className="py-1.5 px-1">
-                          <input type="number" step="0.001" value={item.qty_ordered}
-                            onChange={(e) => updatePoItem(i, { qty_ordered: Number(e.target.value) })}
-                            className="w-16 border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none" />
-                        </td>
-                        <td className="py-1.5 px-1">
-                          <input type="number" step="0.01" value={item.unit_price}
-                            onChange={(e) => updatePoItem(i, { unit_price: Number(e.target.value) })}
-                            className="w-20 border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none" />
-                        </td>
-                        <td className="py-1.5 px-1">
-                          <button onClick={() => setPoItems((prev) => prev.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-600 text-xs">✕</button>
-                        </td>
-                      </tr>
+            <div className="flex-1 space-y-4 overflow-y-auto p-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-slate-500">ผู้ขาย * (เฉพาะรายที่อนุมัติแล้วและไม่ถูกระงับ)</span>
+                  <select value={draft.supplierId} onChange={(e) => setDraft({ ...draft, supplierId: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                    <option value="">— เลือกผู้ขาย —</option>
+                    {options.providers.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}{p.leadTimeDays != null ? ` (รอของ ${p.leadTimeDays} วัน)` : ""}
+                      </option>
                     ))}
-                  </tbody>
-                </table>
-                <div className="text-right text-sm font-semibold text-slate-700 mt-2">
-                  รวม: ฿{poItems.reduce((s, it) => s + it.qty_ordered * it.unit_price, 0).toLocaleString()}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-slate-500">วันที่เราต้องได้ของ *</span>
+                  <input type="date" min={todayISO()} value={draft.requiredDate}
+                    onChange={(e) => setDraft({ ...draft, requiredDate: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-slate-500">วันที่ผู้ขายรับปากว่าจะส่ง (ถ้ามี)</span>
+                  <input type="date" value={draft.eta} onChange={(e) => setDraft({ ...draft, eta: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-slate-500">ซื้อเพื่องานติดตั้งใด (ถ้ามี)</span>
+                  <select value={draft.jobNo} onChange={(e) => setDraft({ ...draft, jobNo: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                    <option value="">— ซื้อเข้าสต็อกกลาง —</option>
+                    {options.jobs.map((job) => (
+                      <option key={job.jobNo} value={job.jobNo}>{job.jobNo}{job.customer ? ` · ${job.customer}` : ""}</option>
+                    ))}
+                  </select>
+                  <span className="mt-1 block text-xs text-slate-400">
+                    ถ้าระบุไว้ ใบ NC ที่เกิดจากของไม่ผ่านตรวจรับจะผูกกับงานนี้ให้อัตโนมัติ
+                  </span>
+                </label>
+              </div>
+
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-500">
+                  ข้อกำหนดการตรวจรับ * — บอกผู้ขายก่อนสั่งว่า &quot;ของแบบไหนถึงจะรับ&quot;
+                </span>
+                <textarea rows={3} value={draft.acceptanceRequirements}
+                  placeholder="เช่น ต้องแนบใบรับรองคุณภาพทุกล็อต · ผิวไม่มีรอยฉีกหรือบิ่น · ความชื้นไม่เกิน 12% · บรรจุพาเลตรัดฟิล์ม"
+                  onChange={(e) => setDraft({ ...draft, acceptanceRequirements: e.target.value })}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-500">รายการที่สั่ง</span>
+                  <button onClick={addItem} className="text-xs text-blue-600 hover:underline">+ เพิ่มรายการ</button>
+                </div>
+                <div className="space-y-2">
+                  {draft.items.map((item, index) => (
+                    <div key={index} className="rounded-lg border border-slate-100 p-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select value={item.materialId} onChange={(e) => patchItem(index, { materialId: e.target.value })}
+                          className="flex-1 rounded border border-slate-200 px-2 py-1 text-sm">
+                          {options.materials.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.sku})</option>)}
+                        </select>
+                        <input type="number" step="0.001" min="0" value={item.qty} placeholder="จำนวน"
+                          onChange={(e) => patchItem(index, { qty: e.target.value })}
+                          className="w-24 rounded border border-slate-200 px-2 py-1 text-sm" />
+                        <input type="number" step="0.01" min="0" value={item.unitPrice} placeholder="ราคา/หน่วย"
+                          onChange={(e) => patchItem(index, { unitPrice: e.target.value })}
+                          className="w-28 rounded border border-slate-200 px-2 py-1 text-sm" />
+                        <button onClick={() => setDraft((prev) => ({ ...prev, items: prev.items.filter((_, i) => i !== index) }))}
+                          className="text-xs text-red-400 hover:text-red-600">ลบ</button>
+                      </div>
+                      <input value={item.acceptanceSpec} placeholder="ข้อกำหนดเฉพาะรายการนี้ (ถ้ามี) เช่น ความหนา 6 มม. สี Ivory"
+                        onChange={(e) => patchItem(index, { acceptanceSpec: e.target.value })}
+                        className="mt-2 w-full rounded border border-slate-200 px-2 py-1 text-xs" />
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 text-right text-sm font-semibold text-slate-700">
+                  รวม: ฿{poDraftTotal(draft).toLocaleString()}
                 </div>
               </div>
+
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-500">หมายเหตุ</span>
+                <input value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
             </div>
-            <div className="flex justify-end gap-2 p-5 border-t border-slate-100">
-              <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">ยกเลิก</button>
-              <button onClick={savePo} disabled={saving} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60">
-                {saving ? 'กำลังบันทึก…' : 'สร้าง PO'}
+            <div className="flex justify-end gap-2 border-t border-slate-100 p-5">
+              <button onClick={() => setShowCreate(false)} className="rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">ยกเลิก</button>
+              <button onClick={savePo} disabled={saving}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-60">
+                {saving ? "กำลังบันทึก…" : "สร้างเป็นร่าง"}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ===== ADD SUPPLIER MODAL ===== */}
-      {showAddSupplier && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowAddSupplier(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6">
-              <h2 className="text-lg font-semibold mb-4">เพิ่ม Supplier</h2>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs font-medium text-slate-500 mb-1 block">ชื่อบริษัท *</label>
-                  <input value={supForm.name} onChange={(e) => setSupForm({ ...supForm, name: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-medium text-slate-500 mb-1 block">ชื่อผู้ติดต่อ</label>
-                    <input value={supForm.contact_name} onChange={(e) => setSupForm({ ...supForm, contact_name: e.target.value })}
-                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-slate-500 mb-1 block">เบอร์โทร</label>
-                    <input value={supForm.phone} onChange={(e) => setSupForm({ ...supForm, phone: e.target.value })}
-                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-medium text-slate-500 mb-1 block">Lead Time (วัน)</label>
-                    <input type="number" value={supForm.lead_time_days} onChange={(e) => setSupForm({ ...supForm, lead_time_days: e.target.value })}
-                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-slate-500 mb-1 block">เงื่อนไขชำระ</label>
-                    <input value={supForm.payment_terms} onChange={(e) => setSupForm({ ...supForm, payment_terms: e.target.value })}
-                      placeholder="เช่น NET30" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 mt-5">
-                <button onClick={() => setShowAddSupplier(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">ยกเลิก</button>
-                <button onClick={saveSupplier} disabled={saving} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60">
-                  {saving ? 'กำลังบันทึก…' : 'บันทึก'}
-                </button>
-              </div>
+      {receiveFor && receiptCheck && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setReceiveFor(null)}>
+          <div className="flex max-h-[92vh] w-full max-w-3xl flex-col rounded-2xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="border-b border-slate-100 p-5">
+              <h2 className="font-semibold">ตรวจรับของ · {receiveFor.poNumber}</h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                ข้อกำหนดที่ตกลงไว้: {receiveFor.acceptanceRequirements ?? "— ไม่ได้ระบุ —"}
+              </p>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===== RECEIVE MODAL ===== */}
-      {showReceive && selectedPo && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowReceive(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6">
-              <h2 className="text-lg font-semibold mb-1">▲ รับสินค้าเข้าคลัง</h2>
-              <p className="text-sm text-slate-400 mb-4">{selectedPo.po_number}</p>
-              <table className="w-full text-sm mb-4">
-                <thead>
+            <div className="flex-1 space-y-4 overflow-y-auto p-5">
+              <table className="w-full text-sm">
+                <thead className="text-xs text-slate-400">
                   <tr className="border-b border-slate-100">
-                    {['วัสดุ', 'สั่ง', 'รับแล้ว', 'รับเพิ่ม'].map((h) => (
-                      <th key={h} className="text-left py-2 px-2 text-xs font-medium text-slate-400">{h}</th>
-                    ))}
+                    <th className="px-2 py-2 text-left font-medium">วัสดุ</th>
+                    <th className="px-2 py-2 text-left font-medium">ค้างรับ</th>
+                    <th className="px-2 py-2 text-left font-medium">รับเข้าคลัง</th>
+                    <th className="px-2 py-2 text-left font-medium">ปฏิเสธ</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {selectedPo.po_items?.map((item) => (
-                    <tr key={item.id}>
-                      <td className="py-2 px-2">{item.material?.name ?? '—'}</td>
-                      <td className="py-2 px-2 tabular-nums text-slate-500">{item.qty_ordered}</td>
-                      <td className="py-2 px-2 tabular-nums text-slate-500">{item.qty_received}</td>
-                      <td className="py-2 px-2">
-                        <input type="number" step="0.001" min="0"
-                          max={item.qty_ordered - item.qty_received}
-                          value={receiveQtys[item.id ?? ''] ?? 0}
-                          onChange={(e) => setReceiveQtys({ ...receiveQtys, [item.id ?? '']: Number(e.target.value) })}
-                          className="w-20 border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                      </td>
-                    </tr>
-                  ))}
+                  {receiveFor.items.map((item) => {
+                    const line = receiptDraft[item.id] ?? { accepted: "", rejected: "", defectNote: "" };
+                    return (
+                      <tr key={item.id}>
+                        <td className="px-2 py-2 align-top">
+                          <div>{item.materialName ?? "—"}</div>
+                          {item.acceptanceSpec && <div className="text-xs text-slate-400">{item.acceptanceSpec}</div>}
+                          {Number(line.rejected) > 0 && (
+                            <input value={line.defectNote} placeholder="ของที่ปฏิเสธเสียตรงไหน (บังคับกรอก)"
+                              onChange={(e) => setReceiptDraft((prev) => ({ ...prev, [item.id]: { ...line, defectNote: e.target.value } }))}
+                              className="mt-2 w-full rounded border border-red-200 px-2 py-1 text-xs" />
+                          )}
+                        </td>
+                        <td className="px-2 py-2 align-top tabular-nums text-slate-500">{remainingQty(item)} {item.unit ?? ""}</td>
+                        <td className="px-2 py-2 align-top">
+                          <input type="number" min="0" step="0.001" value={line.accepted}
+                            onChange={(e) => setReceiptDraft((prev) => ({ ...prev, [item.id]: { ...line, accepted: e.target.value } }))}
+                            className="w-24 rounded border border-slate-200 px-2 py-1 text-sm" />
+                        </td>
+                        <td className="px-2 py-2 align-top">
+                          <input type="number" min="0" step="0.001" value={line.rejected}
+                            onChange={(e) => setReceiptDraft((prev) => ({ ...prev, [item.id]: { ...line, rejected: e.target.value } }))}
+                            className="w-24 rounded border border-slate-200 px-2 py-1 text-sm" />
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setShowReceive(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">ยกเลิก</button>
-                <button onClick={saveReceive} disabled={saving} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60">
-                  {saving ? 'กำลังบันทึก…' : 'บันทึก'}
-                </button>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-slate-500">สัดส่วนที่สุ่มตรวจจริง (%)</span>
+                  <input type="number" min="0" max="100" value={receiptSamplePct}
+                    onChange={(e) => setReceiptSamplePct(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-slate-500">บันทึกการตรวจรับ</span>
+                  <input value={receiptNote} onChange={(e) => setReceiptNote(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                </label>
               </div>
+
+              {receiptCheck.willOpenNcr && (
+                <div className="space-y-3 rounded-xl border border-red-200 bg-red-50 p-4">
+                  <div className="text-sm font-medium text-red-800">
+                    มีของไม่ผ่านตรวจรับ — ระบบจะเปิดใบ NC ให้ 1 ใบ (สาเหตุ: วัสดุ/สินค้า) และผูกกับผู้ขายรายนี้
+                  </div>
+                  {!receiveFor.jobNo && (
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium text-red-800">
+                        ของล็อตนี้กระทบงานใด * (ใบ NC ในระบบนี้ต้องผูกกับเลขงานเสมอ)
+                      </span>
+                      <select value={receiptJobNo} onChange={(e) => setReceiptJobNo(e.target.value)}
+                        className="w-full rounded-lg border border-red-200 px-3 py-2 text-sm">
+                        <option value="">— เลือกงาน —</option>
+                        {options.jobs.map((job) => (
+                          <option key={job.jobNo} value={job.jobNo}>{job.jobNo}{job.customer ? ` · ${job.customer}` : ""}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium text-red-800">อาการที่พบ</span>
+                      <select value={ncrType} onChange={(e) => setNcrType(e.target.value)}
+                        className="w-full rounded-lg border border-red-200 px-3 py-2 text-sm">
+                        {RECEIPT_NCR_TYPES.map((type) => <option key={type.code} value={type.code}>{type.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium text-red-800">ความรุนแรง</span>
+                      <select value={ncrSeverity} onChange={(e) => setNcrSeverity(e.target.value)}
+                        className="w-full rounded-lg border border-red-200 px-3 py-2 text-sm">
+                        {NCR_SEVERITIES.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-red-800">สรุปโดยผู้ตรวจรับ (ไม่บังคับ)</span>
+                    <textarea rows={2} value={defectSummary} onChange={(e) => setDefectSummary(e.target.value)}
+                      className="w-full rounded-lg border border-red-200 px-3 py-2 text-sm" />
+                  </label>
+                </div>
+              )}
+
+              <div className={`rounded-lg p-3 text-sm ${receiptCheck.error ? "bg-amber-50 text-amber-900" : "bg-slate-50 text-slate-600"}`}>
+                {receiptOutcomeMessage(receiptCheck)}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 p-5">
+              <button onClick={() => setReceiveFor(null)} className="rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">ยกเลิก</button>
+              <button onClick={saveReceipt} disabled={saving || Boolean(receiptCheck.error)}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:opacity-50">
+                {saving ? "กำลังบันทึก…" : "บันทึกผลการตรวจรับ"}
+              </button>
             </div>
           </div>
         </div>
