@@ -66,7 +66,11 @@ describe("รอบคำนวณคะแนนผู้ให้บริก�
     expect(payload.onTimeSample).toBe(35);
     expect(payload.ftpSample).toBe(20);
     expect(payload.ncrCount).toBe(3);
-    expect(payload.directEvidence).toBe(85);
+    // ทีมนี้อยู่ในบริษัทที่เปิดใบ NC จริง (3 ใบต่อ 40 งาน) ความเงียบของงานที่เหลือจึงมีความหมาย
+    // ตัวคูณความน่าเชื่อ = (3/13) x min(1, 0.075/0.05) = 0.231 -> นับเป็นหลักฐานได้ floor(40 x 0.231) = 9 ใบ
+    expect(payload.ncrCredibility).toBeCloseTo(3 / 13, 3);
+    expect(payload.ncrSample).toBe(9);
+    expect(payload.directEvidence).toBe(30 + 35 + 20 + 9);
     expect(Number(payload.evalAvg)).toBeLessThanOrEqual(5);
     expect(Number(payload.evalScore)).toBeLessThanOrEqual(Number(payload.performanceScore));
   });

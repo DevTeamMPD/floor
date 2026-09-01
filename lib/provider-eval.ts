@@ -42,16 +42,60 @@
  *
  *   ประตูสุดท้าย — สองเงื่อนไขต้องผ่านพร้อมกันจึงจะประกาศดาว (ไม่งั้น is_provisional)
  *       ก) งานอย่างน้อย 3 ใบ — งานเดียวยังแยกไม่ออกว่าเป็นฝีมือหรือเป็นวันโชคดี
- *       ข) "หลักฐานที่ถูกบันทึกจริง" อย่างน้อย 5 จุด = คะแนนลูกค้า + งานที่เทียบวันนัดได้ + ผลตรวจรับ
- *          ข้อนี้จำเป็น เพราะด้าน NC ให้คะแนนเต็มกับทีมที่ "ไม่มีใครเปิด NC ใส่" ซึ่งวันนี้เป็นจริง
- *          กับทุกทีมเพราะระบบ NC ยังไม่มีใครใช้ — การไม่มีข่าวร้ายยังไม่ใช่ข่าวดี
+ *       ข) "หลักฐานที่ถูกบันทึกจริง" อย่างน้อย 5 จุด
+ *          = คะแนนลูกค้า + งานที่เทียบวันนัดได้ + ผลตรวจรับ + งานที่นับเป็นหลักฐาน NC ได้จริง
+ *          ก้อนสุดท้ายเป็น 0 ตราบใดที่ยังไม่มีใครเปิดใบ NC ในบริษัทนี้ (ดูหัวข้อถัดไป)
  *          ถ้าไม่มีข้อนี้ ทีมที่ไม่มีข้อมูลอะไรเลยจะได้ดาวราว 3.6 ดวงจากความว่างเปล่า
  *       คะแนนยังคำนวณและแสดงพร้อมคำว่า "ยังไม่นิ่ง" เพื่อความโปร่งใส แต่จะไม่ถูกเขียนกลับไปที่
  *       tech_teams.eval_avg ที่หน้าจอเอาไปโชว์เป็นดาว
- *       เงื่อนไข (ก) ถูกย้ำเป็น check constraint ที่ตาราง จึงข้ามด้วยโค้ดฝั่งไหนก็ไม่ได้
+ *       เงื่อนไขทั้ง (ก) และ (ข) ถูกย้ำเป็น check constraint ที่ตาราง จึงข้ามด้วยโค้ดฝั่งไหนก็ไม่ได้
+ *       (ข้อ ก: tech_team_eval_scores_small_sample_is_provisional
+ *        ข้อ ข: tech_team_eval_scores_thin_evidence_is_provisional — เพิ่มใน P4-9.2)
+ *
+ * ------------------------------------------------------------------------
+ * ความเงียบจากระบบ NC ไม่ใช่คุณภาพ (P4-9.2 — แก้ตามผลรีวิว)
+ * ------------------------------------------------------------------------
+ *   ของเดิมพังตรงไหน: ด้าน NC ให้ค่าดิบ 100 ทันทีที่ ncrWeighted = 0 และยังส่ง "จำนวนงานทั้งหมด"
+ *   เข้าไปเป็นจำนวนตัวอย่างด้วย ด้านนี้จึงแทบไม่ถูกหดเข้าหาค่ากลางเลย ทั้งที่วันนี้ ncr_reports
+ *   มี 0 แถวทั้งระบบ — ไม่เคยมีใครเปิดใบ NC สักใบ แปลว่าทุกทีมได้คะแนนเกือบเต็มบน 25%
+ *   ของคะแนนรวม จากข้อเท็จจริงที่ว่า "ฟีเจอร์หนึ่งยังไม่มีใครใช้" ไม่ใช่จากการทำงานที่ดี
+ *   (ของจริงในฐานข้อมูลตอนพบปัญหา: ค่ากลางด้าน NC = 94.2 คะแนนด้าน NC ของทีม 23 งาน = 99.0)
+ *
+ *   กฎใหม่: "ไม่มีใครเปิด NC ใส่ทีมนี้" จะถูกนับเป็นข่าวดีก็ต่อเมื่อมีเหตุให้เชื่อว่าระบบ NC
+ *   ถูกใช้จริง ความเชื่อนั้นวัดจากพฤติกรรม "ทั้งบริษัท" ไม่ใช่ของทีมใดทีมหนึ่ง (ทีมเลี่ยงเองไม่ได้):
+ *
+ *       ncrProcessCredibility = ปริมาณ x อัตรา   (0 ถึง 1)
+ *         ปริมาณ = ใบ NC ทั้งบริษัท / (ใบ NC ทั้งบริษัท + 10)
+ *                  หนึ่งสองใบยังเป็นแค่ "มีคนลองกดดู" ไม่ใช่กระบวนการที่เดินอยู่จริง
+ *         อัตรา  = min(1, (ใบ NC ทั้งบริษัท / งานทั้งบริษัท) / 0.05)
+ *                  บริษัทรับเหมาปูพื้นที่เจอข้อบกพร่องน้อยกว่า 1 ใน 20 งาน ไม่ใช่บริษัทที่ไม่มี
+ *                  ข้อบกพร่อง แต่คือบริษัทที่ยังไม่ได้มอง — สองตัวนี้ตอบคนละคำถาม จึงคูณกัน
+ *
+ *   ตัวคูณนี้ถูกใช้สี่ที่ ไม่ใช่ที่เดียว เพราะแก้ที่เดียวรูรั่วยังอยู่ครบ:
+ *     1) จำนวนตัวอย่างของด้าน NC = floor(จำนวนงานของทีม x ตัวคูณ) แทน "จำนวนงาน" เต็ม ๆ
+ *        เป็น 0 ในโลกที่ยังไม่มีใครเปิด NC -> ด้านนี้ถูกหดเข้าหาค่ากลางเต็มที่ เท่ากับด้านที่ไม่มีข้อมูล
+ *     2) ค่าดิบเป็น null เมื่อจำนวนตัวอย่างที่นับได้เป็น 0 -> หน้าจอพูดตรง ๆ ว่า "ยังไม่มีข้อมูล
+ *        ใช้ค่ากลาง" และทีมที่ไม่มีอะไรเลยนอกจากจำนวนงาน กลายเป็น hasData = false ตามความจริง
+ *        (ของเดิมทีมแบบนั้นมีคะแนนขึ้นจอ ทั้งที่ไม่มีใครบันทึกอะไรเกี่ยวกับคุณภาพของมันเลย)
+ *     3) ค่ากลางของทั้งบริษัทด้าน NC ถูกถ่วงด้วย (ตัวอย่างทั้งบริษัท x ตัวคูณ) ด้วย
+ *        ข้อนี้ขาดไม่ได้เด็ดขาด: ถ้าแก้แค่ข้อ 1-2 ค่ากลางจะยังเป็น ~100 (เพราะทั้งบริษัทไม่มี NC)
+ *        แล้วด้านที่ "ไม่มีข้อมูล" ก็รับ ~100 ไปเต็ม ๆ อยู่ดี รูรั่วเดิมทุกประการแต่ซ่อนลึกกว่าเดิม
+ *     4) directEvidence บวก floor(จำนวนงาน x ตัวคูณ) เข้าไปด้วย
+ *        โลกที่ไม่มีใครเปิด NC = บวก 0 (เท่าเดิมทุกอย่าง) ส่วนโลกที่บริษัทเปิด NC เป็นปกติ
+ *        "งานที่ผ่านไปโดยไม่มีใครเปิด NC" คือการสังเกตที่มีคนทำจริง จึงควรนับเป็นหลักฐาน
+ *        และทีมที่สะอาดจริงในบริษัทที่ตรวจจริง ได้ประโยชน์จากข้อนี้เต็ม ๆ ตามที่ควรได้
+ *
+ *   ทำไมเป็นเส้นโค้งต่อเนื่อง ไม่ใช่สวิตช์เปิด/ปิด:
+ *     วันที่ใบ NC ใบแรกของบริษัทถูกเปิด คะแนนของทุกทีมต้องไม่กระโดดข้ามคืน ตัวคูณจึงไต่ทีละน้อย
+ *     (ใบแรกได้ตัวคูณราว 0.09) ผลต่อดาวของแต่ละทีมในคืนนั้นน้อยกว่า 0.1 ดวง
+ *     ถ้าใช้เกณฑ์แบบ "ครบ 5 ใบแล้วเปิดเต็ม" คะแนนทั้งบริษัทจะกระชากในคืนเดียว ซึ่งแย่พอกัน
+ *
+ *   ราคาที่ยอมจ่าย: ในโลกที่ยังไม่มีใครเปิด NC ทุกทีมได้ค่ากลาง 70 บน 25% ของคะแนน
+ *   ระยะห่างระหว่างทีมจึงถูกบีบให้แคบลงประมาณหนึ่งในสี่ นั่นคือหน้าตาที่ถูกต้องของ
+ *   "เรายังไม่รู้" — ไม่ใช่ข้อบกพร่อง และดีกว่าการแกล้งรู้ด้วยเลข 100 ที่ไม่มีที่มา
  */
 
-export const PROVIDER_EVAL_METHOD_VERSION = "P4-9.1";
+export const PROVIDER_EVAL_METHOD_VERSION = "P4-9.2";
 
 /** น้ำหนักของแต่ละด้าน — รวมกันได้ 1 เมื่อมีข้อมูลครบทุกด้าน */
 export const EVAL_WEIGHTS = { csat: 0.4, ncr: 0.25, onTime: 0.25, firstTimePass: 0.1 } as const;
@@ -66,7 +110,7 @@ export const EVAL_COMPONENT_LABELS: Record<EvalComponentKey, string> = {
 
 export const EVAL_COMPONENT_SAMPLE_LABELS: Record<EvalComponentKey, string> = {
   csat: "งานที่ลูกค้าให้คะแนน",
-  ncr: "งานทั้งหมดที่นับ NC",
+  ncr: "งานที่นับเป็นหลักฐาน NC ได้จริง",
   onTime: "งานที่มีทั้งวันนัดและวันจบจริง",
   firstTimePass: "งานที่มีผลตรวจรับ",
 };
@@ -81,11 +125,16 @@ export const NEUTRAL_PRIOR_WEIGHT = 10;
 export const MIN_JOBS_FOR_STARS = 3;
 /** น้ำหนักการหดคะแนนรวมตามจำนวนงานทั้งหมดของทีม (หน่วย: งาน) */
 export const CONFIDENCE_K = 5;
-/** จุดข้อมูลที่ "ถูกบันทึกจริง" ขั้นต่ำก่อนประกาศดาว — ไม่นับด้าน NC ที่ได้คะแนนจากการไม่มีข่าว */
+/** จุดข้อมูลที่ "ถูกบันทึกจริง" ขั้นต่ำก่อนประกาศดาว — งานที่ไม่มี NC นับได้เท่าที่ระบบ NC น่าเชื่อ */
 export const MIN_DIRECT_EVIDENCE = 5;
 
 /** NC ถ่วงน้ำหนักต่อ 1 งาน ที่ทำให้คะแนนด้าน NC เหลือ 0 */
 export const NCR_TOLERANCE_PER_JOB = 0.5;
+
+/** จำนวนใบ NC ทั้งบริษัทที่ทำให้ "ปริมาณการใช้ระบบ NC" ขึ้นไปครึ่งทาง (หน่วย: ใบ) */
+export const NC_PROCESS_REPORTS_K = 10;
+/** อัตราการเปิด NC ต่องาน ที่ถือว่าระบบถูกใช้เต็มที่แล้ว — 1 ใบต่อ 20 งาน */
+export const NC_PROCESS_FULL_RATE = 0.05;
 
 export interface TeamEvalInput {
   teamId: string;
@@ -135,8 +184,12 @@ export interface TeamEvalScore {
   evalAvg: number | null;
   ncrWeighted: number;
   ncrCount: number;
-  /** จำนวนจุดข้อมูลที่มีคนบันทึกไว้จริง (คะแนนลูกค้า + งานที่เทียบวันนัดได้ + ผลตรวจรับ) */
+  /** จำนวนจุดข้อมูลที่มีคนบันทึกไว้จริง (คะแนนลูกค้า + งานที่เทียบวันนัดได้ + ผลตรวจรับ + งานที่นับ NC ได้) */
   directEvidence: number;
+  /** ระบบ NC ของทั้งบริษัทน่าเชื่อแค่ไหน 0-1 — 0 = ยังไม่มีใครเปิดใบ NC เลย ความเงียบจึงไม่มีความหมาย */
+  ncrCredibility: number;
+  /** จำนวนงานของทีมที่นับเป็นหลักฐานด้าน NC ได้จริง = floor(jobCount x ncrCredibility) */
+  ncrEvidenceJobs: number;
   components: EvalComponentScore[];
   /** คำอธิบายภาษาไทยว่าทำไมคะแนนนี้ถึงแสดงแบบนี้ */
   reason: string;
@@ -166,6 +219,30 @@ export function csatToScore(average: number): number {
 export function ncrToScore(weighted: number, jobs: number): number {
   if (jobs <= 0) return NEUTRAL_PRIOR;
   return clamp(100 * (1 - weighted / jobs / NCR_TOLERANCE_PER_JOB));
+}
+
+/**
+ * ระบบ NC ของ "ทั้งบริษัท" ถูกใช้จริงแค่ไหน — 0 ถึง 1
+ *
+ * นี่คือหัวใจของกฎ "ความเงียบไม่ใช่คุณภาพ": ตราบใดที่ยังไม่มีใครเปิดใบ NC เลย
+ * การที่ทีมหนึ่งไม่มี NC ไม่ได้แปลว่าทีมนั้นทำงานดี แปลว่าเราไม่ได้มอง
+ * ตัวเลขนี้จึงอ่านจากพฤติกรรมของทั้งบริษัทเท่านั้น ทีมใดทีมหนึ่งทำให้ตัวเองดูดีด้วยตัวนี้ไม่ได้
+ *
+ * สองปัจจัยตอบคนละคำถาม จึงคูณกัน ไม่ใช่เลือกอันใดอันหนึ่ง:
+ *   ปริมาณ — "มีการใช้จริงหรือแค่มีคนลองกด" (หด: c / (c + 10))
+ *   อัตรา  — "ใช้ในระดับที่สมเหตุสมผลกับปริมาณงานหรือไม่" (min(1, rate / 0.05))
+ */
+export function ncrProcessCredibility(fleet: TeamEvalInput[]): number {
+  let reports = 0;
+  let jobs = 0;
+  for (const member of fleet) {
+    reports += Math.max(0, num(member.ncrCount));
+    jobs += Math.max(0, num(member.jobCount));
+  }
+  if (reports <= 0 || jobs <= 0) return 0;
+  const volume = reports / (reports + NC_PROCESS_REPORTS_K);
+  const rate = Math.min(1, reports / jobs / NC_PROCESS_FULL_RATE);
+  return clamp(volume * rate, 0, 1);
 }
 
 interface RawComponent {
@@ -226,7 +303,13 @@ export function fleetPrior(key: EvalComponentKey, inputs: TeamEvalInput[]): numb
     : key === "ncr" ? ncrToScore(numerator, denominator)
     : clamp((numerator / denominator) * 100);
 
-  return (denominator * pooledRaw + NEUTRAL_PRIOR_WEIGHT * NEUTRAL_PRIOR) / (denominator + NEUTRAL_PRIOR_WEIGHT);
+  // ด้าน NC: น้ำหนักของ "ค่าเฉลี่ยทั้งบริษัท" ถูกลดตามความน่าเชื่อของระบบ NC
+  // ถ้าไม่มีใครเปิดใบ NC เลย ค่ากลางด้านนี้คือ 70 เฉย ๆ ไม่ใช่ ~100 ที่ได้มาจากความเงียบ
+  // (ขาดข้อนี้ การแก้ที่ตัวอย่างรายทีมจะไร้ผล เพราะทีมที่ไม่มีข้อมูลรับค่ากลางไปเต็ม ๆ อยู่ดี)
+  const weight = key === "ncr" ? denominator * ncrProcessCredibility(inputs) : denominator;
+  if (weight <= 0) return NEUTRAL_PRIOR;
+
+  return (weight * pooledRaw + NEUTRAL_PRIOR_WEIGHT * NEUTRAL_PRIOR) / (weight + NEUTRAL_PRIOR_WEIGHT);
 }
 
 /** หดค่าดิบเข้าหาค่ากลางตามจำนวนตัวอย่าง — สูตรเดียวที่ใช้กับทุกด้าน */
@@ -238,6 +321,15 @@ export function shrink(raw: number, sample: number, prior: number): number {
 export function scoreTeam(input: TeamEvalInput, fleet: TeamEvalInput[]): TeamEvalScore {
   const raws = rawComponents(input);
   const keys = Object.keys(EVAL_WEIGHTS) as EvalComponentKey[];
+
+  // ความเงียบจากระบบ NC ไม่ใช่คุณภาพ — งานของทีมจะถูกนับเป็นหลักฐานด้าน NC
+  // ตามสัดส่วนที่ระบบ NC ของทั้งบริษัทถูกใช้จริงเท่านั้น (ดูหัวไฟล์ ข้อ 1 และ 2)
+  const ncrCredibility = ncrProcessCredibility(fleet);
+  // ปัดลง (floor) ไม่ใช่ปัดใกล้: เศษของงานไม่นับเป็นการสังเกต ต้องได้ครบหนึ่งงานเต็มก่อน
+  // ผลข้างเคียงที่ตั้งใจ: วันที่ใบ NC ใบแรกถูกเปิด ไม่มีทีมไหนข้ามประตูหลักฐานเพราะเศษทศนิยม
+  const ncrEvidenceJobs = Math.floor(Math.max(0, input.jobCount) * ncrCredibility);
+  raws.ncr.sample = ncrEvidenceJobs;
+  if (ncrEvidenceJobs <= 0) raws.ncr.raw = null;
 
   const withData = keys.filter((key) => raws[key].raw !== null);
 
@@ -264,7 +356,9 @@ export function scoreTeam(input: TeamEvalInput, fleet: TeamEvalInput[]): TeamEva
   const evalScore = hasData
     ? round((input.jobCount * performance + CONFIDENCE_K * NEUTRAL_PRIOR) / (input.jobCount + CONFIDENCE_K))
     : null;
-  const directEvidence = input.csatCount + input.onTimeBase + input.firstPassBase;
+  // หลักฐานที่ "มีคนดูจริง" — งานที่ผ่านไปโดยไม่มีใครเปิด NC นับได้เท่าที่ระบบ NC น่าเชื่อ
+  // (โลกที่ยังไม่มีใครเปิด NC บวก 0 เท่ากับพฤติกรรมเดิมทุกประการ)
+  const directEvidence = input.csatCount + input.onTimeBase + input.firstPassBase + ncrEvidenceJobs;
   const isProvisional =
     !hasData || input.jobCount < MIN_JOBS_FOR_STARS || directEvidence < MIN_DIRECT_EVIDENCE;
 
@@ -282,8 +376,10 @@ export function scoreTeam(input: TeamEvalInput, fleet: TeamEvalInput[]): TeamEva
     ncrWeighted: round(input.ncrWeighted, 2),
     ncrCount: input.ncrCount,
     directEvidence,
+    ncrCredibility: round(ncrCredibility, 3),
+    ncrEvidenceJobs,
     components,
-    reason: evalReason(hasData, isProvisional, input.jobCount, directEvidence, withData.length, keys.length),
+    reason: evalReason(hasData, isProvisional, input.jobCount, directEvidence, withData.length, keys.length, ncrCredibility),
   };
 }
 
@@ -294,15 +390,25 @@ export function evalReason(
   directEvidence: number,
   componentsWithData: number,
   componentsTotal: number,
+  ncrCredibility = 0,
 ): string {
-  if (!hasData) return "ยังไม่มีข้อมูลสักด้าน จึงยังให้คะแนนไม่ได้";
+  // ต้องพูดออกมาให้คนอ่านรู้ ไม่ใช่ให้เขาเดาว่าทำไมด้าน NC ถึงไม่มีคะแนนของตัวเอง
+  const silentNc = ncrCredibility <= 0
+    ? " · ด้าน NC ยังไม่นับเป็นหลักฐาน เพราะทั้งบริษัทยังไม่มีการเปิดใบ NC จริง — การไม่มีข่าวร้ายยังไม่ใช่ข่าวดี"
+    : "";
+  if (!hasData) {
+    if (jobCount > 0) {
+      return `มีงาน ${jobCount} ใบ แต่ยังไม่มีใครบันทึกหลักฐานคุณภาพไว้เลย จึงยังให้คะแนนไม่ได้${silentNc}`;
+    }
+    return "ยังไม่มีข้อมูลสักด้าน จึงยังให้คะแนนไม่ได้";
+  }
   const coverage = `ใช้ข้อมูล ${componentsWithData} จาก ${componentsTotal} ด้าน`;
-  if (!isProvisional) return `คิดจากงาน ${jobCount} ใบ (${coverage})`;
+  if (!isProvisional) return `คิดจากงาน ${jobCount} ใบ (${coverage})${silentNc}`;
   if (jobCount < MIN_JOBS_FOR_STARS) {
-    return `ยังไม่นิ่ง — มีงานที่นับได้ ${jobCount} ใบ ต้องมีอย่างน้อย ${MIN_JOBS_FOR_STARS} ใบจึงจะประกาศดาว (${coverage})`;
+    return `ยังไม่นิ่ง — มีงานที่นับได้ ${jobCount} ใบ ต้องมีอย่างน้อย ${MIN_JOBS_FOR_STARS} ใบจึงจะประกาศดาว (${coverage})${silentNc}`;
   }
   return `ยังไม่นิ่ง — มีหลักฐานที่บันทึกไว้จริง ${directEvidence} จุด ต้องมีอย่างน้อย ${MIN_DIRECT_EVIDENCE} จุด `
-    + `(คะแนนลูกค้า/งานที่เทียบวันนัดได้/ผลตรวจรับ) จึงจะประกาศดาว (${coverage})`;
+    + `(คะแนนลูกค้า/งานที่เทียบวันนัดได้/ผลตรวจรับ/งานที่นับ NC ได้) จึงจะประกาศดาว (${coverage})${silentNc}`;
 }
 
 export function scoreAllTeams(inputs: TeamEvalInput[]): TeamEvalScore[] {
@@ -359,6 +465,7 @@ export function toApplyPayload(scores: TeamEvalScore[]): Record<string, unknown>
     ncrSample: componentOf(score, "ncr")?.sample ?? 0,
     ncrWeighted: score.ncrWeighted,
     ncrCount: score.ncrCount,
+    ncrCredibility: score.ncrCredibility,
     onTimeScore: componentOf(score, "onTime")?.score ?? null,
     onTimeRaw: componentOf(score, "onTime")?.raw ?? null,
     onTimeSample: componentOf(score, "onTime")?.sample ?? 0,

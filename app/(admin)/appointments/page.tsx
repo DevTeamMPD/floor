@@ -13,6 +13,7 @@ import {
   evalDisplayLines,
   evalEvidenceNote,
   evalHeadline,
+  evalNcProcessNote,
   type StoredTeamEvalRow,
 } from "@/lib/provider-eval-display";
 
@@ -829,6 +830,12 @@ export default function AppointmentsPage() {
                       {openEvalTeamId === tech.id && (
                         <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
                           <div className="text-[11px] text-slate-500">{evalEvidenceNote(evalScores[tech.id])}</div>
+                          {/* P4-9.2 — ความเงียบจากระบบ NC ไม่ใช่คุณภาพ ต้องเขียนบนจอว่าทำไมด้าน NC ถึงเป็นแบบนั้น */}
+                          {evalNcProcessNote(evalScores[tech.id]) && (
+                            <div className="mt-1 text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded px-1.5 py-1">
+                              {evalNcProcessNote(evalScores[tech.id])}
+                            </div>
+                          )}
                           {evalScores[tech.id] ? (
                             <>
                               <table className="mt-2 w-full text-[11px]">

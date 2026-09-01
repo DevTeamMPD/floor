@@ -4,6 +4,7 @@ import {
   evalDisplayLines,
   evalEvidenceNote,
   evalHeadline,
+  evalNcProcessNote,
   type StoredTeamEvalRow,
 } from "@/lib/provider-eval-display";
 
@@ -14,7 +15,7 @@ function row(overrides: Partial<StoredTeamEvalRow> = {}): StoredTeamEvalRow {
     has_data: false, is_provisional: true, job_count: 0,
     csat_score: null, csat_raw: null, csat_sample: 0,
     ncr_score: null, ncr_raw: null, ncr_sample: 0,
-    ncr_weighted: 0, ncr_count: 0,
+    ncr_weighted: 0, ncr_count: 0, ncr_credibility: 0,
     ontime_score: null, ontime_raw: null, ontime_sample: 0,
     ftp_score: null, ftp_raw: null, ftp_sample: 0,
     ...overrides,
@@ -70,6 +71,23 @@ describe("ตารางคะแนนย่อย — ต้องกาง�
     expect(csat.raw).toBe("ยังไม่มีข้อมูล ใช้ค่ากลาง");
     expect(csat.score).toBe("78.7");
     expect(csat.sample).toBe("0 งานที่ลูกค้าให้คะแนน");
+  });
+
+  it("*** ระบบ NC ที่ยังไม่มีใครใช้ ต้องถูกพูดออกมาบนจอ ไม่ใช่ปล่อยให้เดา ***", () => {
+    const note = evalNcProcessNote(row({ job_count: 23, ncr_sample: 0, ncr_credibility: 0 }));
+    expect(note).toContain("ยังไม่มีการเปิดใบ NC จริง");
+    expect(note).toContain("ยังไม่ใช่ข่าวดี");
+  });
+
+  it("โลกที่บริษัทเปิด NC จริง บอกว่านับงานของทีมเป็นหลักฐานไปกี่ใบ", () => {
+    const note = evalNcProcessNote(row({ job_count: 20, ncr_sample: 10, ncr_credibility: 0.545 }));
+    expect(note).toContain("55%");
+    expect(note).toContain("10 ใบ จาก 20 ใบ");
+  });
+
+  it("แถวเก่าที่ยังไม่มีค่าความน่าเชื่อ ไม่พูดอะไรมั่ว", () => {
+    expect(evalNcProcessNote(row({ ncr_credibility: null }))).toBe("");
+    expect(evalNcProcessNote(null)).toBe("");
   });
 
   it("เวลาที่คำนวณล่าสุดอ่านออกเป็นภาษาไทย และของเสียไม่ทำให้พัง", () => {

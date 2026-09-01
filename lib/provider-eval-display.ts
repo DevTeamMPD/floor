@@ -23,6 +23,8 @@ export interface StoredTeamEvalRow {
   csat_score: number | null; csat_raw: number | null; csat_sample: number | null;
   ncr_score: number | null; ncr_raw: number | null; ncr_sample: number | null;
   ncr_weighted: number | null; ncr_count: number | null;
+  /** ระบบ NC ทั้งบริษัทน่าเชื่อแค่ไหน 0-1 (null = แถวเก่าที่คำนวณก่อน P4-9.2) */
+  ncr_credibility: number | null;
   ontime_score: number | null; ontime_raw: number | null; ontime_sample: number | null;
   ftp_score: number | null; ftp_raw: number | null; ftp_sample: number | null;
 }
@@ -89,6 +91,25 @@ export function evalEvidenceNote(row: StoredTeamEvalRow | null | undefined): str
   const base = `จากงาน ${jobs} ใบ · หลักฐานที่บันทึกไว้จริง ${evidence} จุด`;
   if (performance === null) return base;
   return `${base} · คะแนนจากผลงานก่อนถ่วงปริมาณงาน ${performance}`;
+}
+
+/**
+ * บรรทัดที่ต้องมีเสมอเมื่อระบบ NC ยังไม่ถูกใช้จริง
+ *
+ * ถ้าไม่พูด คนอ่านจะเห็นด้าน NC เขียนว่า "ยังไม่มีข้อมูล ใช้ค่ากลาง" ทั้งที่ทีมนั้นทำงานมาเป็นสิบใบ
+ * แล้วเข้าใจว่าระบบพัง — ความจริงคือไม่มีใครเปิดใบ NC เลยทั้งบริษัท ความเงียบจึงไม่ถูกนับเป็นคุณภาพ
+ */
+export function evalNcProcessNote(row: StoredTeamEvalRow | null | undefined): string {
+  if (!row) return "";
+  const credibility = row.ncr_credibility;
+  if (credibility === null || credibility === undefined) return "";
+  if (credibility <= 0) {
+    return "ด้าน NC ยังไม่ถูกนับเป็นหลักฐาน เพราะทั้งบริษัทยังไม่มีการเปิดใบ NC จริง "
+      + "การไม่มีใครเปิด NC ใส่ทีมนี้ จึงยังไม่ใช่ข่าวดี — ด้านนี้ใช้ค่ากลางแทน";
+  }
+  const percent = Math.round(Number(credibility) * 100);
+  return `ระบบ NC ถูกใช้จริงราว ${percent}% ของระดับที่เชื่อได้เต็มที่ `
+    + `งานของทีมนี้จึงถูกนับเป็นหลักฐานด้าน NC ${count(row.ncr_sample)} ใบ จาก ${count(row.job_count)} ใบ`;
 }
 
 export function evalComputedAtLabel(row: StoredTeamEvalRow | null | undefined): string {
