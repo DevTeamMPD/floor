@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { IP_STAGES } from "@/lib/types";
 import type { InstallJob } from "@/lib/types";
@@ -17,6 +17,34 @@ import {
   type QcLoadState,
   type QCResult,
 } from "@/lib/job-checklist";
+import {
+  ACCEPTANCE_GATE_RPC,
+  ACCEPTANCE_RULE_HEADLINE,
+  ACCEPTANCE_RULE_NOTICE_LINES,
+  ACCEPTANCE_SAVE_RPC,
+  ACCEPTANCE_VERIFY_RPC,
+  MEASURING_DEVICES_RPC,
+  NO_MEASURING_DEVICES_HINT,
+  acceptanceItemCloseWarning,
+  acceptanceItemSaveBlock,
+  acceptanceProgress,
+  acceptanceSaveBlocks,
+  buildAcceptanceResultsPayload,
+  deviceOptions,
+  deviceSelectNotice,
+  emptyAcceptanceEntry,
+  externalVerificationNotice,
+  gateHeadline,
+  gateMissingLine,
+  parseAcceptanceGate,
+  parseAcceptanceRows,
+  parseMeasuringDevices,
+  shouldShowExternalVerification,
+  type AcceptanceEntry,
+  type AcceptanceEntryMap,
+  type AcceptanceGate,
+  type MeasuringDevice,
+} from "@/lib/job-acceptance";
 import type { StaffRole } from "@/lib/staff";
 import { toast } from "sonner";
 import TechQueueView from "@/components/tech-queue/tech-queue-view";
@@ -195,10 +223,19 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   // แสดงตารางคิวช่างที่โซนซ้าย (A) ตอนจองช่าง
   const [showQueue, setShowQueue] = useState(false);
 
-  // QC state — คีย์ด้วยรหัสเกณฑ์ (QC01…) ไม่ใช่ลำดับที่แสดงบนจอ เพราะลำดับเปลี่ยนได้เมื่อหัวหน้าช่างแก้แม่แบบ
-  const [qcResults, setQcResults] = useState<Record<string, QCResult>>({});
+  // ผลตรวจรับ — คีย์ด้วยรหัสเกณฑ์ (QC01…) ไม่ใช่ลำดับที่แสดงบนจอ เพราะลำดับเปลี่ยนได้เมื่อหัวหน้าช่างแก้แม่แบบ
+  // ตั้งแต่ P4-3 หนึ่งข้อไม่ได้มีแค่ ผ่าน/ไม่ผ่าน แล้ว แต่มีค่าที่วัดได้ เครื่องมือที่ใช้ รูปหลักฐาน และหมายเหตุ
+  // เพราะผลตรวจรับถูกบันทึกเป็นแถวจริงใน job_acceptance_results ไม่ใช่ JSON ก้อนเดียวใน install_jobs.qc_data อีกต่อไป
+  const [acceptance, setAcceptance] = useState<AcceptanceEntryMap>({});
   const [qcInspector, setQcInspector] = useState("");
   const [qcNotes, setQcNotes] = useState("");
+  // ทะเบียนเครื่องมือวัด (get_measuring_devices) — ว่างได้ และ "ว่าง" ต้องมีข้อความบอก ไม่ใช่ dropdown เปล่า
+  const [devices, setDevices] = useState<MeasuringDevice[]>([]);
+  const [devicesLoaded, setDevicesLoaded] = useState(false);
+  // ด่านตรวจรับของงานนี้ (job_acceptance_gate) — undefined = ยังไม่โหลด, null = อ่านไม่ได้
+  const [gate, setGate] = useState<AcceptanceGate | null | undefined>(undefined);
+  const [uploadingCode, setUploadingCode] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
   // สถานะการโหลดผลตรวจรับเดิม — ปุ่มบันทึกเขียนทับทั้งก้อน จึงห้ามบันทึกถ้ายังไม่รู้ว่าของเดิมมีอะไร
   const [qcLoadState, setQcLoadState] = useState<QcLoadState>(() => (job.id ? "loading" : "ready"));
   // เกณฑ์ตรวจรับที่กำลังแสดง: ตั้งต้นเป็น "กำลังโหลด" (ไม่ใช่ชุดสำรอง) เพื่อไม่ให้เอารายการเก่าขึ้นจอเป็นของจริง
@@ -224,13 +261,10 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   // Load saved data
   useEffect(() => {
     if (job.id) {
-      setQcLoadState("loading");
       supabase.from("install_jobs")
-        .select("survey_data, qc_data, material_usage, pick_plan, waiting_on, waiting_since, needs_survey, has_defect, needs_redesign, is_claim")
+        .select("survey_data, material_usage, pick_plan, waiting_on, waiting_since, needs_survey, has_defect, needs_redesign, is_claim")
         .eq("job_no", job.jobNo).single().then(({ data, error }) => {
         if (error) {
-          // อ่านแถวงานไม่สำเร็จ = ไม่รู้ว่าผลตรวจรับเดิมมีอะไร ห้ามให้กดบันทึกทับ
-          setQcLoadState("error");
           toast.error(floorActionError("โหลดข้อมูลที่บันทึกไว้ของงานนี้", error));
           return;
         }
@@ -248,21 +282,6 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
             const pp = typeof data.pick_plan === "string" ? JSON.parse(data.pick_plan) : data.pick_plan;
             if (pp) setPickPlan({ newItems: pp.newItems ?? [], remnants: pp.remnants ?? [], note: pp.note ?? "", savedAt: pp.savedAt });
           } catch {}
-        }
-        if (data?.qc_data) {
-          try {
-            const qc: QCData = typeof data.qc_data === "string" ? JSON.parse(data.qc_data) : (data.qc_data as QCData);
-            setQcResults(normalizeQcResults(qc?.results));
-            setQcInspector(qc?.inspector ?? "");
-            setQcNotes(qc?.notes ?? "");
-            setQcLoadState("ready");
-          } catch (e: unknown) {
-            // ห้ามกลืนเงียบ: ถ้าอ่านของเดิมไม่ออกแล้วยังให้กดบันทึกได้ ผลตรวจรับเดิมจะถูกทับหายทั้งชุด
-            setQcLoadState("error");
-            toast.error(floorActionError("อ่านผลตรวจรับเดิมของงานนี้", e));
-          }
-        } else {
-          setQcLoadState("ready");
         }
         if (data) {
           setWaitingOn(data.waiting_on ?? "ไม่ได้ค้าง");
@@ -297,6 +316,66 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     return () => { cancelled = true; };
   }, []);
 
+
+  // P4-3: ผลตรวจรับเดิมมาจากสองที่ และต้องอ่านให้ครบทั้งสองก่อนจะให้กดบันทึกทับได้
+  //   1) ตาราง job_acceptance_results — แหล่งจริงตั้งแต่ P4-3 (มีรูป เครื่องมือ ค่าที่วัดได้)
+  //   2) install_jobs.qc_data — ผลรุ่นเก่าของงานที่ตรวจไว้ก่อนมีตารางนี้ (มีแค่ ผ่าน/ไม่ผ่าน)
+  // งานเก่าทั้ง 117 ใบมีแต่ (2) เท่านั้น ถ้าอ่านแค่ (1) หน้าจอจะขึ้นว่า "ยังไม่ได้ตรวจสักข้อ"
+  // ทั้งที่เคยตรวจไว้แล้ว แล้วการกดบันทึกจะกลายเป็นการลบผลเก่าทิ้งทั้งชุดโดยที่ไม่มีใครตั้งใจ
+  const loadAcceptance = useCallback(async () => {
+    if (!job.jobNo) { setQcLoadState("ready"); return; }
+    setQcLoadState("loading");
+    const [jobRow, rows] = await Promise.all([
+      supabase.from("install_jobs").select("qc_data").eq("job_no", job.jobNo).single(),
+      supabase.from("job_acceptance_results")
+        .select("item_code, result, measured_value, measuring_device_id, photo_paths, note, verified_at, verified_role")
+        .eq("job_no", job.jobNo),
+    ]);
+    if (jobRow.error || rows.error) {
+      setQcLoadState("error");
+      toast.error(floorActionError("โหลดผลตรวจรับเดิมของงานนี้", jobRow.error ?? rows.error));
+      return;
+    }
+    const merged: AcceptanceEntryMap = {};
+    try {
+      const raw = jobRow.data?.qc_data;
+      const qc: QCData | null = raw ? (typeof raw === "string" ? JSON.parse(raw) : (raw as QCData)) : null;
+      for (const [code, result] of Object.entries(normalizeQcResults(qc?.results))) {
+        merged[code] = { ...emptyAcceptanceEntry(), result };
+      }
+      setQcInspector(qc?.inspector ?? "");
+      setQcNotes(qc?.notes ?? "");
+    } catch (e: unknown) {
+      // ห้ามกลืนเงียบ: ถ้าอ่านของเดิมไม่ออกแล้วยังให้กดบันทึกได้ ผลตรวจรับเดิมจะถูกทับหายทั้งชุด
+      setQcLoadState("error");
+      toast.error(floorActionError("อ่านผลตรวจรับเดิมของงานนี้", e));
+      return;
+    }
+    // แถวจริงชนะผลรุ่นเก่าเสมอ เพราะเป็นข้อมูลที่ละเอียดกว่าและใหม่กว่า
+    for (const [code, entry] of Object.entries(parseAcceptanceRows(rows.data))) merged[code] = entry;
+    setAcceptance(merged);
+    setQcLoadState("ready");
+  }, [job.jobNo]);
+  useEffect(() => { void loadAcceptance(); }, [loadAcceptance]);
+
+  // ด่านตรวจรับ — ตัวเดียวกับที่ close_floor_work_order_cs_v4 ใช้ตัดสิน จึงเป็นคำตอบที่ตรงกับความจริงเสมอ
+  const loadGate = useCallback(async () => {
+    if (!job.jobNo) { setGate(undefined); return; }
+    const { data, error } = await supabase.rpc(ACCEPTANCE_GATE_RPC, { p_job_no: job.jobNo });
+    setGate(error ? null : parseAcceptanceGate(data));
+  }, [job.jobNo]);
+  useEffect(() => { void loadGate(); }, [loadGate]);
+
+  // ทะเบียนเครื่องมือวัด — โหลดครั้งเดียว ใช้ร่วมกันทุกข้อในแม่แบบ
+  useEffect(() => {
+    let cancelled = false;
+    void supabase.rpc(MEASURING_DEVICES_RPC).then(({ data, error }) => {
+      if (cancelled) return;
+      if (!error) setDevices(parseMeasuringDevices(data));
+      setDevicesLoaded(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   // เฟส 4: โหลดโซนของงาน (คำนวณความยาวแผ่นที่ต้องใช้)
   useEffect(() => {
@@ -396,8 +475,9 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     setSaving(false);
   }
 
-  // แนบรูปหน้างาน -> Supabase Storage (bucket job-photos, public)
-  function surveyPhotoUrl(path: string): string {
+  // ลิงก์รูปใน bucket job-photos (bucket นี้เป็น public อยู่ก่อนงานนี้ ไม่ได้ถูกแก้ในงานนี้)
+  // ใช้ร่วมกันทั้งรูปสำรวจหน้างานและรูปหลักฐานผลตรวจรับ เพื่อไม่ให้มีสองวิธีอ่านรูปจาก bucket เดียวกัน
+  function jobPhotoUrl(path: string): string {
     return supabase.storage.from("job-photos").getPublicUrl(path).data.publicUrl;
   }
   async function handleSurveyUpload(files: File[]) {
@@ -424,31 +504,100 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     setSurvey((s) => ({ ...s, photos: (s.photos ?? []).filter((p) => p !== path) }));
   }
 
+  function setEntry(code: string, patch: Partial<AcceptanceEntry>) {
+    setAcceptance((current) => ({ ...current, [code]: { ...(current[code] ?? emptyAcceptanceEntry()), ...patch } }));
+  }
+
+  /**
+   * แนบรูปหลักฐานของเกณฑ์หนึ่งข้อ — ใช้ bucket job-photos และวิธีอัปโหลดชุดเดียวกับรูปสำรวจ/รูปหน้างาน
+   * ไม่สร้าง bucket ใหม่และไม่แตะสิทธิ์ของ bucket เดิม
+   * เส้นทางไฟล์แยกเป็น acceptance/<เลขงาน>/<รหัสเกณฑ์>/ เพื่อให้ตามหาหลักฐานของข้อไหนก็ได้ในภายหลัง
+   * รูปที่อัปโหลดสำเร็จจะยังไม่ถูกบันทึกจนกว่าจะกด "บันทึกผลตรวจรับ" — จึงต้องบอกบนจอให้ชัด
+   */
+  async function uploadAcceptancePhotos(code: string, files: File[]) {
+    if (!files.length) return;
+    if (!canEditQc) { toast.error(QC_ROLE_NOTICE); return; }
+    setUploadingCode(code);
+    const added: string[] = [];
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = `acceptance/${job.jobNo}/${code}/${Date.now()}-${i}-${safe}`;
+        const { error } = await supabase.storage.from("job-photos").upload(path, file, { upsert: false, contentType: file.type || "image/jpeg" });
+        if (error) throw error;
+        added.push(path);
+      }
+      setAcceptance((current) => {
+        const entry = current[code] ?? emptyAcceptanceEntry();
+        return { ...current, [code]: { ...entry, photoPaths: [...entry.photoPaths, ...added] } };
+      });
+      toast.success(`แนบรูปหลักฐานข้อ ${code} แล้ว ${added.length} รูป — อย่าลืมกดบันทึกผลตรวจรับ`);
+    } catch (e: unknown) {
+      toast.error(floorActionError(`อัปโหลดรูปหลักฐานของเกณฑ์ ${code}`, e));
+    }
+    setUploadingCode(null);
+  }
+
+  function removeAcceptancePhoto(code: string, path: string) {
+    setAcceptance((current) => {
+      const entry = current[code] ?? emptyAcceptanceEntry();
+      return { ...current, [code]: { ...entry, photoPaths: entry.photoPaths.filter((item) => item !== path) } };
+    });
+  }
+
+  /**
+   * บันทึกผลตรวจรับผ่าน RPC save_job_acceptance_results
+   *
+   * ทำไมไม่เขียน install_jobs.qc_data เองอีกต่อไป: RPC ตัวนี้เขียนแถวจริงลง job_acceptance_results
+   * แล้ว "sync" qc_data ให้ในทรานแซกชันเดียวกัน หน้าจอเก่าที่อ่าน qc_data จึงยังทำงานเหมือนเดิมทุกอย่าง
+   * ถ้าหน้าจอเขียน qc_data เองด้วย จะกลายเป็นสองมือเขียนค่าเดียวกันและมีวันที่ไม่ตรงกันแน่นอน
+   */
   async function saveQC() {
     // กันข้อมูลหาย: ถ้ายังโหลดผลเดิมไม่สำเร็จ การเขียนทั้งก้อนจากหน่วยความจำจะลบผลตรวจรับเดิมทิ้ง
     const blocked = qcSaveBlockReason(qcLoadState);
     if (blocked) { toast.error(blocked); return; }
     if (!canEditQc) { toast.error(QC_ROLE_NOTICE); return; }
+    if (checklist.origin !== "template") {
+      toast.error("ตอนนี้หน้าจอกำลังใช้เกณฑ์ชุดสำรองในโปรแกรม ไม่ใช่แม่แบบที่เปิดใช้งานอยู่ จึงบันทึกผลตรวจรับไม่ได้ — ผลที่บันทึกต้องผูกกับแม่แบบรุ่นจริงเท่านั้น");
+      return;
+    }
+    const saveBlocks = acceptanceSaveBlocks(checklist.items, acceptance);
+    if (saveBlocks.length) { toast.error(saveBlocks[0], { duration: 12000 }); return; }
     setSaving(true);
     try {
-      const qcPayload: QCData = {
-        results: qcResults,
-        inspector: qcInspector,
-        notes: qcNotes,
-        savedAt: new Date().toISOString(),
-        templateId: checklist.templateId,
-        templateVersion: checklist.version,
-      };
-      const { error } = await supabase
-        .from("install_jobs")
-        .update({ qc_data: JSON.stringify(qcPayload) })
-        .eq("job_no", job.jobNo);
+      const { error } = await supabase.rpc(ACCEPTANCE_SAVE_RPC, {
+        p_job_no: job.jobNo,
+        p_inspector: qcInspector.trim(),
+        p_notes: qcNotes.trim(),
+        p_results: buildAcceptanceResultsPayload(checklist.items, acceptance),
+      });
       if (error) throw error;
-      toast.success("บันทึก QC แล้ว");
+      toast.success("บันทึกผลตรวจรับแล้ว");
+      await loadAcceptance();
+      await loadGate();
     } catch (e: unknown) {
-      toast.error(floorActionError("บันทึกผลตรวจ QC", e));
+      toast.error(floorActionError("บันทึกผลตรวจรับ", e), { duration: 15000 });
     }
     setSaving(false);
+  }
+
+  /**
+   * ลายเซ็นรับรองชั้นที่สอง — มีความหมายเฉพาะงานของทีมภายนอก (provider_type = 'subcontract')
+   * ปุ่มนี้จึงถูกซ่อนทั้งหมดบนงานทีมภายใน ไม่ใช่แสดงแล้วกดไม่ได้
+   */
+  async function verifyAcceptance() {
+    setVerifying(true);
+    try {
+      const { error } = await supabase.rpc(ACCEPTANCE_VERIFY_RPC, { p_job_no: job.jobNo, p_item_codes: null });
+      if (error) throw error;
+      toast.success("เซ็นรับรองผลตรวจรับชั้นที่สองแล้ว");
+      await loadAcceptance();
+      await loadGate();
+    } catch (e: unknown) {
+      toast.error(floorActionError("รับรองผลตรวจรับชั้นที่สอง", e), { duration: 15000 });
+    }
+    setVerifying(false);
   }
 
   // S2: log a call attempt
@@ -638,10 +787,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
 
   // นับเฉพาะข้อที่แสดงอยู่จริงในแม่แบบรุ่นปัจจุบัน ไม่นับผลของข้อที่ถูกถอดออกจากแม่แบบไปแล้ว
   // (ผลของข้อเก่ายังอยู่ใน qc_data ไม่ได้ถูกลบ แต่ไม่ควรเอามาโชว์ว่า "ตอบครบ" ทั้งที่ข้อนั้นไม่มีแล้ว)
-  const qcShownResults = checklist.items.map((item) => qcResults[item.code] ?? null);
-  const qcAnswered = qcShownResults.filter(Boolean).length;
-  const qcPass = qcShownResults.filter((v) => v === "pass").length;
-  const qcFail = qcShownResults.filter((v) => v === "fail").length;
+  const qcProgress = acceptanceProgress(checklist.items, acceptance);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
@@ -676,7 +822,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
               {n > 1 && (
                 <button onClick={(e) => { e.stopPropagation(); go(-1); }} className="absolute left-2 bg-white/85 hover:bg-white text-slate-800 rounded-full w-11 h-11 text-2xl font-bold flex items-center justify-center shadow-lg">‹</button>
               )}
-              <img src={surveyPhotoUrl(photos[previewIdx])} alt="รูปขยาย" className="max-w-full max-h-[82vh] object-contain rounded-lg shadow-2xl" />
+              <img src={jobPhotoUrl(photos[previewIdx])} alt="รูปขยาย" className="max-w-full max-h-[82vh] object-contain rounded-lg shadow-2xl" />
               {n > 1 && (
                 <button onClick={(e) => { e.stopPropagation(); go(1); }} className="absolute right-2 bg-white/85 hover:bg-white text-slate-800 rounded-full w-11 h-11 text-2xl font-bold flex items-center justify-center shadow-lg">›</button>
               )}
@@ -1185,7 +1331,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                     {survey.photos!.map((p, idx) => (
                       <div key={p} className="relative">
                         <button type="button" onClick={() => { setShowQueue(false); setPreviewIdx(idx); }} className="block w-full" title="กดเพื่อดูรูปขยายด้านซ้าย">
-                          <img src={surveyPhotoUrl(p)} alt="รูปหน้างาน" className="w-full h-20 object-cover rounded-lg border border-gray-200 hover:ring-2 hover:ring-blue-400" />
+                          <img src={jobPhotoUrl(p)} alt="รูปหน้างาน" className="w-full h-20 object-cover rounded-lg border border-gray-200 hover:ring-2 hover:ring-blue-400" />
                         </button>
                         <button onClick={() => removeSurveyPhoto(p)} className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-5 h-5 text-xs leading-none flex items-center justify-center">×</button>
                       </div>
@@ -1224,6 +1370,26 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 </p>
               </div>
 
+              {/* กฎการปิดงานต้องอ่านได้ "ตอนกรอก" ไม่ใช่รู้ตอนถูกปฏิเสธตอนกดปิดงาน */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs leading-relaxed text-slate-700">
+                <div className="font-semibold text-slate-800">{ACCEPTANCE_RULE_HEADLINE}</div>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                  {ACCEPTANCE_RULE_NOTICE_LINES.map((line) => <li key={line}>{line}</li>)}
+                </ul>
+              </div>
+
+              {gate !== undefined ? (
+                <div className={`rounded-lg border p-2.5 text-xs leading-relaxed ${gate?.ok ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+                  <div className="font-semibold">{gate?.ok ? "✅ " : "⛔ "}{gateHeadline(gate)}</div>
+                  {gate && !gate.ok ? (
+                    <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                      {gate.missing.map((miss) => <li key={`${miss.code}-${miss.reason}`}>{gateMissingLine(miss)}</li>)}
+                    </ul>
+                  ) : null}
+                  <p className="mt-1 text-[11px] opacity-80">สถานะนี้มาจากด่านเดียวกับที่ใช้ตอนปิดงานจริง (job_acceptance_gate) จึงตรงกับสิ่งที่จะเกิดขึ้นตอน CS กดปิดงาน</p>
+                </div>
+              ) : null}
+
               {roleChecked && !canEditQc ? (
                 <div className="rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-800">{QC_ROLE_NOTICE}</div>
               ) : null}
@@ -1238,18 +1404,26 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
               ) : null}
 
               {checklist.origin === "loading" ? null : (
-                <div className="flex items-center gap-3 text-xs">
-                  <span className="text-gray-500">ตอบแล้ว {qcAnswered}/{checklist.items.length} ข้อ</span>
-                  <span className="text-emerald-700 font-medium">ผ่าน {qcPass}</span>
-                  <span className="text-red-700 font-medium">ไม่ผ่าน {qcFail}</span>
+                <div className="flex flex-wrap items-center gap-3 text-xs">
+                  <span className="text-gray-500">ตอบแล้ว {qcProgress.answered}/{qcProgress.total} ข้อ</span>
+                  <span className="text-emerald-700 font-medium">ผ่าน {qcProgress.pass}</span>
+                  <span className="text-red-700 font-medium">ไม่ผ่าน {qcProgress.fail}</span>
+                  <span className="text-gray-500">ไม่เกี่ยวข้อง {qcProgress.na}</span>
+                  {qcProgress.blocking > 0 ? <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">ยังขวางการปิดงาน {qcProgress.blocking} ข้อ</span> : null}
                 </div>
               )}
 
               <div className="space-y-2">
                 {checklist.items.map((item, index) => {
-                  const value = qcResults[item.code] ?? null;
+                  const entry = acceptance[item.code] ?? emptyAcceptanceEntry();
+                  const value = entry.result;
+                  const saveBlock = acceptanceItemSaveBlock(item, entry);
+                  const closeWarning = acceptanceItemCloseWarning(item, entry);
+                  const options = deviceOptions(devices, item.measuringDeviceKind);
+                  const deviceNotice = deviceSelectNotice(devices, item.measuringDeviceKind);
+                  const editable = canEditQc && qcLoadState === "ready";
                   return (
-                    <div key={item.code} className="rounded-lg border border-gray-200 p-2.5">
+                    <div key={item.code} className={`rounded-lg border p-2.5 ${saveBlock ? "border-red-300 bg-red-50/40" : closeWarning ? "border-amber-200 bg-amber-50/40" : "border-gray-200"}`}>
                       <div className="flex items-start gap-2">
                         <span className="mt-0.5 rounded border border-gray-300 bg-gray-50 px-1.5 py-0.5 font-mono text-[11px] text-gray-600" title="รหัสถาวรของเกณฑ์ข้อนี้ ใช้อ้างอิงผลตรวจรับย้อนหลัง">{item.code}</span>
                         <div className="flex-1 min-w-0">
@@ -1257,7 +1431,8 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                           <div className="mt-0.5 text-xs text-gray-500">
                             {item.spec ? `เกณฑ์: ${item.spec}` : "ไม่ได้ระบุค่าเกณฑ์"}
                             {item.measuringDeviceKind ? ` · เครื่องมือ: ${item.measuringDeviceKind}` : ""}
-                            {item.isCritical ? " · ข้อสำคัญ" : ""}
+                            {item.isCritical ? " · ข้อสำคัญ (ไม่ผ่าน = ปิดงานไม่ได้)" : ""}
+                            {item.requiresPhoto ? " · ต้องแนบรูปหลักฐาน" : ""}
                           </div>
                         </div>
                       </div>
@@ -1271,8 +1446,8 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                             <button
                               key={key}
                               type="button"
-                              disabled={!canEditQc || qcLoadState !== "ready"}
-                              onClick={() => setQcResults((current) => ({ ...current, [item.code]: on ? null : key }))}
+                              disabled={!editable}
+                              onClick={() => setEntry(item.code, { result: on ? null : key })}
                               className={`min-h-9 rounded-lg border px-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${on ? tone : "border-gray-200 text-gray-500 hover:bg-gray-50"}`}
                             >
                               {label}
@@ -1280,6 +1455,99 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                           );
                         })}
                       </div>
+
+                      {value ? (
+                        <div className="mt-2 space-y-2">
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <label className="block text-[11px] text-gray-500">
+                              ค่าที่วัดได้
+                              <input
+                                value={entry.measuredValue}
+                                disabled={!editable}
+                                onChange={(e) => setEntry(item.code, { measuredValue: e.target.value })}
+                                placeholder={item.spec ? `เทียบกับเกณฑ์ ${item.spec}` : "เช่น 0.8 mm"}
+                                className="mt-1 w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:bg-gray-50"
+                              />
+                            </label>
+                            {item.measuringDeviceKind ? (
+                              <label className="block text-[11px] text-gray-500">
+                                เครื่องมือที่ใช้วัด
+                                {options.length ? (
+                                  <select
+                                    value={entry.measuringDeviceId ?? ""}
+                                    disabled={!editable}
+                                    onChange={(e) => setEntry(item.code, { measuringDeviceId: e.target.value || null })}
+                                    className="mt-1 w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:bg-gray-50"
+                                  >
+                                    <option value="">ไม่ระบุเครื่องมือ</option>
+                                    {options.map((device) => (
+                                      <option key={device.id} value={device.id}>
+                                        {device.code} · {device.kind}{device.isOverdue ? " · เลยกำหนดสอบเทียบ" : ""}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <div className="mt-1 rounded-lg border border-dashed border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-800">
+                                    {devicesLoaded ? (deviceNotice ?? NO_MEASURING_DEVICES_HINT) : "กำลังโหลดทะเบียนเครื่องมือวัด…"}
+                                  </div>
+                                )}
+                              </label>
+                            ) : null}
+                          </div>
+                          {options.length && deviceNotice ? (
+                            <p className="text-[11px] leading-relaxed text-amber-700">{deviceNotice}</p>
+                          ) : null}
+
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-[11px] text-gray-500">
+                                รูปหลักฐาน {entry.photoPaths.length} รูป{item.requiresPhoto ? " · ข้อนี้ต้องมีอย่างน้อย 1 รูป" : ""}
+                              </span>
+                              {editable ? (
+                                <label className={`cursor-pointer rounded-lg border px-2 py-1 text-[11px] font-medium ${saveBlock ? "border-red-400 bg-white text-red-700" : "border-gray-300 bg-white text-gray-600"}`}>
+                                  {uploadingCode === item.code ? "กำลังอัปโหลด…" : "📷 แนบรูป"}
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    className="hidden"
+                                    disabled={uploadingCode !== null}
+                                    onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ""; void uploadAcceptancePhotos(item.code, files); }}
+                                  />
+                                </label>
+                              ) : null}
+                            </div>
+                            {entry.photoPaths.length ? (
+                              <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+                                {entry.photoPaths.map((path) => (
+                                  <div key={path} className="relative aspect-square overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={jobPhotoUrl(path)} alt={`หลักฐาน ${item.code}`} className="h-full w-full object-cover" />
+                                    {editable ? (
+                                      <button type="button" aria-label="ลบรูปนี้" onClick={() => removeAcceptancePhoto(item.code, path)} className="absolute right-0.5 top-0.5 rounded bg-black/60 px-1 text-[10px] text-white">✕</button>
+                                    ) : null}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <label className="block text-[11px] text-gray-500">
+                            หมายเหตุของข้อนี้
+                            <input
+                              value={entry.note}
+                              disabled={!editable}
+                              onChange={(e) => setEntry(item.code, { note: e.target.value })}
+                              placeholder="สิ่งที่พบ / สิ่งที่แก้ไปแล้ว"
+                              className="mt-1 w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:bg-gray-50"
+                            />
+                          </label>
+                        </div>
+                      ) : null}
+
+                      {saveBlock ? <p className="mt-2 rounded bg-red-100 px-2 py-1 text-[11px] font-medium text-red-800">⛔ {saveBlock}</p>
+                        : closeWarning ? <p className="mt-2 rounded bg-amber-100 px-2 py-1 text-[11px] text-amber-800">⚠️ {closeWarning}</p>
+                        : null}
                     </div>
                   );
                 })}
@@ -1309,9 +1577,39 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                 </label>
               </div>
 
+              {/*
+                รับรองชั้นที่สอง — โผล่เฉพาะงานของทีมภายนอก (tech_teams.provider_type = 'subcontract')
+                วันนี้ทุกทีมเป็นทีมภายใน (provider_type เป็น NULL ทั้งหมด) ส่วนนี้จึงไม่ขึ้นบนงานจริงสักงาน
+                และนั่นถูกต้องแล้ว: ปุ่มที่กดแล้วไม่มีความหมายบนงานทีมภายใน มีค่าเท่ากับปุ่มที่พัง
+              */}
+              {shouldShowExternalVerification(gate ?? null) ? (
+                <div className="rounded-lg border border-violet-300 bg-violet-50 p-2.5 text-xs leading-relaxed text-violet-900">
+                  <div className="font-semibold">🖊️ การรับรองชั้นที่สอง (งานทีมภายนอก)</div>
+                  <p className="mt-0.5">{externalVerificationNotice(gate ?? null)}</p>
+                  <p className="mt-1 text-[11px] opacity-80">คนที่บันทึกผลเองเซ็นรับรองให้ตัวเองไม่ได้ — ต้องให้คนอื่นในทีมออฟฟิศ (ผู้ดูแลระบบ / หัวหน้าช่าง / CS) เป็นผู้เซ็น</p>
+                  <button
+                    type="button"
+                    onClick={() => void verifyAcceptance()}
+                    disabled={verifying || qcLoadState !== "ready"}
+                    className="mt-2 w-full rounded-lg bg-violet-600 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                  >
+                    {verifying ? "กำลังบันทึกการรับรอง…" : "เซ็นรับรองผลตรวจรับทั้งงาน"}
+                  </button>
+                </div>
+              ) : null}
+
+              {acceptanceSaveBlocks(checklist.items, acceptance).length ? (
+                <div className="rounded-lg border border-red-300 bg-red-50 p-2.5 text-xs leading-relaxed text-red-800">
+                  <div className="font-semibold">ยังบันทึกไม่ได้ — ฐานข้อมูลจะปฏิเสธด้วยเหตุผลนี้</div>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                    {acceptanceSaveBlocks(checklist.items, acceptance).map((reason) => <li key={reason}>{reason}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+
               <button
                 onClick={saveQC}
-                disabled={saving || !canEditQc || qcLoadState !== "ready"}
+                disabled={saving || !canEditQc || qcLoadState !== "ready" || checklist.origin !== "template" || acceptanceSaveBlocks(checklist.items, acceptance).length > 0}
                 title={!canEditQc && roleChecked ? QC_ROLE_NOTICE : (qcSaveBlockReason(qcLoadState) ?? undefined)}
                 className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
               >
@@ -1320,8 +1618,14 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
                   : !canEditQc ? "🔒 ไม่มีสิทธิ์บันทึกผลตรวจรับ"
                   : qcLoadState === "loading" ? "กำลังโหลดผลตรวจรับเดิม…"
                   : qcLoadState === "error" ? "⛔ บันทึกไม่ได้ — อ่านผลเดิมไม่สำเร็จ"
+                  : checklist.origin === "loading" ? "กำลังโหลดแม่แบบเกณฑ์ตรวจรับ…"
+                  : checklist.origin !== "template" ? "⛔ บันทึกไม่ได้ — กำลังใช้เกณฑ์ชุดสำรองในโปรแกรม"
+                  : acceptanceSaveBlocks(checklist.items, acceptance).length ? "⛔ บันทึกไม่ได้ — ยังขาดรูปหลักฐาน"
                   : "💾 บันทึกผลตรวจรับ"}
               </button>
+              <p className="text-[11px] leading-relaxed text-gray-500">
+                การบันทึกจะเขียนผลลงตาราง job_acceptance_results เป็นรายข้อ พร้อมอัปเดตสรุปใน qc_data ของงานให้หน้าจอเดิมอ่านต่อได้เหมือนเดิม
+              </p>
             </div>
           )}
 
