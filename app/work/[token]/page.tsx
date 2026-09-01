@@ -13,6 +13,7 @@ import {
 } from "@/lib/job-checklist";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import RemnantReportForm, { MaterialMovement, RemnantReportData } from "@/components/technician/remnant-report-form";
+import TechnicianReceiptConfirmation from "@/components/technician/receipt-confirmation";
 import TechnicianPushButton from "@/components/notifications/technician-push-button";
 import TicketChat from "@/components/tickets/ticket-chat";
 import LendiSkeleton from "@/components/brand/lendi-skeleton";
@@ -769,6 +770,15 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
               <div className="mb-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800">สถานะ: {{ head_review: "รอหัวหน้าช่างตรวจ", returned_sales: "ส่งกลับฝ่ายขาย", warehouse_waiting: "รอคลังรับงาน", warehouse_preparing: "กำลังเตรียมสินค้า", ready_to_install: "รอติดตั้ง", installing: "กำลังติดตั้ง", waiting_cs: "รอ CS โทรประเมิน", closed: "ปิดงานแล้ว", cancelled: "ยกเลิก" }[centralWorkOrder.status] ?? centralWorkOrder.status}</div>
               <div className="space-y-2">{centralWorkOrder.items.map((item) => isFreeformWorkNote(item) ? <div key={item.id} className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm"><div className="font-semibold text-violet-950">📝 โน้ต Freeform จากหัวหน้าช่าง</div><div className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-violet-900">{item.note || "—"}</div></div> : <div key={item.id} className="rounded-xl border border-slate-200 p-3 text-sm"><div className="font-medium text-slate-900">{item.itemName}{item.sku ? ` · ${item.sku}` : ""}</div><div className="mt-1 text-xs text-slate-500">{item.specification || "ไม่ระบุสเปก"} · ตามแผน {item.plannedQty} {item.unit} · หยิบจริง {item.actualQty ?? "—"} {item.unit}</div>{item.note ? <div className="mt-1 text-xs text-amber-700">{item.note}</div> : null}</div>)}</div>
               {centralWorkOrder.note ? <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">หมายเหตุ: {centralWorkOrder.note}</div> : null}
+            </WorkSection> : null}
+            {/* P3-6: ช่างยืนยันของที่มาถึงจริงทีละบรรทัด และแจ้ง "ได้ไม่ครบ + เหตุผล"
+                วางไว้ต่อจากใบสั่งงานที่คลังเตรียมให้โดยตั้งใจ — ช่างอ่านว่าคลังบอกอะไร แล้วตอบทันทีในหน้าจอเดียวกัน
+                คิวทีมยังไม่มีใบมอบหมายรายบุคคล จึงเรียก RPC (ที่ผูกด่านกับใบมอบหมาย) ไม่ได้ และเราไม่ลดด่านลง */}
+            {selected.assignmentId && !selected.isTeamQueue ? <WorkSection
+              title="📦 ตรวจรับของที่มาถึงหน้างาน"
+              subtitle="ยืนยันทีละรายการ — ถ้าได้ไม่ครบให้บอกเหตุผล แล้วระบบจะเปิดเรื่องให้เอง ไม่ต้องโทรแจ้งซ้ำ"
+            >
+              <TechnicianReceiptConfirmation token={token} pin={pin.trim()} assignmentId={selected.assignmentId} demoMode={demoMode} />
             </WorkSection> : null}
           </div>
 
