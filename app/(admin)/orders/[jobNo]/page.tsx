@@ -334,7 +334,10 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
   // ส่ง id ของบรรทัดเดิมไปด้วย เพื่อให้ confirm_floor_work_order_v3 แก้ทับที่เดิมแทนการลบแล้วสร้างใหม่
   // ถ้าไม่ส่ง id ทุกบรรทัดจะกลายเป็นบรรทัดใหม่ และคอลัมน์ที่ payload ไม่ได้พูดถึง
   // (template_item_id / material_id / item_kind / is_manual_override / picked_qty) จะหายทั้งใบ
-  function rpcItems(unknownSkus: Set<string>) { return items.map((item) => { const isException = item.category === "floor_material" && unknownSkus.has(item.sku.trim()); return { ...(item.id ? { id: item.id } : {}), category: item.category, itemName: item.itemName.trim(), sku: item.sku.trim(), specification: item.specification.trim(), plannedQty: Number(item.plannedQty), unit: item.unit.trim(), sourceType: isException ? "other" : item.sourceType, note: isException ? `[อนุมัติ SKU นอกคลัง]${item.note.trim() ? ` ${item.note.trim()}` : ""}` : item.note.trim() }; }); }
+  // D6: ส่ง itemKind ไปด้วยทุกบรรทัด มิฉะนั้นบรรทัดเครื่องมือที่หัวหน้าช่างพิมพ์เองจะไม่มี item_kind = 'tool'
+  // และจะไม่โผล่ในรายการ "เครื่องมือค้างคืน" ตลอดไป (v3 เดิมไม่เคยเขียนคอลัมน์นี้เลย)
+  // บรรทัดที่หน้าจอไม่รู้ชนิด (itemKind = null) ปล่อยให้ฝั่ง SQL เดาจาก category ตามกติกาเดียว
+  function rpcItems(unknownSkus: Set<string>) { return items.map((item) => { const isException = item.category === "floor_material" && unknownSkus.has(item.sku.trim()); return { ...(item.id ? { id: item.id } : {}), category: item.category, itemName: item.itemName.trim(), sku: item.sku.trim(), specification: item.specification.trim(), plannedQty: Number(item.plannedQty), unit: item.unit.trim(), sourceType: isException ? "other" : item.sourceType, itemKind: item.itemKind, note: isException ? `[อนุมัติ SKU นอกคลัง]${item.note.trim() ? ` ${item.note.trim()}` : ""}` : item.note.trim() }; }); }
 
   async function confirmOrder() {
     if (!order) return; if (!items.length || items.some((item) => isFreeformNote(item) ? !item.note.trim() : !item.itemName.trim() || !item.unit.trim() || item.plannedQty === "" || Number(item.plannedQty) < 0 || (item.category === "floor_material" && !item.sku.trim()))) { toast.error("กรอก SKU ชื่อรายการ จำนวน และหน่วยให้ครบทุกบรรทัด หรือพิมพ์ข้อความในโน้ต Freeform"); return; }
