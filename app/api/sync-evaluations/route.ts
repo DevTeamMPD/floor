@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { fetchGoogleSurvey } from "@/lib/evaluations/google-survey";
+import { processCsatAutomationJobs } from "@/lib/csat/automation-worker";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,8 @@ async function runSync() {
       .select("job_no");
     if (!error) updated += (data ?? []).length;
   }
-  return { surveyed: latestByBill.size, updated, questionCount: survey.questions.length };
+  const automation = await processCsatAutomationJobs();
+  return { surveyed: latestByBill.size, updated, questionCount: survey.questions.length, automation };
 }
 
 export async function GET(request: Request) {

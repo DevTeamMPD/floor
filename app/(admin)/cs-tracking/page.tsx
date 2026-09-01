@@ -112,7 +112,17 @@ function EvalModal({ row, questions, readOnly = false, onClose, onSaved }: {
         const { error } = await supabase.from("job_evaluations").insert({ ...payload, created_at: new Date().toISOString() });
         if (error) throw error;
       }
-      toast.success("บันทึกการประเมินแล้ว");
+      const automationResponse = await fetch("/api/csat/process", { method: "POST" }).catch(() => null);
+      if (score <= 2) {
+        if (automationResponse?.ok) {
+          const result = await automationResponse.json() as { created?: number; duplicate?: number };
+          toast.success(result.created ? "บันทึกแล้ว และเปิดเคสหลังการขายอัตโนมัติ" : "บันทึกแล้ว เคสหลังการขายถูกเชื่อมไว้แล้ว");
+        } else {
+          toast.warning("บันทึกแล้ว ระบบจะเปิดเคสหลังการขายจากคิวอัตโนมัติ");
+        }
+      } else {
+        toast.success("บันทึกการประเมินแล้ว");
+      }
       onSaved(); onClose();
     } catch (e: unknown) {
       toast.error(floorActionError("บันทึกผลประเมินลูกค้า", e));
@@ -330,7 +340,7 @@ function CsTrackingInner() {
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-xl font-bold text-gray-900">📞 CS ติดตามความพึงพอใจ</h1>
-            <p className="text-xs text-gray-500 mt-0.5">งานสถานะ ✅ เสร็จสิ้น — ทุกรายการต้องมีการโทรประเมิน</p>
+            <p className="text-xs text-gray-500 mt-0.5">โทรหลังลูกค้าเซ็นครบ 3 วัน · คะแนน 1–2 เปิดเคสหลังการขายอัตโนมัติ</p>
           </div>
           <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="ค้นหา เลขงาน / ลูกค้า / สินค้า..."
