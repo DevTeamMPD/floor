@@ -45,6 +45,9 @@ export interface WorkOrderItem {
   // ทุกตัวเป็น null ได้ เพราะแถวเดิมก่อน branch นี้ไม่เคยมีค่า
   material_id?: string | null; item_kind?: "consumable" | "tool" | null; template_item_id?: string | null;
   is_manual_override?: boolean; picked_qty?: number | null; returned_qty?: number | null; used_qty?: number | null;
+  // P3-5: ผลการหยิบรายบรรทัดของคลัง — null ทั้งหมดในแถวเดิม เพราะยังไม่เคยมีใครหยิบผ่านทางนี้
+  pick_status?: "picked_full" | "picked_partial" | "unavailable" | null;
+  picked_by?: string | null; picked_at?: string | null; pick_note?: string | null;
 }
 
 export interface WorkOrderEvent {
