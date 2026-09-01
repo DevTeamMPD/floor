@@ -20,7 +20,7 @@ import {
 function line(overrides: Partial<TechnicianReceiptLine> = {}): TechnicianReceiptLine {
   return {
     itemId: "item-1", category: "floor_material", itemName: "กระเบื้องยาง", sku: "SKU-1",
-    specification: null, unit: "แผ่น", note: null,
+    sourceType: "new", specification: null, unit: "แผ่น", note: null,
     plannedQty: 10, actualQty: null, pickedQty: 10, pickStatus: "picked_full",
     pickNote: null, expectedQty: 10, receipt: null,
     ...overrides,
@@ -182,12 +182,41 @@ describe("parseReceiptPayload", () => {
 });
 
 describe("บรรทัดโน้ตของหัวหน้าช่างไม่ใช่ของที่ต้องตรวจรับ", () => {
-  it("ระบุบรรทัดโน้ตด้วยเงื่อนไขเดียวกับหน้าช่างเดิม", () => {
-    const note = line({ category: "tool", plannedQty: 0, unit: "รายการ", itemName: "โน้ต Freeform จากหัวหน้าช่าง" });
-    expect(isNoteOnlyLine(note)).toBe(true);
+  /** บรรทัดโน้ตจริง — ค่าทุกช่องตรงกับที่ emptyFreeformNote() สร้าง และตรงกับ 3 แถวในโปรดักชัน */
+  const realNote = () => line({
+    itemId: "note", category: "tool", sourceType: "other", sku: null,
+    itemName: "โน้ต Freeform จากหัวหน้าช่าง", plannedQty: 0, unit: "รายการ",
+  });
+
+  it("ระบุบรรทัดโน้ตด้วยเงื่อนไขเดียวกับหน้าช่างเดิม ครบทั้ง 6 ข้อ", () => {
+    expect(isNoteOnlyLine(realNote())).toBe(true);
     expect(isNoteOnlyLine(line())).toBe(false);
-    expect(isNoteOnlyLine(line({ category: "tool", plannedQty: 2, unit: "รายการ" }))).toBe(false);
-    expect(confirmableLines([note, line()])).toHaveLength(1);
+    expect(confirmableLines([realNote(), line()])).toHaveLength(1);
+  });
+
+  it("เครื่องมือจริงที่ planned = 0 และหน่วยเป็น 'รายการ' ต้องไม่ถูกกรองทิ้ง (รีวิว D2)", () => {
+    // เงื่อนไขเก่าตรวจแค่ category + plannedQty + unit บรรทัดนี้จึงเข้าเงื่อนไขครบทั้งสามข้อ
+    // และถูกกรองหายไปจากหน้าจอช่างโดยไม่มีใครรู้ ทั้งที่เป็นเครื่องมือจริงที่ต้องตรวจรับ
+    const realTool = line({
+      itemId: "tool-1", category: "tool", sourceType: "other", sku: null,
+      itemName: "ยืมเครื่องเจียร 1 ชุด", plannedQty: 0, unit: "รายการ",
+    });
+    expect(isNoteOnlyLine(realTool)).toBe(false);
+    expect(confirmableLines([realTool, realNote()]).map((row) => row.itemId)).toEqual(["tool-1"]);
+  });
+
+  it("ต่างจากบรรทัดโน้ตแค่ข้อเดียวก็ไม่ใช่โน้ตแล้ว — ทั้ง 6 ข้อต้องตรงพร้อมกัน", () => {
+    expect(isNoteOnlyLine({ ...realNote(), sourceType: "new" })).toBe(false);
+    expect(isNoteOnlyLine({ ...realNote(), sku: "SKU-9" })).toBe(false);
+    expect(isNoteOnlyLine({ ...realNote(), itemName: "เครื่องมือช่าง" })).toBe(false);
+    expect(isNoteOnlyLine({ ...realNote(), category: "consumable" })).toBe(false);
+    expect(isNoteOnlyLine({ ...realNote(), plannedQty: 2 })).toBe(false);
+    expect(isNoteOnlyLine({ ...realNote(), unit: "ชิ้น" })).toBe(false);
+  });
+
+  it("plannedQty ที่ไม่รู้ค่า (null) ไม่ใช่ศูนย์ จึงไม่ใช่บรรทัดโน้ต", () => {
+    expect(isNoteOnlyLine({ ...realNote(), plannedQty: null })).toBe(false);
+    expect(isNoteOnlyLine({ ...realNote(), plannedQty: "0" })).toBe(true);
   });
 });
 
@@ -197,7 +226,8 @@ describe("summariseReceipts", () => {
       line({ itemId: "a", receipt: { status: "received_full", receivedQty: 10, expectedQty: 10, shortageQty: 0, reasonCode: null, reasonNote: null, ncrId: null, technicianName: "ช่าง", confirmedAt: "x" } }),
       line({ itemId: "b", receipt: { status: "received_partial", receivedQty: 4, expectedQty: 6, shortageQty: 2, reasonCode: "not_loaded", reasonNote: null, ncrId: "ncr-1", technicianName: "ช่าง", confirmedAt: "x" } }),
       line({ itemId: "c", receipt: null }),
-      line({ itemId: "d", category: "tool", plannedQty: 0, unit: "รายการ", receipt: null }),
+      // บรรทัดโน้ตจริงต้องครบทั้ง 6 เงื่อนไข ไม่ใช่แค่ category + plannedQty + unit (รีวิว D2)
+      line({ itemId: "d", category: "tool", sourceType: "other", sku: null, itemName: "โน้ต Freeform จากหัวหน้าช่าง", plannedQty: 0, unit: "รายการ", receipt: null }),
     ]);
     expect(progress).toEqual({ total: 3, confirmed: 2, pending: 1, shortLines: 1, ncrCount: 1, allConfirmed: false });
   });

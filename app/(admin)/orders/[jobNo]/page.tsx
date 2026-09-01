@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import { floorErrorMessage } from "@/lib/floor-error-message";
+import { isFreeformWorkNote } from "@/lib/freeform-work-note";
 import { createClient } from "@/lib/supabase/client";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import TechnicianAssignmentButton from "@/components/appointments/technician-assignment";
@@ -54,8 +55,9 @@ function emptyItem(category: WorkItemCategory = "floor_material"): DraftItem {
 // A freeform instruction is deliberately stored as a non-stock "tool" row.
 // It remains part of the central work order and technician view, but has zero
 // planned/actual quantity and is never treated as an inventory pick.
+// แก้ตามรีวิว D2: ใช้กฎตัวเดียวกับทุกหน้าจอจาก lib/freeform-work-note.ts ไม่ลอกเงื่อนไขมาเขียนซ้ำ
 function isFreeformNote(item: DraftItem) {
-  return item.category === "tool" && item.sourceType === "other" && item.sku === "" && item.plannedQty === "0" && item.unit === "รายการ" && item.itemName === "โน้ต Freeform จากหัวหน้าช่าง";
+  return isFreeformWorkNote(item);
 }
 function emptyFreeformNote(): DraftItem {
   return { ...emptyItem("tool"), itemName: "โน้ต Freeform จากหัวหน้าช่าง", plannedQty: "0", actualQty: "0", unit: "รายการ", sourceType: "other" };

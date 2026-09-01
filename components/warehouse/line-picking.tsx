@@ -27,6 +27,7 @@ import {
   isPickStatus,
   num,
   pickNoteError,
+  pickableLines,
   qtyText,
   resolvePickedQty,
   stockBesideLineLabel,
@@ -76,14 +77,19 @@ export default function WarehouseLinePicking({
       setLoading(false);
       return;
     }
-    const rows = toWarehousePickLines(data);
+    const allRows = toWarehousePickLines(data);
+    // แก้ตามรีวิว D5: บรรทัด "โน้ต Freeform จากหัวหน้าช่าง" ไม่ใช่ของ ห้ามมีปุ่มหยิบ
+    // ใช้กฎตัวเดียวกับฝั่งช่าง (lib/freeform-work-note.ts) ไม่ใช่กฎชุดที่สองที่จะค่อย ๆ เพี้ยน
+    const rows = pickableLines(allRows);
     setLoadError(null);
     setLines(rows);
     setDraftStatus(Object.fromEntries(rows.flatMap((row) => (isPickStatus(row.pick_status) ? [[row.item_id ?? "", row.pick_status]] : []))));
     setDraftQty(Object.fromEntries(rows.map((row) => [row.item_id ?? "", row.picked_qty == null ? "" : String(num(row.picked_qty) ?? "")])));
     setDraftNote(Object.fromEntries(rows.map((row) => [row.item_id ?? "", row.pick_note ?? ""])));
     setLoading(false);
-    onLinesChanged?.(rows);
+    // ส่ง "ทุกบรรทัด" กลับให้หน้าแม่ เพราะช่อง actual_qty ของทางเดิมทั้งใบยังต้องกรอกครบทุกบรรทัด
+    // รวมบรรทัดโน้ตด้วย (complete_floor_warehouse_order_v2 ตรวจครบทั้งใบ) — กรองเฉพาะปุ่มหยิบเท่านั้น
+    onLinesChanged?.(allRows);
   }, [onLinesChanged, supabase, workOrderId]);
 
   useEffect(() => { void load(); }, [load]);
@@ -126,7 +132,7 @@ export default function WarehouseLinePicking({
     </div>;
   }
   if (!lines.length) {
-    return <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">ใบสั่งงานนี้ยังไม่มีรายการของ</div>;
+    return <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">ใบสั่งงานนี้ยังไม่มีรายการของที่ต้องหยิบ</div>;
   }
 
   return <div className="space-y-3">

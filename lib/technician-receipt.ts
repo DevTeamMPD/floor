@@ -17,6 +17,8 @@
  * ข้อบังคับฝั่ง SQL ทั้งหมดถูกพิสูจน์ด้วย probe ที่รันจริง — ดู sdd-jobtpl/p35-probes.sql (P3, P4, P5)
  */
 
+import { type FreeformWorkNoteShape, isFreeformWorkNote } from "./freeform-work-note";
+
 export const RECEIPT_STATUSES = ["received_full", "received_partial", "not_received"] as const;
 export type ReceiptStatus = typeof RECEIPT_STATUSES[number];
 
@@ -87,6 +89,8 @@ export interface TechnicianReceiptLine {
   category: string | null;
   itemName: string;
   sku: string | null;
+  /** floor_work_order_items.source_type — จำเป็นต่อการรู้ว่าบรรทัดนี้เป็นโน้ต Freeform หรือของจริง */
+  sourceType: string | null;
   specification: string | null;
   unit: string;
   note: string | null;
@@ -153,6 +157,7 @@ export function parseReceiptPayload(data: unknown): TechnicianReceiptPayload {
         category: typeof line.category === "string" ? line.category : null,
         itemName: typeof line.itemName === "string" ? line.itemName : "ไม่ระบุชื่อ",
         sku: typeof line.sku === "string" ? line.sku : null,
+        sourceType: typeof line.sourceType === "string" ? line.sourceType : null,
         specification: typeof line.specification === "string" ? line.specification : null,
         unit: typeof line.unit === "string" && line.unit.trim() ? line.unit : "หน่วย",
         note: typeof line.note === "string" ? line.note : null,
@@ -172,19 +177,19 @@ export function parseReceiptPayload(data: unknown): TechnicianReceiptPayload {
 
 /**
  * บรรทัด "โน้ต Freeform จากหัวหน้าช่าง" ไม่ใช่ของที่หยิบได้ จึงไม่ควรมีปุ่มตรวจรับ
- * เงื่อนไขเดียวกับ isFreeformWorkNote() ใน app/work/[token]/page.tsx (แหล่งเดียวกัน ตัวเลขเดียวกัน)
  *
- * P4-1: รับ shape ขั้นต่ำแทนที่จะรับ TechnicianReceiptLine ทั้งก้อน เพื่อให้แผงบันทึกยอดใช้/คืน
- * (lib/job-usage.ts) ใช้กฎ "บรรทัดไหนไม่ใช่ของ" ตัวเดียวกันได้ ไม่ต้องมีกฎชุดที่สองที่ค่อย ๆ เพี้ยนจากกัน
+ * แก้ตามรีวิว D2: เดิมฟังก์ชันนี้ "ลอก" เงื่อนไขมาแค่ 3 ใน 6 ข้อ (ขาด sourceType, sku, itemName)
+ * ทั้งที่คอมเมนต์อ้างว่าเงื่อนไขเดียวกับ isFreeformWorkNote() ผลคือของจริงถูกกรองทิ้ง
+ * เช่นบรรทัดเครื่องมือที่ planned = 0 และหน่วยเป็น "รายการ" ซึ่งช่างต้องเห็นและต้องตรวจรับ
+ * ตอนนี้ไม่ลอกแล้ว — เรียก isFreeformWorkNote() ตัวจริงจาก lib/freeform-work-note.ts ตรง ๆ
+ *
+ * ยังคงรับ shape ขั้นต่ำ เพื่อให้แผงบันทึกยอดใช้/คืน (lib/job-usage.ts) และหน้าคลัง
+ * (components/warehouse/line-picking.tsx) ใช้กฎตัวเดียวกันนี้ได้โดยไม่ต้องมีกฎชุดที่สอง
  */
-export interface NoteOnlyLineShape {
-  category: string | null;
-  plannedQty: number | string | null;
-  unit: string;
-}
+export type NoteOnlyLineShape = FreeformWorkNoteShape;
 
 export function isNoteOnlyLine(line: NoteOnlyLineShape): boolean {
-  return line.category === "tool" && (num(line.plannedQty) ?? 0) === 0 && line.unit === "รายการ";
+  return isFreeformWorkNote(line);
 }
 
 export function confirmableLines(lines: readonly TechnicianReceiptLine[]): TechnicianReceiptLine[] {

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   PICK_STATUS_LABELS,
   isPickStatus,
+  isWarehouseNoteOnlyLine,
   pickNoteError,
+  pickableLines,
   prefillActualQtyFromPicks,
   resolvePickedQty,
   stockBesideLineLabel,
@@ -17,7 +19,7 @@ function line(overrides: Partial<WarehousePickLine> = {}): WarehousePickLine {
     item_id: "item-1", prep_source: "work_order_item", category: "floor_material",
     item_name: "กระเบื้องยาง", line_sku: "SKU-1", specification: null, note: null,
     unit: "แผ่น", sort_order: 0, planned_qty: 10, actual_qty: null, picked_qty: null,
-    pick_status: null, pick_note: null, picked_at: null, picked_by_name: null,
+    pick_status: null, pick_note: null, picked_at: null, picked_by_name: null, source_type: "new",
     stock_key: "SKU-1", stock_source: "warehouse", registry_qty: null, warehouse_qty: 40,
     available_qty: 40, warehouse_name: "Samaedam_FG", snapshot_date: "2026-09-01",
     ...overrides,
@@ -179,5 +181,29 @@ describe("toWarehousePickLines", () => {
     expect(toWarehousePickLines({ nope: true })).toEqual([]);
     expect(toWarehousePickLines([null, "x", 3])).toEqual([]);
     expect(toWarehousePickLines([line()])).toHaveLength(1);
+  });
+});
+
+describe("บรรทัดโน้ตของหัวหน้าช่างต้องไม่มีปุ่มหยิบบนหน้าคลัง (รีวิว D5)", () => {
+  /** ตรงกับ 3 แถวที่มีอยู่จริงในโปรดักชันวันนี้ */
+  const note = () => line({
+    item_id: "note", category: "tool", source_type: "other", line_sku: null,
+    item_name: "โน้ต Freeform จากหัวหน้าช่าง", planned_qty: 0, unit: "รายการ",
+  });
+
+  it("กรองบรรทัดโน้ตออก แต่เก็บของจริงไว้ครบ", () => {
+    expect(isWarehouseNoteOnlyLine(note())).toBe(true);
+    expect(isWarehouseNoteOnlyLine(line())).toBe(false);
+    expect(pickableLines([note(), line(), line({ item_id: "b" })]).map((row) => row.item_id))
+      .toEqual(["item-1", "b"]);
+  });
+
+  it("ใช้กฎเดียวกับฝั่งช่าง — เครื่องมือจริงที่ planned = 0 ยังต้องหยิบได้", () => {
+    const realTool = line({
+      item_id: "tool-1", category: "tool", source_type: "other", line_sku: null,
+      item_name: "ยืมเครื่องเจียร 1 ชุด", planned_qty: 0, unit: "รายการ",
+    });
+    expect(isWarehouseNoteOnlyLine(realTool)).toBe(false);
+    expect(pickableLines([realTool, note()]).map((row) => row.item_id)).toEqual(["tool-1"]);
   });
 });

@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { floorActionError, floorErrorMessage } from "@/lib/floor-error-message";
+import { isFreeformWorkNote as isFreeformWorkNoteLine } from "@/lib/freeform-work-note";
 import {
   checklistFromRpcPayload,
   checklistProvenanceLabel,
@@ -174,8 +175,10 @@ function localDemoWorkOrder(): CentralWorkOrder {
     events: [],
   };
 }
+// แก้ตามรีวิว D2: กฎ "บรรทัดไหนไม่ใช่ของ" ย้ายไปอยู่ที่เดียวใน lib/freeform-work-note.ts
+// เพื่อไม่ให้มีสำเนาที่ค่อย ๆ เพี้ยนจากกัน (lib/technician-receipt.ts เคยลอกไปแค่ 3 ใน 6 เงื่อนไข)
 function isFreeformWorkNote(item: CentralWorkItem) {
-  return item.category === "tool" && item.sourceType === "other" && !item.sku && item.plannedQty === 0 && item.unit === "รายการ" && item.itemName === "โน้ต Freeform จากหัวหน้าช่าง";
+  return isFreeformWorkNoteLine(item);
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><div className="text-xs font-medium text-slate-400">{label}</div><div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{children || "—"}</div></div>;

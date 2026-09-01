@@ -24,6 +24,8 @@ export interface UsageLine {
   itemKind: JobItemKind | null;
   itemName: string;
   sku: string | null;
+  /** ต้องมีเพื่อให้ใช้กฎ "บรรทัดไหนไม่ใช่ของ" ตัวเดียวกับทุกหน้าจอได้ (lib/freeform-work-note.ts) */
+  sourceType: string | null;
   specification: string | null;
   unit: string;
   note: string | null;
@@ -96,6 +98,7 @@ export function parseUsagePayload(data: unknown): UsagePayload {
         itemKind: kind,
         itemName: typeof line.itemName === "string" ? line.itemName : "ไม่ระบุชื่อ",
         sku: typeof line.sku === "string" ? line.sku : null,
+        sourceType: typeof line.sourceType === "string" ? line.sourceType : null,
         specification: typeof line.specification === "string" ? line.specification : null,
         unit: typeof line.unit === "string" && line.unit.trim() ? line.unit : "หน่วย",
         note: typeof line.note === "string" ? line.note : null,

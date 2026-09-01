@@ -19,6 +19,7 @@
  * ถ้าเขียนสูตรที่สองในไฟล์นี้ วันหนึ่งเลข "ของขาด" บนหน้าคลังกับบนหน้าใบสั่งงานจะไม่ตรงกัน
  */
 
+import { excludeFreeformWorkNotes, isFreeformWorkNote } from "@/lib/freeform-work-note";
 import type { JobStockCheckRow } from "@/lib/stock-shortage";
 
 export const PICK_STATUSES = ["picked_full", "picked_partial", "unavailable"] as const;
@@ -56,6 +57,30 @@ export interface WarehousePickLine extends JobStockCheckRow {
   pick_note: string | null;
   picked_at: string | null;
   picked_by_name: string | null;
+  /** floor_work_order_items.source_type — ใช้ตัดสินว่าบรรทัดนี้เป็นโน้ตของหัวหน้าช่างหรือของจริง */
+  source_type: string | null;
+}
+
+/**
+ * แก้ตามรีวิว D5: บรรทัด "โน้ต Freeform จากหัวหน้าช่าง" ไม่ใช่ของ จึงต้องไม่มีปุ่มหยิบ
+ * ฝั่งช่างกรองบรรทัดชนิดนี้มาตั้งแต่ P3-6 แล้ว แต่ฝั่งคลังไม่ได้กรอง คนคลังจึงเห็นปุ่ม
+ * "หยิบครบ / บางส่วน / ไม่มีของ" บนบรรทัดที่ไม่มีของให้หยิบเลย (วันนี้มีอยู่จริง 3 บรรทัดในโปรดักชัน)
+ * ใช้กฎตัวเดียวกับทุกหน้าจอ — lib/freeform-work-note.ts ไม่ได้ลอกเงื่อนไขมาเขียนใหม่
+ */
+export function isWarehouseNoteOnlyLine(line: WarehousePickLine): boolean {
+  return isFreeformWorkNote({
+    category: line.category,
+    sourceType: line.source_type,
+    sku: line.line_sku,
+    itemName: line.item_name,
+    plannedQty: line.planned_qty,
+    unit: line.unit,
+  });
+}
+
+/** บรรทัดที่คลังหยิบได้จริง — ตัดโน้ตของหัวหน้าช่างออก */
+export function pickableLines(lines: readonly WarehousePickLine[]): WarehousePickLine[] {
+  return lines.filter((line) => !isWarehouseNoteOnlyLine(line));
 }
 
 export function toWarehousePickLines(data: unknown): WarehousePickLine[] {
