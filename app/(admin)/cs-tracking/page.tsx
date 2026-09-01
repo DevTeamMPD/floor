@@ -3,7 +3,17 @@ import { useState, useEffect, Suspense } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { IP_STAGES } from "@/lib/types";
 import { toast } from "sonner";
-import { floorActionError } from "@/lib/floor-error-message";
+import { floorActionError, floorErrorMessage } from "@/lib/floor-error-message";
+import {
+  ACCEPTANCE_GATE_RPC,
+  ACCEPTANCE_RULE_NOTICE_LINES,
+  ACCEPTANCE_RULE_HEADLINE,
+  CLOSE_CS_RPC,
+  gateHeadline,
+  gateMissingLine,
+  parseAcceptanceGate,
+  type AcceptanceGate,
+} from "@/lib/job-acceptance";
 
 interface Job {
   job_no: string;
@@ -83,6 +93,19 @@ function EvalModal({ row, questions, readOnly = false, onClose, onSaved }: {
   const [followup, setFollowup] = useState(ev?.needs_followup ?? false);
   const [answers, setAnswers]   = useState<Record<string, string>>(ev?.answers ?? {});
   const [saving, setSaving]     = useState(false);
+  // ด่านตรวจรับของงานนี้ — โหลดมาแสดงก่อน "ตอนกรอก" ไม่ใช่ให้รู้ตอนกดปิดงานแล้วถูกปฏิเสธ
+  // undefined = ยังไม่โหลด, null = อ่านไม่ได้ (ต้องถือว่ายังไม่ผ่าน ห้ามถือว่าผ่าน)
+  const [gate, setGate] = useState<AcceptanceGate | null | undefined>(undefined);
+  const closesWorkOrder = Boolean(row.work_order_id) && row.work_order_status === "waiting_cs";
+  useEffect(() => {
+    if (readOnly || !closesWorkOrder) { setGate(undefined); return; }
+    let cancelled = false;
+    void supabase.rpc(ACCEPTANCE_GATE_RPC, { p_job_no: row.job_no }).then(({ data, error }) => {
+      if (cancelled) return;
+      setGate(error ? null : parseAcceptanceGate(data));
+    });
+    return () => { cancelled = true; };
+  }, [row.job_no, closesWorkOrder, readOnly]);
 
   async function save() {
     if (!score) { toast.error("กรุณาให้คะแนนความพึงพอใจ"); return; }
@@ -130,6 +153,27 @@ function EvalModal({ row, questions, readOnly = false, onClose, onSaved }: {
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl ml-4">×</button>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+          {closesWorkOrder && gate !== undefined ? (
+            <div className={`rounded-xl border p-3 text-xs leading-relaxed ${gate?.ok ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+              <div className="text-sm font-semibold">{gate?.ok ? "✅ " : "⛔ "}{gateHeadline(gate)}</div>
+              {gate && !gate.ok ? (
+                <>
+                  <p className="mt-1">บันทึกผลประเมินได้ตามปกติ แต่ระบบจะยังปิดงานให้ไม่ได้จนกว่ารายการต่อไปนี้จะครบ:</p>
+                  <ul className="mt-1.5 list-disc space-y-0.5 pl-5">
+                    {gate.missing.map((miss) => <li key={`${miss.code}-${miss.reason}`}>{gateMissingLine(miss)}</li>)}
+                  </ul>
+                  <p className="mt-2">แก้ได้ที่แท็บ “ตรวจรับ” ในรายละเอียดงาน (ผู้ดูแลระบบ / หัวหน้าช่าง)</p>
+                </>
+              ) : null}
+              {gate === null ? <p className="mt-1">ลองเปิดหน้าต่างนี้ใหม่อีกครั้ง — ถ้ายังไม่หายให้แจ้งผู้ดูแลระบบ</p> : null}
+              <details className="mt-2">
+                <summary className="cursor-pointer font-medium">{ACCEPTANCE_RULE_HEADLINE}</summary>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                  {ACCEPTANCE_RULE_NOTICE_LINES.map((line) => <li key={line}>{line}</li>)}
+                </ul>
+              </details>
+            </div>
+          ) : null}
           <div>
             <p className="text-sm font-medium text-gray-700 mb-2">คะแนนความพึงพอใจ <span className="text-red-500">*</span></p>
             <div className="flex gap-2 items-center">
@@ -440,7 +484,7 @@ function CsTrackingInner() {
       )}
 
       {selected && (
-        <EvalModal row={selected} questions={questions} readOnly={localPreview} onClose={() => setSelected(null)} onSaved={() => { void (async () => { if (selected.work_order_id && selected.work_order_status === "waiting_cs") { const { error } = await supabase.rpc("close_floor_work_order_cs_v3", { p_work_order_id: selected.work_order_id }); if (error) toast.error(`บันทึกผลแล้ว แต่ปิดงานไม่สำเร็จ: ${error.message}`); else toast.success("ประเมินและปิดงานเรียบร้อย"); } await load(); })(); }} />
+        <EvalModal row={selected} questions={questions} readOnly={localPreview} onClose={() => setSelected(null)} onSaved={() => { void (async () => { if (selected.work_order_id && selected.work_order_status === "waiting_cs") { const { error } = await supabase.rpc(CLOSE_CS_RPC, { p_work_order_id: selected.work_order_id }); if (error) toast.error(`บันทึกผลประเมินแล้ว แต่ยังปิดงานไม่ได้ · ${floorErrorMessage(error)}`, { duration: 15000 }); else toast.success("ประเมินและปิดงานเรียบร้อย"); } await load(); })(); }} />
       )}
     </div>
   );
