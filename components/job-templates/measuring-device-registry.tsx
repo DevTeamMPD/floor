@@ -26,8 +26,12 @@ import {
   NO_DEVICE_USAGE_NOTICE,
   NO_MEASURING_DEVICES_NOTICE,
   deviceCalibrationLabel,
+  mergeDeviceKinds,
+  normalizeDeviceKind,
   parseMeasuringDeviceUsage,
   parseMeasuringDevices,
+  sameDeviceKind,
+  tidyDeviceKind,
   type MeasuringDevice,
   type MeasuringDeviceStatus,
   type MeasuringDeviceUsageRow,
@@ -36,6 +40,9 @@ import {
 const INPUT = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50";
 const PRIMARY = "min-h-11 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50";
 const SECONDARY = "min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50";
+
+/** ค่าพิเศษของ <option> ที่ไม่มีวันชนกับชื่อชนิดจริง ใช้สลับไปโหมดพิมพ์เอง */
+const NEW_KIND_OPTION = "\u0000new-kind";
 
 interface DraftState {
   id: string | null;
@@ -85,6 +92,25 @@ export default function MeasuringDeviceRegistry({ canEdit, kindsInUse }: { canEd
   const [usageFor, setUsageFor] = useState<string | null>(null);
   const [usage, setUsage] = useState<MeasuringDeviceUsageRow[] | null>(null);
   const [usageLoading, setUsageLoading] = useState(false);
+  // true = กำลังพิมพ์ชนิดใหม่เอง · false = เลือกจากชนิดที่ระบบรู้จักอยู่แล้ว
+  const [typingNewKind, setTypingNewKind] = useState(false);
+
+  /**
+   * ชนิดที่ระบบ "รู้จัก" แล้ว = ชนิดที่แม่แบบเกณฑ์ตรวจรับประกาศไว้ + ชนิดที่มีเครื่องมือจริงในทะเบียน
+   * เอามาเป็นตัวเลือกจริง ไม่ใช่แค่ datalist ที่เป็นคำใบ้ เพราะคำใบ้ไม่ได้กันการพิมพ์ผิด
+   * และการพิมพ์ผิดหนึ่งตัวอักษรทำให้เครื่องมือทั้งตัวหายจาก dropdown ของเกณฑ์ข้อนั้นแบบเงียบ ๆ
+   */
+  const knownKinds = useMemo(
+    () => mergeDeviceKinds(kindsInUse, devices.map((device) => device.kind)),
+    [kindsInUse, devices],
+  );
+
+  /** เปิดฟอร์ม พร้อมตัดสินว่าควรเริ่มที่โหมด "เลือก" หรือโหมด "พิมพ์เอง" */
+  function openDraft(next: DraftState) {
+    const known = mergeDeviceKinds(kindsInUse, devices.map((device) => device.kind));
+    setTypingNewKind(!known.length || (next.kind.trim() !== "" && !known.some((kind) => sameDeviceKind(kind, next.kind))));
+    setDraft(next);
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -114,7 +140,8 @@ export default function MeasuringDeviceRegistry({ canEdit, kindsInUse }: { canEd
       const { error } = await supabase.rpc(MEASURING_DEVICE_UPSERT_RPC, {
         p_id: draft.id,
         p_code: draft.code.trim(),
-        p_kind: draft.kind.trim(),
+        // ล้างตัวสะกดก่อนเก็บ ให้ตรงกับที่ฝั่งแม่แบบเกณฑ์ทำตอนบันทึกเช่นกัน
+        p_kind: tidyDeviceKind(draft.kind),
         p_owner_team_id: draft.ownerTeamId || null,
         p_range_text: draft.rangeText.trim() || null,
         p_resolution_text: draft.resolutionText.trim() || null,
@@ -142,7 +169,14 @@ export default function MeasuringDeviceRegistry({ canEdit, kindsInUse }: { canEd
     setUsageLoading(false);
   }
 
-  const missingKinds = kindsInUse.filter((kind) => !devices.some((device) => device.kind.trim() === kind.trim()));
+  // เทียบแบบ normalise ทั้งสองฝั่ง — ไม่งั้นเคาะวรรคเกินหนึ่งที่ก็ขึ้นเตือนว่า "ยังไม่มีในทะเบียน"
+  // ทั้งที่มีอยู่จริง ซึ่งจะไล่ให้ผู้ใช้ไปลงทะเบียนตัวซ้ำ
+  // ชนิดที่พิมพ์อยู่ ตรงกับชนิดที่รู้จักอยู่แล้วตัวไหน (หลัง normalise) — ใช้บอกผู้ใช้ว่าไม่ได้สร้างของซ้ำ
+  const matchedKnownKind = draft && normalizeDeviceKind(draft.kind)
+    ? knownKinds.find((kind) => sameDeviceKind(kind, draft.kind)) ?? null
+    : null;
+
+  const missingKinds = kindsInUse.filter((kind) => !devices.some((device) => sameDeviceKind(device.kind, kind)));
 
   return <section className="mt-10 rounded-2xl border border-slate-200 bg-white p-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -155,7 +189,7 @@ export default function MeasuringDeviceRegistry({ canEdit, kindsInUse }: { canEd
       </div>
       <div className="flex gap-2">
         <button type="button" onClick={() => void load()} className={SECONDARY}>รีเฟรช</button>
-        {canEdit ? <button type="button" onClick={() => setDraft(emptyDraft())} className={PRIMARY}>+ เพิ่มเครื่องมือ</button> : null}
+        {canEdit ? <button type="button" onClick={() => openDraft(emptyDraft())} className={PRIMARY}>+ เพิ่มเครื่องมือ</button> : null}
       </div>
     </div>
 
@@ -211,7 +245,7 @@ export default function MeasuringDeviceRegistry({ canEdit, kindsInUse }: { canEd
           <button type="button" onClick={() => void openUsage(device.id)} className={SECONDARY}>
             {usageFor === device.id ? "ปิดประวัติการใช้งาน" : "ดูว่าใช้กับงานไหนบ้าง"}
           </button>
-          {canEdit ? <button type="button" onClick={() => setDraft(draftFromDevice(device))} className={SECONDARY}>แก้ไข</button> : null}
+          {canEdit ? <button type="button" onClick={() => openDraft(draftFromDevice(device))} className={SECONDARY}>แก้ไข</button> : null}
         </div>
 
         {usageFor === device.id ? <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -239,8 +273,39 @@ export default function MeasuringDeviceRegistry({ canEdit, kindsInUse }: { canEd
             <input value={draft.code} onChange={(e) => setDraft({ ...draft, code: e.target.value })} placeholder="เช่น FG-01" className={`${INPUT} mt-1`} />
           </label>
           <label className="text-xs font-medium text-slate-600">ชนิดเครื่องมือ <span className="text-rose-600">*</span>
-            <input list="measuring-device-kinds" value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })} placeholder="เช่น ฟีลเลอร์เกจ" className={`${INPUT} mt-1`} />
-            <datalist id="measuring-device-kinds">{kindsInUse.map((kind) => <option key={kind} value={kind} />)}</datalist>
+            {/*
+              เดิมช่องนี้เป็นข้อความอิสระ + datalist ซึ่งเป็นแค่ "คำใบ้" — พิมพ์ไม่ตรงก็บันทึกได้
+              แล้วเครื่องมือตัวนั้นจะไม่ถูกจับคู่กับเกณฑ์ข้อใดเลยแบบเงียบ ๆ
+              ตอนนี้ชนิดที่ระบบรู้จักแล้วเป็น "ตัวเลือกจริง" และการพิมพ์ชนิดใหม่ยังทำได้
+              แต่ต้องตั้งใจเลือกโหมดนั้น ไม่ใช่พลาดเข้าไปเอง
+            */}
+            {knownKinds.length && !typingNewKind ? <>
+              <select
+                value={knownKinds.find((kind) => sameDeviceKind(kind, draft.kind)) ?? ""}
+                onChange={(e) => {
+                  if (e.target.value === NEW_KIND_OPTION) { setTypingNewKind(true); return; }
+                  setDraft({ ...draft, kind: e.target.value });
+                }}
+                className={`${INPUT} mt-1`}
+              >
+                <option value="">— เลือกชนิดเครื่องมือ —</option>
+                {knownKinds.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
+                <option value={NEW_KIND_OPTION}>+ พิมพ์ชนิดใหม่ที่ยังไม่มีในรายการ</option>
+              </select>
+              <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
+                รายการนี้คือชนิดที่แม่แบบเกณฑ์ตรวจรับประกาศไว้ และชนิดที่มีเครื่องมือจริงในทะเบียนแล้ว — เลือกจากรายการแล้วระบบจับคู่ให้แน่นอน
+              </span>
+            </> : <>
+              <input value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })} placeholder="เช่น ฟีลเลอร์เกจ" className={`${INPUT} mt-1`} />
+              {matchedKnownKind ? <span className="mt-1 block text-[11px] leading-relaxed text-emerald-700">
+                ตรงกับชนิด “{matchedKnownKind}” ที่มีอยู่แล้ว — ระบบจะจับคู่ให้ ไม่ได้สร้างชนิดซ้ำ
+              </span> : knownKinds.length ? <span className="mt-1 block text-[11px] leading-relaxed text-amber-700">
+                ชนิดใหม่ที่ยังไม่มีเกณฑ์ข้อไหนเรียกใช้ — ตรวจตัวสะกดอีกครั้ง เพราะถ้าสะกดต่างจากที่แม่แบบเขียนไว้ เครื่องมือตัวนี้จะไม่ขึ้นให้เลือกในเกณฑ์ข้อนั้น
+              </span> : null}
+              {knownKinds.length ? <button type="button" onClick={() => setTypingNewKind(false)} className="mt-1 text-[11px] font-semibold text-blue-700 underline">
+                กลับไปเลือกจากรายการ
+              </button> : null}
+            </>}
           </label>
           <label className="text-xs font-medium text-slate-600">ทีมที่ถือเครื่องมือ
             <select value={draft.ownerTeamId} onChange={(e) => setDraft({ ...draft, ownerTeamId: e.target.value })} className={`${INPUT} mt-1`}>

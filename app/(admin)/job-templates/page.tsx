@@ -8,6 +8,7 @@ import { floorErrorMessage } from "@/lib/floor-error-message";
 import { Badge } from "@/components/ui/badge";
 import type { StaffRole } from "@/lib/staff";
 import MeasuringDeviceRegistry from "@/components/job-templates/measuring-device-registry";
+import { mergeDeviceKinds, tidyDeviceKind } from "@/lib/job-acceptance";
 
 type TaskField = "ball_pit" | "workshop_set" | "gym" | "floor" | "other";
 type TemplateStatus = "draft" | "active" | "retired";
@@ -416,7 +417,9 @@ export default function JobTemplatesPage() {
       spec_text: item.spec_text.trim() || null,
       requires_photo: item.requires_photo,
       is_critical: item.is_critical,
-      measuring_device_kind: item.measuring_device_kind.trim() || null,
+      // ล้างตัวสะกดที่ต้นทางฝั่ง "ประกาศ" ด้วย ไม่ใช่ล้างแค่ตอนอ่าน —
+      // ช่องว่างซ้ำหรืออักขระความกว้างศูนย์ที่ติดมากับการคัดลอกวาง ทำให้เครื่องมือไม่ถูกจับคู่
+      measuring_device_kind: tidyDeviceKind(item.measuring_device_kind) || null,
       sort_order: idx,
       is_active: item.is_active,
     }));
@@ -516,10 +519,11 @@ export default function JobTemplatesPage() {
 
   const clCurrent = clSelectedId ? clTemplates.find((t) => t.id === clSelectedId) ?? null : null;
   const clIsNew = clSelectedId === null;
-  // ชนิดเครื่องมือวัดที่แม่แบบเกณฑ์ตรวจรับ "ประกาศไว้แล้ว" — ใช้เตือนว่าชนิดไหนยังไม่มีตัวจริงในทะเบียน
-  const measuringKindsInUse = Array.from(new Set(
-    clItems.map((item) => item.measuring_device_kind.trim()).filter((kind) => kind !== ""),
-  )).sort();
+  // ชนิดเครื่องมือวัดที่แม่แบบเกณฑ์ตรวจรับ "ประกาศไว้แล้ว"
+  // ใช้สองอย่าง: เตือนว่าชนิดไหนยังไม่มีตัวจริงในทะเบียน และเป็น "ตัวเลือกจริง" ตอนลงทะเบียนเครื่องมือ
+  // ยุบด้วย mergeDeviceKinds ไม่ใช่ Set ของสตริงดิบ — ไม่งั้น "ตลับเมตร" กับ "ตลับเมตร " (เคาะวรรคเกิน)
+  // จะกลายเป็นสองชนิดในสายตาระบบ และหนึ่งในนั้นจะไม่มีวันมีเครื่องมือตรงชนิดเลย
+  const measuringKindsInUse = mergeDeviceKinds(clItems.map((item) => item.measuring_device_kind));
   const clEditable = canEdit && (clIsNew || clCurrent?.status === "draft" || (clCurrent?.status === "active" && clEditMode));
 
   const prCurrent = prSelectedId ? prTemplates.find((t) => t.id === prSelectedId) ?? null : null;

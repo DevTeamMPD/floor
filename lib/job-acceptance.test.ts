@@ -17,8 +17,12 @@ import {
   externalVerificationNotice,
   gateHeadline,
   gateMissingSummary,
+  mergeDeviceKinds,
+  normalizeDeviceKind,
   parseAcceptanceGate,
   photoUploadReport,
+  sameDeviceKind,
+  tidyDeviceKind,
   safePhotoFileName,
   uploadPhotoBatch,
   parseAcceptanceRows,
@@ -341,5 +345,64 @@ describe("uploadPhotoBatch / photoUploadReport", () => {
     expect(cleaned).toMatch(/^[a-zA-Z0-9._-]+$/);
     expect(cleaned.endsWith("1_.jpg")).toBe(true);
     expect(safePhotoFileName("ok-name_2.JPG")).toBe("ok-name_2.JPG");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// การจับคู่ "ชนิดเครื่องมือ" ระหว่างแม่แบบเกณฑ์ตรวจรับกับทะเบียนเครื่องมือ
+//
+// สองฝั่งนี้ถูกพิมพ์มือ คนละที่ คนละเวลา การเทียบด้วย === ตรง ๆ ทำให้เคาะวรรคเกิน
+// หนึ่งที่ก็พอให้เครื่องมือทั้งตัวหายจาก dropdown ของเกณฑ์ข้อนั้นแบบไม่มีอะไรฟ้อง
+// ---------------------------------------------------------------------------
+describe("normalizeDeviceKind / devicesForKind ที่ทนตัวสะกดเพี้ยน", () => {
+  const rows = [
+    { id: "d1", code: "FG-01", kind: "ฟีลเลอร์เกจ", status: "ok" },
+    { id: "d2", code: "LV-01", kind: "Level  Gauge", status: "ok" },
+  ];
+
+  it("ช่องว่างหัวท้าย ช่องว่างซ้ำ และอักขระความกว้างศูนย์ ต้องไม่ทำให้จับคู่ไม่ติด", () => {
+    const devices = parseMeasuringDevices(rows);
+    expect(devicesForKind(devices, "  ฟีลเลอร์เกจ  ").map((d) => d.code)).toEqual(["FG-01"]);
+    expect(devicesForKind(devices, "ฟีลเลอร์เกจ\u200B").map((d) => d.code)).toEqual(["FG-01"]);
+    expect(devicesForKind(devices, "Level Gauge").map((d) => d.code)).toEqual(["LV-01"]);
+    expect(devicesForKind(devices, "level gauge").map((d) => d.code)).toEqual(["LV-01"]);
+  });
+
+  it("ไม่มีข้อความเตือนผิด ๆ ว่า “ยังไม่มีชนิดนี้” ทั้งที่มีอยู่จริงแค่สะกดห่างกันหนึ่งเคาะ", () => {
+    const devices = parseMeasuringDevices(rows);
+    expect(deviceSelectNotice(devices, " ฟีลเลอร์เกจ")).toBeNull();
+    expect(deviceOptions(devices, "ฟีลเลอร์เกจ ").map((d) => d.code)).toEqual(["FG-01"]);
+  });
+
+  it("ชนิดที่สะกดต่างกันจริงต้องยังคงต่างกัน — ไม่เดาแทนผู้ใช้", () => {
+    const devices = parseMeasuringDevices(rows);
+    expect(devicesForKind(devices, "ฟิลเลอร์เกจ")).toHaveLength(0);
+    expect(sameDeviceKind("ฟีลเลอร์เกจ", "ฟิลเลอร์เกจ")).toBe(false);
+  });
+
+  it("ชนิดว่าง/null = ไม่จำกัดชนิด ต้องได้เครื่องมือที่ใช้ได้ทั้งหมด", () => {
+    const devices = parseMeasuringDevices(rows);
+    expect(devicesForKind(devices, null)).toHaveLength(2);
+    expect(devicesForKind(devices, "   ")).toHaveLength(2);
+    expect(normalizeDeviceKind(null)).toBe("");
+  });
+
+  it("tidyDeviceKind ล้างของที่ไม่มีความหมายแต่คงตัวพิมพ์ไว้ให้คนอ่านออก", () => {
+    expect(tidyDeviceKind("  Level  Gauge\u200B ")).toBe("Level Gauge");
+    expect(tidyDeviceKind(null)).toBe("");
+  });
+
+  it("mergeDeviceKinds ยุบตัวสะกดที่ตรงกันหลัง normalise และให้แหล่งแรกชนะ", () => {
+    const merged = mergeDeviceKinds(
+      ["ฟีลเลอร์เกจ", " ฟีลเลอร์เกจ ", "Level Gauge", ""],
+      ["level  gauge", "ตลับเมตร", null],
+    );
+    expect(merged).toContain("ฟีลเลอร์เกจ");
+    expect(merged).toContain("ตลับเมตร");
+    // ตัวสะกดที่ชนะต้องเป็นของแหล่งแรก (แม่แบบเกณฑ์เป็นฝ่ายประกาศ) ไม่ใช่ของทะเบียน
+    expect(merged).toContain("Level Gauge");
+    expect(merged).not.toContain("level  gauge");
+    expect(merged.filter((kind) => kind.toLowerCase() === "level gauge")).toHaveLength(1);
+    expect(merged.filter((kind) => kind === "ฟีลเลอร์เกจ")).toHaveLength(1);
   });
 });

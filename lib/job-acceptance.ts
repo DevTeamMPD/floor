@@ -380,11 +380,73 @@ export function selectableDevices(devices: MeasuringDevice[]): MeasuringDevice[]
   return devices.filter((device) => device.status !== "out_of_service");
 }
 
+/**
+ * ทำให้ "ชนิดเครื่องมือ" สองฝั่งเทียบกันได้จริง
+ *
+ * ปัญหาที่แก้: measuring_device_kind ถูกพิมพ์มือที่หน้าแม่แบบเกณฑ์ตรวจรับ ส่วน
+ * measuring_devices.kind ถูกพิมพ์มือที่ทะเบียนเครื่องมือ สองช่องนี้อยู่คนละที่ คนละเวลา
+ * ถ้าเทียบด้วย === ตรง ๆ เคาะวรรคเกินมาหนึ่งที่ ก็พอให้เครื่องมือทั้งตัว "หายไป"
+ * จาก dropdown ของเกณฑ์ข้อนั้น โดยไม่มีอะไรฟ้อง — ผู้ใช้เห็นแค่ช่องว่างเปล่า
+ * และสรุปว่าโปรแกรมพัง ไม่ใช่ว่าตัวเองเคาะวรรคเกิน
+ *
+ * ที่ยุบทิ้ง: อักขระความกว้างศูนย์ (ติดมากับการคัดลอกวาง) · ช่องว่างซ้ำและช่องว่างหัวท้าย
+ * (รวม non-breaking space ที่ \s ของ JS ครอบอยู่แล้ว) · ตัวพิมพ์ใหญ่-เล็กของอักษรละติน
+ * แล้ว normalize เป็น NFC เพื่อให้สระ/วรรณยุกต์ไทยที่มาจากคีย์บอร์ดคนละตัวเทียบกันได้
+ *
+ * ที่ "ไม่" ยุบ: การสะกดที่ต่างกันจริง เช่น ฟีลเลอร์เกจ กับ ฟิลเลอร์เกจ
+ * เพราะการเดาว่าสองคำนี้คือของเดียวกันเป็นการเดาแทนผู้ใช้ ทางแก้ที่ถูกคือกันที่ต้นทาง —
+ * หน้าทะเบียนเครื่องมือจึงให้ "เลือก" จากชนิดที่แม่แบบใช้อยู่แล้วเป็นหลัก
+ * และเปิดให้พิมพ์ชนิดใหม่ได้เมื่อจำเป็นจริง ๆ เท่านั้น
+ */
+export function normalizeDeviceKind(kind: string | null | undefined): string {
+  if (!kind) return "";
+  return kind
+    .normalize("NFC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * ตัวสะกดที่ควร "เก็บลงฐานข้อมูล" — เก็บรูปที่คนอ่านออกไว้ (ไม่ lowercase)
+ * แต่ล้างสิ่งที่ไม่มีความหมายทิ้ง: อักขระความกว้างศูนย์ ช่องว่างซ้ำ ช่องว่างหัวท้าย
+ * ใช้ที่ "ทุกทางเขียน" ของทั้งสองฝั่ง (แม่แบบเกณฑ์ และทะเบียนเครื่องมือ)
+ * เพื่อไม่ให้ต้องพึ่ง normalizeDeviceKind ตอนอ่านเพียงอย่างเดียว
+ */
+export function tidyDeviceKind(kind: string | null | undefined): string {
+  if (!kind) return "";
+  return kind.normalize("NFC").replace(/[\u200B-\u200D\uFEFF]/g, "").replace(/\s+/g, " ").trim();
+}
+
+/** ชนิดสองตัวนี้หมายถึงของเดียวกันหรือไม่ (ใช้ที่ไหนก็ตามที่เคยเทียบด้วย === ) */
+export function sameDeviceKind(a: string | null | undefined, b: string | null | undefined): boolean {
+  return normalizeDeviceKind(a) === normalizeDeviceKind(b);
+}
+
+/**
+ * รวมชนิดที่ "รู้จัก" จากหลายแหล่งให้เหลือชุดเดียวสำหรับเอาไปเป็นตัวเลือกจริง
+ * ตัวสะกดที่ normalise แล้วตรงกันจะถูกยุบเป็นตัวเดียว โดยเก็บตัวสะกดที่เจอก่อนไว้แสดง
+ * (แหล่งแรกที่ส่งเข้ามาคือแม่แบบเกณฑ์ตรวจรับ ซึ่งเป็นฝ่ายที่ "ประกาศ" ว่าต้องใช้ชนิดอะไร
+ *  จึงควรเป็นตัวสะกดที่ชนะ)
+ */
+export function mergeDeviceKinds(...groups: (string | null | undefined)[][]): string[] {
+  const seen = new Map<string, string>();
+  for (const group of groups) {
+    for (const raw of group) {
+      const key = normalizeDeviceKind(raw);
+      if (!key || seen.has(key)) continue;
+      seen.set(key, tidyDeviceKind(raw));
+    }
+  }
+  return Array.from(seen.values()).sort((a, b) => a.localeCompare(b, "th"));
+}
+
 export function devicesForKind(devices: MeasuringDevice[], kind: string | null): MeasuringDevice[] {
   const usable = selectableDevices(devices);
-  if (!kind) return usable;
-  const wanted = kind.trim();
-  return usable.filter((device) => device.kind.trim() === wanted);
+  const wanted = normalizeDeviceKind(kind);
+  if (!wanted) return usable;
+  return usable.filter((device) => normalizeDeviceKind(device.kind) === wanted);
 }
 
 /**
