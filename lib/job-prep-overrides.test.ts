@@ -8,29 +8,25 @@ import {
   JOB_PREP_REMOVE_ITEM_RPC,
   JOB_PREP_SAVE_OVERRIDE_RPC,
   PREP_CHANGE_LABELS,
+  PREP_NAME_CONFLICT_LABELS,
   addJobPrepItem,
   fetchJobPrepOverrides,
   generateJobPrepItems,
   latestOverrideByItem,
   prepGenerateMessage,
+  prepNameConflictMessage,
   removeJobPrepItem,
   removedOverrides,
   saveJobPrepItemOverride,
   toJobPrepOverrides,
   toPrepGenerateResult,
+  toPrepNameConflicts,
   type JobPrepOverrideRow,
 } from "@/lib/job-prep-overrides";
 
+// ตัว generate_job_prep_items ที่ใช้อยู่จริง (แทนที่ตอนแก้รีวิว C1)
 const GENERATE_SQL = readFileSync(
-  join(process.cwd(), "supabase/migrations/20260902110010_job_prep_generate_from_template.sql"),
-  "utf8",
-);
-const TABLE_SQL = readFileSync(
-  join(process.cwd(), "supabase/migrations/20260902110000_job_prep_item_overrides.sql"),
-  "utf8",
-);
-const RPC_SQL = readFileSync(
-  join(process.cwd(), "supabase/migrations/20260902110020_job_prep_item_override_rpcs.sql"),
+  join(process.cwd(), "supabase/migrations/20260902130000_job_prep_generate_name_adoption.sql"),
   "utf8",
 );
 const PAGE_TSX = readFileSync(
@@ -120,11 +116,12 @@ describe("เลือกส่วนต่างที่จะติดป้�
 describe("สรุปผลการสร้างรายการเป็นภาษาไทย", () => {
   it("บอกทั้งที่ทำและที่จงใจไม่แตะ", () => {
     const message = prepGenerateMessage(toPrepGenerateResult({
-      area_sqm: 14, unit_count: "5.00", inserted: 3, updated: 1,
-      kept_manual: 2, kept_picked: 1, kept_removed: 1, kept_untracked: 0,
+      area_sqm: 14, unit_count: "5.00", inserted: 3, updated: 1, adopted: 2,
+      kept_manual: 2, kept_picked: 1, kept_removed: 1,
     }));
     expect(message).toContain("เพิ่ม 3 รายการ");
     expect(message).toContain("ปรับจำนวนตามแม่แบบ 1 รายการ");
+    expect(message).toContain("ผูกบรรทัดเดิมกลับเข้าแม่แบบ 2 รายการ");
     expect(message).toContain("คนแก้ไว้ 2");
     expect(message).toContain("คลังหยิบแล้ว 1");
     expect(message).toContain("คนลบทิ้งแล้ว 1");
@@ -135,6 +132,43 @@ describe("สรุปผลการสร้างรายการเป็�
     const message = prepGenerateMessage(toPrepGenerateResult({ inserted: 0, updated: 0, kept_manual: 1 }));
     expect(message).toContain("ไม่มีอะไรต้องเปลี่ยน");
     expect(message).toContain("คนแก้ไว้ 1");
+  });
+});
+
+describe("คำเตือนเมื่อชื่อรายการชนกัน (C1)", () => {
+  it("อ่าน name_conflicts จาก RPC ได้ และ reason ที่ไม่รู้จักต้องไม่ทำให้ป้ายพัง", () => {
+    const conflicts = toPrepNameConflicts([
+      { item_name: "กาว", reason: "human_line" },
+      { item_name: "ใบมีด", reason: "template_duplicate_name" },
+      { item_name: "ผ้าคลุม", reason: "อะไรก็ไม่รู้" },
+    ]);
+    expect(conflicts).toHaveLength(3);
+    expect(conflicts[1].reason).toBe("template_duplicate_name");
+    for (const row of conflicts) expect(PREP_NAME_CONFLICT_LABELS[row.reason]).toBeTruthy();
+    expect(toPrepNameConflicts(null)).toEqual([]);
+  });
+
+  it("ไม่มีชื่อชน = ไม่ต้องเตือน", () => {
+    expect(prepNameConflictMessage(toPrepGenerateResult({ inserted: 2 }))).toBeNull();
+  });
+
+  it("มีชื่อชน ต้องบอกว่า 'สร้างให้แล้ว ไม่ได้ข้าม' และบอกชื่อที่ชน — ไม่ใช่ข้อความกำกวมแบบเดิม", () => {
+    const message = prepNameConflictMessage(toPrepGenerateResult({
+      inserted: 1, name_conflicts: [{ item_name: "กาว", reason: "human_line" }],
+    }));
+    expect(message).toContain("กาว");
+    expect(message).toContain(PREP_NAME_CONFLICT_LABELS.human_line);
+    expect(message).toContain("ไม่ได้ข้าม");
+    // ข้อความเดิมที่รีวิวชี้ว่ากำกวม ต้องไม่กลับมาอีก
+    expect(message).not.toContain("มีบรรทัดชื่อเดียวกันอยู่แล้ว");
+  });
+
+  it("ข้อความสรุปผลหลักต้องไม่กลืนคำเตือน — สองข้อความแยกกัน", () => {
+    const result = toPrepGenerateResult({
+      inserted: 1, name_conflicts: [{ item_name: "กาว", reason: "human_line" }],
+    });
+    expect(prepGenerateMessage(result)).not.toContain("กาว");
+    expect(prepNameConflictMessage(result)).toContain("กาว");
   });
 });
 
@@ -176,94 +210,42 @@ describe("หน้าจอเขียนผ่าน RPC เท่านั�
   });
 });
 
-describe("หลักประกัน idempotent (คุมที่ migration)", () => {
-  it("มี partial unique index กันบรรทัดแม่แบบซ้ำต่อหนึ่งใบสั่งงาน", () => {
-    expect(GENERATE_SQL).toMatch(/create unique index if not exists floor_work_order_items_template_once_idx\s+on public\.floor_work_order_items\(work_order_id, template_item_id\)\s+where template_item_id is not null/);
-  });
-
-  it("ผูกบรรทัดเดิมด้วย template_item_id ก่อน แล้วค่อยกันซ้ำด้วยชื่อ เผื่อ confirm ลบคอลัมน์แม่แบบทิ้ง", () => {
-    expect(GENERATE_SQL).toContain("where work_order_id = v_order.id and template_item_id = v_item.id");
-    expect(GENERATE_SQL).toContain("and lower(btrim(item_name)) = lower(btrim(v_item.item_name))");
-  });
-
-  it("ไม่มี delete ใด ๆ ใน migration ของการสร้างรายการ — เป็น non-destructive", () => {
-    expect(GENERATE_SQL).not.toMatch(/delete\s+from/i);
-    expect(GENERATE_SQL).not.toMatch(/drop\s+(table|column)/i);
-  });
-});
-
-describe("หลักประกันว่าของที่คนแก้จะไม่ถูกทับ (คุมที่ migration)", () => {
-  it("บรรทัดที่คนแก้ต้องถูกข้าม", () => {
-    expect(GENERATE_SQL).toMatch(/elsif v_line\.is_manual_override then[\s\S]{0,200}v_kept_manual := v_kept_manual \+ 1;/);
-  });
-
-  it("บรรทัดที่คลังหยิบไปแล้วต้องถูกข้าม", () => {
-    expect(GENERATE_SQL).toMatch(/elsif v_line\.picked_qty is not null then[\s\S]{0,200}v_kept_picked := v_kept_picked \+ 1;/);
-  });
-
-  it("บรรทัดที่คนสั่งลบต้องไม่ถูกปลุกกลับมา", () => {
-    expect(GENERATE_SQL).toContain("and o.change_kind = 'removed'");
-    expect(GENERATE_SQL).toMatch(/v_kept_removed := v_kept_removed \+ 1;\s*continue;/);
-  });
-
-  it("update ของ generate ต้องอยู่หลังด่านทั้งสาม ไม่ใช่ก่อน", () => {
-    const manual = GENERATE_SQL.indexOf("elsif v_line.is_manual_override then");
-    const picked = GENERATE_SQL.indexOf("elsif v_line.picked_qty is not null then");
-    const update = GENERATE_SQL.indexOf("update public.floor_work_order_items");
-    expect(manual).toBeGreaterThan(0);
-    expect(picked).toBeGreaterThan(manual);
-    expect(update).toBeGreaterThan(picked);
-  });
-});
-
-describe("สิทธิ์และรูปแบบของ migration ใหม่", () => {
-  const all = [GENERATE_SQL, TABLE_SQL, RPC_SQL].join("\n");
-
-  it("ทุกฟังก์ชันใหม่เป็น security definer + search_path = ''", () => {
-    for (const sql of [GENERATE_SQL, RPC_SQL]) {
-      const defs = sql.match(/create or replace function/g) ?? [];
-      expect(defs.length).toBeGreaterThan(0);
-      expect((sql.match(/security definer/g) ?? []).length).toBe(defs.length);
-      expect((sql.match(/set search_path = ''/g) ?? []).length).toBe(defs.length);
+/**
+ * ยามกันสัญญาระหว่าง TypeScript กับ SQL หลุดจากกัน (drift guard) — ไม่ใช่การทดสอบพฤติกรรม
+ *
+ * ยามชุดนี้ไม่ได้พิสูจน์ว่าฟังก์ชันฝั่งฐานข้อมูลทำงานถูก การพิสูจน์นั้นอยู่ใน
+ * $HOME/sdd-jobtpl/p32-probes.sql ซึ่งเรียกฟังก์ชันจริงกับฐานข้อมูลจริงแล้ว rollback
+ * สิ่งที่ยามชุดนี้กันได้จริงคือกรณี "แก้ฝั่งเดียว": เปลี่ยนชื่อคีย์ใน jsonb ที่ SQL ส่งกลับ
+ * หรือเพิ่ม reason code ใหม่ แล้วลืมแก้ฝั่ง TypeScript — ผลคือหน้าจอเงียบ (อ่านได้ 0 หรือ undefined)
+ * โดยที่ probe ฝั่งฐานข้อมูลยังผ่านหมด
+ */
+describe("ยามกันสัญญา TypeScript ↔ SQL หลุดจากกัน (drift guard ไม่ใช่การทดสอบพฤติกรรม)", () => {
+  it("ทุกคีย์ที่ฝั่ง TypeScript อ่าน ต้องมีอยู่ใน jsonb ที่ generate_job_prep_items ส่งกลับ", () => {
+    for (const key of ["area_sqm", "unit_count", "inserted", "updated", "adopted", "kept_manual", "kept_picked", "kept_removed", "name_conflicts"]) {
+      expect(GENERATE_SQL).toContain(`'${key}',`);
     }
+    // คีย์เดิมที่เลิกใช้แล้ว ต้องไม่หลงเหลืออยู่ทั้งสองฝั่ง
+    expect(GENERATE_SQL).not.toContain("kept_untracked");
   });
 
-  it("anon ต้องเรียกอะไรไม่ได้และอ่านตารางใหม่ไม่ได้", () => {
-    expect(GENERATE_SQL).toContain("revoke all on function public.generate_job_prep_items(uuid) from public, anon;");
-    expect(RPC_SQL).toContain("revoke all on function public.save_job_prep_item_override(uuid, numeric, text, text, text) from public, anon;");
-    expect(TABLE_SQL).toContain("revoke all on public.job_prep_item_overrides from anon, authenticated;");
-    expect(TABLE_SQL).toContain("grant select on public.job_prep_item_overrides to authenticated;");
-    expect(all).not.toMatch(/grant[^;]*to[^;]*\banon\b/);
+  it("reason code ของชื่อชนใน SQL ต้องมีป้ายภาษาไทยครบทุกตัวฝั่ง TypeScript", () => {
+    const block = /v_conflict_reason := case([\s\S]*?)end;/.exec(GENERATE_SQL);
+    expect(block).not.toBeNull();
+    const codes = Array.from(block![1].matchAll(/(?:then|else) '([a-z_]+)'/g)).map((match) => match[1]);
+    expect(codes.length).toBeGreaterThan(0);
+    expect(new Set(codes)).toEqual(new Set(Object.keys(PREP_NAME_CONFLICT_LABELS)));
   });
 
-  it("ทางเขียนทุกตัวเช็ค role เดียวกับที่แก้แม่แบบได้ (admin / head_technician)", () => {
-    expect((GENERATE_SQL.match(/role in \('admin', 'head_technician'\)/g) ?? []).length).toBe(1);
-    expect((RPC_SQL.match(/role in \('admin', 'head_technician'\)/g) ?? []).length).toBe(1);
-    expect(RPC_SQL).toContain("v_actor := public.job_prep_edit_guard(");
+  it("หน้าจอยืนยันใบสั่งงานผ่าน v3 และส่ง id ของบรรทัดเดิมไปด้วย", () => {
+    // v3 แก้ทับที่เดิมด้วย id ถ้าหน้าจอลืมส่ง id ทุกบรรทัดจะกลายเป็นบรรทัดใหม่
+    // แล้ว template_item_id / is_manual_override / picked_qty จะหายทั้งใบเงียบ ๆ
+    expect(PAGE_TSX).toContain('supabase.rpc("confirm_floor_work_order_v3"');
+    expect(PAGE_TSX).not.toContain('supabase.rpc("confirm_floor_work_order_v2"');
+    expect(PAGE_TSX).toMatch(/\.\.\.\(item\.id \? \{ id: item\.id \} : \{\}\)/);
   });
 
-  it("แก้ได้เฉพาะก่อนส่งคลัง และห้ามแตะบรรทัดที่คลังหยิบไปแล้ว", () => {
-    expect(GENERATE_SQL).toContain("if v_order.status not in ('head_review', 'returned_sales') then");
-    expect(RPC_SQL).toContain("if v_status not in ('head_review', 'returned_sales') then");
-    expect((RPC_SQL.match(/v_line\.picked_qty is not null/g) ?? []).length).toBe(2);
-  });
-
-  it("บังคับกรอกเหตุผลทั้งระดับตารางและระดับ RPC", () => {
-    expect(TABLE_SQL).toContain("reason text not null check (btrim(reason) <> '')");
-    expect((RPC_SQL.match(/if v_reason = '' then/g) ?? []).length).toBe(3);
-  });
-
-  it("ตารางส่วนต่างเก็บครบทั้งห้าคำถาม: แม่แบบว่าเท่าไร คนแก้เป็นเท่าไร ใคร เมื่อไร ทำไม", () => {
-    for (const column of ["template_qty", "human_qty", "changed_by", "changed_at", "reason", "calc_basis"]) {
-      expect(TABLE_SQL).toContain(column);
-    }
-    expect(TABLE_SQL).toContain("change_kind in ('qty_changed', 'added', 'removed')");
-  });
-
-  it("ไม่มี drop / rename ในทั้งสาม migration — additive อย่างเดียว", () => {
-    expect(all).not.toMatch(/drop\s+table/i);
-    expect(all).not.toMatch(/drop\s+column/i);
-    expect(all).not.toMatch(/rename\s+(to|column)/i);
-    expect(all).not.toMatch(/alter\s+table[^;]*alter\s+column/i);
+  it("หน้าจอไม่เหลือกล่อง prompt/confirm สำหรับรายการเตรียมของแล้ว", () => {
+    expect(PAGE_TSX).not.toContain("เป็นเครื่องมือหรือไม่?");
+    expect(PAGE_TSX).not.toContain("ชื่อรายการที่ไม่มีในแม่แบบ\"");
   });
 });

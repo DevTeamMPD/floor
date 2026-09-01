@@ -11,8 +11,15 @@ import {
   type PrepTemplateItemInput,
 } from "@/lib/job-prep-calc";
 
-const GENERATE_SQL = readFileSync(
+// นิยามการปัดเศษ (job_prep_round_qty) และการอ่านพื้นที่ (job_prep_area_sqm) ยังอยู่ไฟล์นี้ ไม่เคยถูกแทนที่
+const ROUND_SQL = readFileSync(
   join(process.cwd(), "supabase/migrations/20260902110010_job_prep_generate_from_template.sql"),
+  "utf8",
+);
+// ตัว generate_job_prep_items ที่ "ใช้อยู่จริง" ถูกแทนที่ในไฟล์นี้ (แก้ตามรีวิว C1)
+// ยามกันหลุดทุกข้อที่อ่านตัวลูปคำนวณต้องชี้มาที่ไฟล์นี้ ไม่ใช่ไฟล์เก่า
+const GENERATE_SQL = readFileSync(
+  join(process.cwd(), "supabase/migrations/20260902130000_job_prep_generate_name_adoption.sql"),
   "utf8",
 );
 
@@ -151,19 +158,28 @@ describe("อ่านพื้นที่จากข้อมูลสำร�
   });
 });
 
-describe("โค้ดกับ migration ต้องไม่หลุดจากกัน", () => {
+/**
+ * ยามกันโค้ดสองฝั่งหลุดจากกัน (drift guard) — ไม่ใช่การทดสอบพฤติกรรม
+ *
+ * ข้อความในไฟล์ SQL ไม่ได้พิสูจน์ว่าฟังก์ชันทำงานถูก (ดู $HOME/sdd-jobtpl/p32-probes.sql
+ * ซึ่งรันฟังก์ชันจริงกับฐานข้อมูลจริงแล้ว rollback) สิ่งที่ยามชุดนี้กันได้จริงมีอย่างเดียว:
+ * "กฎเดียวกันถูกเขียนไว้สองที่ (TypeScript กับ PL/pgSQL) แล้วมีคนแก้ที่เดียว"
+ * เช่น เพิ่มหน่วยใหม่ใน CONTINUOUS_PREP_UNITS แต่ลืมเพิ่มใน SQL — ผลคือหน้าจอกับฐานข้อมูล
+ * ปัดเศษไม่เท่ากัน ซึ่ง probe ฝั่งฐานข้อมูลอย่างเดียวจับไม่ได้
+ */
+describe("ยามกันโค้ด TypeScript กับ SQL หลุดจากกัน (drift guard ไม่ใช่การทดสอบพฤติกรรม)", () => {
   it("รายชื่อหน่วยที่แบ่งย่อยได้ใน SQL ต้องตรงกับฝั่ง TypeScript ทุกตัว", () => {
-    const block = /lower\(btrim\(coalesce\(p_unit, ''\)\)\) = any \(array\[([\s\S]*?)\]\)/.exec(GENERATE_SQL);
+    const block = /lower\(btrim\(coalesce\(p_unit, ''\)\)\) = any \(array\[([\s\S]*?)\]\)/.exec(ROUND_SQL);
     expect(block).not.toBeNull();
     const sqlUnits = Array.from(block![1].matchAll(/'([^']*)'/g)).map((match) => match[1]);
     expect(new Set(sqlUnits)).toEqual(new Set(CONTINUOUS_PREP_UNITS.map((unit) => unit.toLowerCase())));
   });
 
   it("SQL ปัดขึ้น (ceil) ทั้งสองทาง ไม่มี round หรือ floor หลุดเข้ามา", () => {
-    expect(GENERATE_SQL).toContain("ceil(p_value * 100) / 100");
-    expect(GENERATE_SQL).toContain("else ceil(p_value)");
-    expect(GENERATE_SQL).not.toMatch(/\bfloor\(/);
-    expect(GENERATE_SQL).not.toMatch(/\bround\(p_value/);
+    expect(ROUND_SQL).toContain("ceil(p_value * 100) / 100");
+    expect(ROUND_SQL).toContain("else ceil(p_value)");
+    expect(ROUND_SQL).not.toMatch(/\bfloor\(/);
+    expect(ROUND_SQL).not.toMatch(/\bround\(p_value/);
   });
 
   it("SQL คำนวณสามโหมดเหมือนฝั่ง TypeScript และคูณเผื่อเสียหายก่อนปัดเศษ", () => {
@@ -180,7 +196,7 @@ describe("โค้ดกับ migration ต้องไม่หลุดจ�
   });
 
   it("พื้นที่มาจาก survey_data ไม่ใช่ area_w × area_l ที่ข้อมูลจริงใช้ไม่ได้", () => {
-    expect(GENERATE_SQL).toContain("v_json ->> 'areaSqm'");
+    expect(ROUND_SQL).toContain("v_json ->> 'areaSqm'");
     expect(GENERATE_SQL).toContain("public.job_prep_area_sqm(v_job.survey_data)");
     expect(GENERATE_SQL).not.toMatch(/v_job\.area_w/);
     expect(GENERATE_SQL).not.toMatch(/v_job\.area_l/);
