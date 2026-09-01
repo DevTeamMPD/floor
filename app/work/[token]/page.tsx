@@ -12,6 +12,16 @@ import {
   loadingChecklist,
   type JobChecklistSource,
 } from "@/lib/job-checklist";
+import {
+  ACCEPTANCE_RULE_HEADLINE,
+  ACCEPTANCE_RULE_NOTICE_LINES,
+  TECHNICIAN_ACCEPTANCE_READ_ONLY_NOTICE,
+  gateHeadline,
+  gateMissingLine,
+  parseTechnicianAcceptanceStatus,
+  technicianItemStatusLabel,
+  type TechnicianAcceptanceStatus,
+} from "@/lib/job-acceptance";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import RemnantReportForm, { MaterialMovement, RemnantReportData } from "@/components/technician/remnant-report-form";
 import TechnicianReceiptConfirmation from "@/components/technician/receipt-confirmation";
@@ -271,6 +281,8 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   const [remnantReport, setRemnantReport] = useState<RemnantReportData | null>(null);
   // T8: เกณฑ์ตรวจรับที่ช่างต้องเคลียร์ — อ่านจากแม่แบบที่หัวหน้าช่างเปิดใช้งานอยู่ ไม่ใช่รายการที่ฝังในโค้ด
   const [checklist, setChecklist] = useState<JobChecklistSource>(() => fallbackChecklist("ยังไม่ได้เปิดงาน"));
+  // สถานะตรวจรับของงานนี้ (อ่านอย่างเดียว) — null = ยังไม่รู้/อ่านไม่ได้ ห้ามแปลว่า "ไม่มีอะไรค้าง"
+  const [acceptanceStatus, setAcceptanceStatus] = useState<TechnicianAcceptanceStatus | null>(null);
   const [statusFiles, setStatusFiles] = useState<StatusFilePreview[]>([]);
   const statusFilesRef = useRef<StatusFilePreview[]>([]);
   const [statusNote, setStatusNote] = useState("");
@@ -382,6 +394,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       setCentralWorkOrder(localDemoWorkOrder());
       // โหมดข้อมูลจำลองไม่มี token/PIN จริงให้เรียก RPC จึงแสดงชุดสำรองและบอกตรง ๆ ว่าเป็นชุดสำรอง
       setChecklist(fallbackChecklist("โหมดข้อมูลจำลองไม่ได้อ่านแม่แบบจากระบบจริง"));
+      setAcceptanceStatus(null);
       return;
     }
     if (a.assignmentId) {
@@ -399,6 +412,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       // และเราจะไม่ลดด่านลงเพื่อให้เรียกได้ — ต้อง "จบ" ที่ชุดสำรองพร้อมเหตุผลจริง
       // ไม่ใช่ปล่อยให้จอค้างคำว่า "กำลังโหลด" ตลอดกาลจนดูเหมือนแอปแฮงก์
       setChecklist(checklistWithoutAssignment());
+      setAcceptanceStatus(null);
     } else {
       detailTasks.push(
         supabase.rpc("get_technician_assignment_detail", { p_token: token, p_pin: pin.trim(), p_assignment_id: a.assignmentId })
@@ -434,6 +448,12 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
             }
             setChecklist(checklistFromRpcPayload(data, "ยังไม่มีแม่แบบเกณฑ์ตรวจรับที่เปิดใช้งานสำหรับงานนี้"));
           })
+      );
+      detailTasks.push(
+        // ทางอ่านอย่างเดียว: บอกช่างว่าตอนนี้งานติดอะไรอยู่ ก่อนรถออกจากหน้างาน
+        // ไม่ใช่ให้รู้ตอนออฟฟิศโทรมาบอกวันรุ่งขึ้น ตอนที่กลับไปแก้แพงกว่าเดิมหลายเท่า
+        supabase.rpc("get_technician_job_acceptance_status", { p_token: token, p_pin: pin.trim(), p_assignment_id: a.assignmentId })
+          .then(({ data, error }) => setAcceptanceStatus(error ? null : parseTechnicianAcceptanceStatus(data)))
       );
     }
     await Promise.all(detailTasks.map((task) => Promise.resolve(task)));
@@ -818,22 +838,50 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
                 {checklist.origin === "loading" ? <div className="mt-3 space-y-2" aria-busy="true">
                   {[0, 1, 2].map((row) => <div key={row} className="h-14 animate-pulse rounded-xl bg-slate-100" />)}
                 </div> : null}
+                {acceptanceStatus?.gate ? <div className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-relaxed ${acceptanceStatus.gate.ok ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+                  <div className="font-semibold">{acceptanceStatus.gate.ok ? "✅ " : "⛔ "}{gateHeadline(acceptanceStatus.gate)}</div>
+                  {!acceptanceStatus.gate.ok ? <>
+                    <p className="mt-1">รายการที่ยังทำให้ปิดงานไม่ได้ — ถ้าแก้ได้ตอนยังอยู่หน้างาน จะไม่ต้องกลับมาใหม่:</p>
+                    <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                      {acceptanceStatus.gate.missing.map((miss) => <li key={`${miss.code}-${miss.reason}`}>{gateMissingLine(miss)}</li>)}
+                    </ul>
+                  </> : null}
+                </div> : null}
+
+                <details className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-700">
+                  <summary className="cursor-pointer font-semibold text-slate-800">{ACCEPTANCE_RULE_HEADLINE}</summary>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                    {ACCEPTANCE_RULE_NOTICE_LINES.map((line) => <li key={line}>{line}</li>)}
+                  </ul>
+                </details>
+
                 <ul className="mt-3 space-y-2">
-                  {checklist.items.map((item, index) => <li key={item.code} className="rounded-xl border border-slate-200 px-3 py-2">
-                    <div className="flex items-start gap-2">
-                      <span className="mt-0.5 rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-600">{item.code}</span>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium text-slate-900">{index + 1}. {item.label}</div>
-                        <div className="mt-0.5 text-xs text-slate-500">
-                          {item.spec ? `เกณฑ์: ${item.spec}` : "ไม่ได้ระบุค่าเกณฑ์"}
-                          {item.measuringDeviceKind ? ` · เครื่องมือ: ${item.measuringDeviceKind}` : ""}
-                          {item.requiresPhoto ? " · ต้องมีรูป" : ""}
+                  {checklist.items.map((item, index) => {
+                    const status = technicianItemStatusLabel(acceptanceStatus, item.code);
+                    const tone = status?.tone === "pass" ? "bg-emerald-100 text-emerald-800"
+                      : status?.tone === "fail" ? "bg-rose-100 text-rose-800"
+                      : status?.tone === "na" ? "bg-slate-200 text-slate-700"
+                      : "bg-amber-100 text-amber-800";
+                    return <li key={item.code} className="rounded-xl border border-slate-200 px-3 py-2">
+                      <div className="flex items-start gap-2">
+                        <span className="mt-0.5 rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-600">{item.code}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-medium text-slate-900">{index + 1}. {item.label}</span>
+                            {status ? <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone}`}>{status.text}</span> : null}
+                          </div>
+                          <div className="mt-0.5 text-xs text-slate-500">
+                            {item.spec ? `เกณฑ์: ${item.spec}` : "ไม่ได้ระบุค่าเกณฑ์"}
+                            {item.measuringDeviceKind ? ` · เครื่องมือ: ${item.measuringDeviceKind}` : ""}
+                            {item.requiresPhoto ? " · ต้องมีรูปหลักฐาน" : ""}
+                            {item.isCritical ? " · ข้อสำคัญ" : ""}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </li>)}
+                    </li>;
+                  })}
                 </ul>
-                <p className="mt-3 text-xs text-slate-500">หน้านี้แสดงเกณฑ์ให้ตรวจหน้างาน ส่วนการบันทึกผลผ่าน/ไม่ผ่านทำที่หน้าออฟฟิศ (แท็บ “ตรวจรับ” ในรายละเอียดงาน)</p>
+                <p className="mt-3 text-xs leading-relaxed text-slate-500">{TECHNICIAN_ACCEPTANCE_READ_ONLY_NOTICE}</p>
               </div>
             </WorkSection>
 
