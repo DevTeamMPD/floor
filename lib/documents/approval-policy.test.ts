@@ -1,15 +1,23 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { AUTO_APPROVE_DOCUMENT_CLASSES, DOCUMENT_APPROVER_ROLES, HUMAN_APPROVAL_DOCUMENT_CLASSES, requiresHumanApproval } from "@/lib/documents/approval-policy";
+import { AUTO_APPROVE_DOCUMENT_CLASSES, DOCUMENT_APPROVER_ROLES, DOCUMENT_TYPE_CLASSES, HUMAN_APPROVAL_DOCUMENT_CLASSES, UNKNOWN_DOCUMENT_CLASS, documentClassForType, requiresHumanApproval } from "@/lib/documents/approval-policy";
 import { renderBoq, renderCsat, renderCustomerAcceptance, renderHandover, renderInstallationReport, renderNcr, renderPickConfirmation, renderRemnantReport, renderWorkOrder } from "@/lib/documents/render";
 
 const MIGRATION = path.join(
   process.cwd(), "supabase", "migrations", "20260902230000_document_approval_7_5_2.sql"
 );
 
+const ENFORCEMENT_MIGRATION = path.join(
+  process.cwd(), "supabase", "migrations", "20260903000020_document_class_and_approval_enforced.sql"
+);
+
 function migrationSql() {
   return fs.readFileSync(MIGRATION, "utf8");
+}
+
+function enforcementSql() {
+  return fs.readFileSync(ENFORCEMENT_MIGRATION, "utf8");
 }
 
 describe("นโยบายอนุมัติเอกสาร (ISO 7.5.2)", () => {
@@ -77,5 +85,55 @@ describe("นโยบายอนุมัติเอกสาร (ISO 7.5.2)"
     const definerCount = (sql.match(/security definer/g) ?? []).length;
     const searchPathCount = (sql.match(/set search_path = ''/g) ?? []).length;
     expect(searchPathCount).toBeGreaterThanOrEqual(definerCount);
+  });
+
+  /**
+   * *** กฎ 7.5.2 ต้องอยู่ในที่ที่ข้ามไม่ได้ ไม่ใช่แค่ใน TypeScript ***
+   * เดิมกฎทั้งข้ออยู่ใน generation-worker.ts ตัวเดียว ฐานข้อมูลไม่มีอะไรห้ามการสร้าง
+   * แถว controlled_document ที่ status = 'approved' ตั้งแต่แรก
+   */
+  it("migration ต้องมี trigger บังคับทั้งชั้นเอกสารและด่านอนุมัติที่ระดับตาราง", () => {
+    const sql = enforcementSql();
+    expect(sql).toContain("create trigger floor_job_documents_class_approval_guard_ins");
+    expect(sql).toContain("create trigger floor_job_documents_class_approval_guard_upd");
+    expect(sql).toContain("public.document_requires_human_approval(new.document_class)");
+    expect(sql).toContain("new.approved_by is null");
+    // ค่าเริ่มต้นต้องพลาดไปทางปลอดภัย: ลืมระบุชนิด = ต้องมีคนอนุมัติ
+    expect(sql).toContain("alter column document_class set default 'controlled_document'");
+    expect(UNKNOWN_DOCUMENT_CLASS).toBe("controlled_document");
+    expect(requiresHumanApproval(UNKNOWN_DOCUMENT_CLASS)).toBe(true);
+  });
+
+  it("ตารางชนิด -> ชั้นเอกสารฝั่ง TS ตรงกับ document_class_for_type() ในฐานข้อมูล", () => {
+    const sql = enforcementSql();
+    for (const [documentType, documentClass] of Object.entries(DOCUMENT_TYPE_CLASSES)) {
+      expect(sql).toMatch(new RegExp(`when '${documentType}'\\s+then '${documentClass}'`));
+    }
+    // ชนิดที่ระบบไม่รู้จักต้องพลาดไปทางที่ต้องมีคนอ่าน ไม่ใช่ทางที่ปล่อยผ่าน
+    expect(documentClassForType("ใบเสนอราคาที่อัปโหลดเอง")).toBe("controlled_document");
+    expect(documentClassForType(null)).toBe("controlled_document");
+    expect(documentClassForType("work_order")).toBe("controlled_document");
+    expect(documentClassForType("pick_confirmation")).toBe("quality_record");
+  });
+
+  /** ชั้นที่ renderer ประกาศเอง ต้องตรงกับตารางกลาง ไม่งั้น trigger จะปฏิเสธเอกสารที่ worker สร้าง */
+  it("ชั้นเอกสารที่ renderer ประกาศ ต้องตรงกับตารางกลางทุกชนิด", () => {
+    const declared: Record<string, string> = {
+      work_order: "controlled_document", boq: "controlled_document", ncr: "controlled_document",
+      pick_confirmation: "quality_record", installation_report: "quality_record",
+      customer_acceptance: "quality_record", remnant_report: "quality_record",
+      handover: "quality_record", csat: "quality_record",
+    };
+    const renderSource = fs.readFileSync(path.join(process.cwd(), "lib", "documents", "render.ts"), "utf8");
+    for (const [documentType, documentClass] of Object.entries(declared)) {
+      expect(DOCUMENT_TYPE_CLASSES[documentType]).toBe(documentClass);
+      expect(renderSource).toContain(`documentType: "${documentType}", documentClass: "${documentClass}"`);
+    }
+  });
+
+  it("การอัปโหลดด้วยมือต้องไม่ใส่ quality_record ตายตัวอีกแล้ว", () => {
+    const route = fs.readFileSync(path.join(process.cwd(), "app", "api", "job-documents", "route.ts"), "utf8");
+    expect(route).not.toContain('document_class: "quality_record"');
+    expect(route).toContain("documentClassForType(input.documentType)");
   });
 });

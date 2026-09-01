@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { getCurrentStaff } from "@/lib/staff-server";
 import { createJobDocumentUploadSession, ensureJobDocumentFolder, isSharePointConfigured, SHAREPOINT_UPLOAD_MAX_BYTES, uploadJobDocument, verifyUploadedJobDocument, type SharePointDocument } from "@/lib/sharepoint/floor-job-documents";
+import { documentClassForType } from "@/lib/documents/approval-policy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -88,7 +89,7 @@ async function registerDocument(input: { admin: ReturnType<typeof serviceClient>
   const { error: folderError } = await input.admin.from("floor_job_document_folders").upsert({ job_no: input.jobNo, provider: "sharepoint", provider_folder_id: folder.folderId, provider_folder_url: folder.folderUrl, updated_at: new Date().toISOString() });
   if (folderError) throw folderError;
   const { data: previous } = await input.admin.from("floor_job_documents").select("version").eq("job_no", input.jobNo).eq("document_type", input.documentType).eq("workflow_stage", input.workflowStage).order("version", { ascending: false }).limit(1).maybeSingle();
-  const { data, error } = await input.admin.from("floor_job_documents").insert({ job_no: input.jobNo, document_type: input.documentType, document_class: "quality_record", workflow_stage: input.workflowStage, provider: "sharepoint", provider_item_id: input.uploaded.itemId, provider_web_url: input.uploaded.webUrl, file_name: input.uploaded.fileName, mime_type: input.uploaded.mimeType, file_size_bytes: input.uploaded.fileSizeBytes, version: (previous?.version ?? 0) + 1, change_summary: input.changeSummary || null, uploaded_by: input.uploadedBy }).select("id,job_no,document_type,workflow_stage,provider_web_url,file_name,version,status,created_at").single();
+  const { data, error } = await input.admin.from("floor_job_documents").insert({ job_no: input.jobNo, document_type: input.documentType, document_class: documentClassForType(input.documentType), workflow_stage: input.workflowStage, provider: "sharepoint", provider_item_id: input.uploaded.itemId, provider_web_url: input.uploaded.webUrl, file_name: input.uploaded.fileName, mime_type: input.uploaded.mimeType, file_size_bytes: input.uploaded.fileSizeBytes, version: (previous?.version ?? 0) + 1, change_summary: input.changeSummary || null, uploaded_by: input.uploadedBy }).select("id,job_no,document_type,workflow_stage,provider_web_url,file_name,version,status,created_at").single();
   if (error) throw error;
   const { error: eventError } = await input.admin.from("floor_job_document_events").insert({ document_id: data.id, event_type: "uploaded", actor_id: input.uploadedBy, detail: { file_name: data.file_name, workflow_stage: data.workflow_stage } });
   if (eventError) throw eventError;
