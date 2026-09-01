@@ -66,11 +66,14 @@ describe("รอบคำนวณคะแนนผู้ให้บริก�
     expect(payload.onTimeSample).toBe(35);
     expect(payload.ftpSample).toBe(20);
     expect(payload.ncrCount).toBe(3);
-    // ทีมนี้อยู่ในบริษัทที่เปิดใบ NC จริง (3 ใบต่อ 40 งาน) ความเงียบของงานที่เหลือจึงมีความหมาย
-    // ตัวคูณความน่าเชื่อ = (3/13) x min(1, 0.075/0.05) = 0.231 -> นับเป็นหลักฐานได้ floor(40 x 0.231) = 9 ใบ
-    expect(payload.ncrCredibility).toBeCloseTo(3 / 13, 3);
-    expect(payload.ncrSample).toBe(9);
-    expect(payload.directEvidence).toBe(30 + 35 + 20 + 9);
+    // ทีมนี้อยู่ในบริษัทที่เปิดใบ NC จริง (3 ใบต่อ 40 งาน) ความเงียบของงานที่เหลือจึงเริ่มมีความหมาย
+    // ตัวคูณความน่าเชื่อ = ปริมาณ (3/13) x อัตรา min(1, 3 / (0.05 x (40 + 200))) = 0.231 x 0.25
+    // = 0.058 -> นับเป็นหลักฐานได้ floor(40 x 0.058) = 2 ใบ
+    // (P5-9: ฐานของพจน์อัตราบวกจำนวนงานขั้นต่ำที่ทำให้อัตราเป็นการวัดจริง บริษัทที่เพิ่งทำงาน
+    //  40 ใบจึงยังไม่ได้ความน่าเชื่อเต็มจากการเปิด NC สามใบ — เหตุผลเต็มอยู่ใน lib/provider-eval.ts)
+    expect(payload.ncrCredibility).toBeCloseTo((3 / 13) * 0.25, 3);
+    expect(payload.ncrSample).toBe(2);
+    expect(payload.directEvidence).toBe(30 + 35 + 20 + 2);
     expect(Number(payload.evalAvg)).toBeLessThanOrEqual(5);
     expect(Number(payload.evalScore)).toBeLessThanOrEqual(Number(payload.performanceScore));
   });

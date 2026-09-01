@@ -5,6 +5,7 @@ import {
   EVAL_WEIGHTS,
   MIN_DIRECT_EVIDENCE,
   MIN_JOBS_FOR_STARS,
+  NC_PROCESS_CREDIBLE_JOBS,
   NC_PROCESS_FULL_RATE,
   NC_PROCESS_REPORTS_K,
   NEUTRAL_PRIOR,
@@ -296,10 +297,23 @@ describe("*** ความเงียบจากระบบ NC ไม่ใ�
     expect(ncrProcessCredibility([team({ jobCount: 0, ncrCount: 3 })])).toBe(0);
   });
 
+  it("ค่าคงที่สองตัวต้องผูกกันด้วยสมการเดียว ไม่ใช่ตั้งแยกกันแล้วขัดกันเอง", () => {
+    // K = อัตราเต็ม x จำนวนงานที่ทำให้อัตรานั้นเป็นการวัดจริง
+    // ถ้าใครมาแก้ตัวใดตัวหนึ่งโดยไม่แก้อีกตัว เทสข้อนี้จะแดงทันที
+    expect(NC_PROCESS_REPORTS_K).toBeCloseTo(NC_PROCESS_FULL_RATE * NC_PROCESS_CREDIBLE_JOBS, 10);
+    // และบริษัทที่เปิด NC ที่อัตราเต็มพอดีบนฐานงานที่ถือว่าวัดได้ ต้องได้ความน่าเชื่อครึ่งทางจริง ๆ
+    const atFullRate = ncrProcessCredibility([team({
+      jobCount: NC_PROCESS_CREDIBLE_JOBS,
+      ncrCount: NC_PROCESS_FULL_RATE * NC_PROCESS_CREDIBLE_JOBS,
+    })]);
+    expect(atFullRate).toBeCloseTo(0.25, 6); // = 0.5 (ปริมาณ) x 0.5 (อัตรา) — ครึ่งทางทั้งสองพจน์พอดี
+  });
+
   it("ความน่าเชื่อ = ปริมาณ x อัตรา และไม่มีทางเกิน 1", () => {
     const one = ncrProcessCredibility([team({ jobCount: 40, ncrCount: 1 })]);
     expect(one).toBeCloseTo(
-      (1 / (1 + NC_PROCESS_REPORTS_K)) * Math.min(1, 1 / 40 / NC_PROCESS_FULL_RATE), 8);
+      (1 / (1 + NC_PROCESS_REPORTS_K))
+      * Math.min(1, 1 / (NC_PROCESS_FULL_RATE * (40 + NC_PROCESS_CREDIBLE_JOBS))), 8);
     // ใบเดียวทั้งบริษัท ยังเป็นแค่ "มีคนลองกด" — ต้องไม่ทำให้ความเงียบกลายเป็นคุณภาพในคืนเดียว
     expect(one).toBeLessThan(0.1);
 
@@ -345,7 +359,8 @@ describe("*** ความเงียบจากระบบ NC ไม่ใ�
     const cleanFiling = filing.find((s) => s.teamId === "clean")!;
     const cleanSilent = silent.find((s) => s.teamId === "clean")!;
 
-    expect(cleanFiling.ncrCredibility).toBeGreaterThan(0.5);
+    // 12 ใบบนงาน 80 ใบ = อัตรา 3 เท่าของ "เต็ม" แต่ฐานงานยังเล็ก ความน่าเชื่อจึงยังไม่ถึงเต็ม
+    expect(cleanFiling.ncrCredibility).toBeGreaterThan(0.45);
     expect(cleanFiling.ncrEvidenceJobs).toBe(Math.floor(20 * cleanFiling.ncrCredibility));
     // ศูนย์ NC ในบริษัทที่ตรวจจริง = หลักฐานคุณภาพ ต้องได้คะแนนสูงกว่าค่ากลางชัดเจน
     expect(ncrOf(cleanFiling).raw).toBe(100);
@@ -356,7 +371,59 @@ describe("*** ความเงียบจากระบบ NC ไม่ใ�
     expect(cleanFiling.evalScore!).toBeGreaterThan(filing.find((s) => s.teamId === "filer")!.evalScore!);
   });
 
-  it("*** วันที่ใบ NC ใบแรกของบริษัทถูกเปิด คะแนนต้องไม่กระชากข้ามคืน ***", () => {
+  /**
+   * *** คุณสมบัติที่ค่าคงที่ชุดนี้ถูกออกแบบมาให้ถือ ***
+   *
+   *   "ใบ NC หนึ่งใบที่เปิดในบริษัท ต้องไม่ทำให้ดาวของทีมที่ไม่ได้ถูกเปิด NC ใส่
+   *    ขยับเกิน 0.05 ดวง และต้องไม่ทำให้ 'งานที่นับเป็นหลักฐาน NC ได้' ของทีมใด
+   *    ขยับเกิน 1 งาน"
+   *
+   * ทำไมต้องวัดถึงใบที่ห้า ไม่ใช่แค่ใบแรก: ของเดิมใบแรกผ่านเทสสบาย ๆ (ตัวคูณ 0.043)
+   * แต่ใบที่ "สอง" ต่างหากที่เป็นหน้าผา — ตัวคูณกระโดดเป็น 0.159 (เกือบสี่เท่า)
+   * งานที่นับเป็นหลักฐานของทีม B กระโดดจาก 0 เป็น 3 รวดเดียว ดันทีมที่ไม่ได้ทำอะไรเลย
+   * ข้าม MIN_DIRECT_EVIDENCE แล้วขึ้นดาว 3.68 ข้ามคืน เทสที่ทดสอบแค่ ncrCount: 1
+   * จึงรับรองข้อความที่แคบกว่าข้อความที่สำคัญจริง
+   *
+   * กองงานที่ใช้คือกองจริงของบริษัทวันนี้: 2 ทีม 42 งาน (23 + 19) ยังไม่มีใบ NC สักใบ
+   */
+  it("*** ใบ NC ใบที่หนึ่งถึงห้า คะแนนต้องไต่ทีละน้อย ไม่มีหน้าผาที่ใบไหนเลย ***", () => {
+    const a = team({ teamId: "A", jobCount: 23, csatSum: 12, csatCount: 3, onTimeBase: 1, onTimeCount: 0 });
+    const b = team({ teamId: "B", jobCount: 19, csatSum: 5, csatCount: 1, onTimeBase: 2, onTimeCount: 1 });
+    // ใบทุกใบเปิดใส่ทีม B — ทีม A จึงเป็น "ทีมที่ไม่ได้ทำอะไรเลย" ที่คะแนนต้องไม่กระชาก
+    const days = [0, 1, 2, 3, 4, 5].map((count) =>
+      scoreAllTeams([a, { ...b, ncrWeighted: count, ncrCount: count }]));
+
+    for (let day = 1; day < days.length; day += 1) {
+      const before = days[day - 1];
+      const after = days[day];
+      before.forEach((prev, index) => {
+        const next = after[index];
+        // หลักฐานด้าน NC ขยับได้ทีละงานเดียวต่อใบ ไม่ใช่กระโดดทีละสามงาน
+        expect(next.ncrEvidenceJobs - prev.ncrEvidenceJobs).toBeLessThanOrEqual(1);
+        expect(next.ncrEvidenceJobs).toBeGreaterThanOrEqual(prev.ncrEvidenceJobs);
+        if (prev.teamId === "A") {
+          // +1e-9 กัน floating point ล้วน ๆ (ดาวถูกปัดเป็นทศนิยม 2 ตำแหน่งอยู่แล้ว)
+          expect(Math.abs(next.evalAvg! - prev.evalAvg!)).toBeLessThanOrEqual(0.05 + 1e-9);
+        }
+      });
+    }
+
+    // ใบที่สองต้องไม่ใช่หน้าผาอีกต่อไป — ทั้งสองทีมยังไม่มีใครข้ามประตูดาวจากใบเดียวนั้น
+    expect(days[1].every((score) => score.isProvisional)).toBe(true);
+    expect(days[2].every((score) => score.isProvisional)).toBe(true);
+    expect(days[2].find((s) => s.teamId === "B")!.ncrEvidenceJobs).toBe(0);
+
+    // และตัวคูณเองต้องไต่ต่อเนื่อง ไม่มีขั้นไหนที่โตเกินหนึ่งงานของทีมที่ใหญ่ที่สุด (1/23)
+    // อ่านค่าจากฟังก์ชันตรง ๆ ไม่ใช่จากฟิลด์ที่ถูกปัดเป็นทศนิยม 3 ตำแหน่งเพื่อแสดงผล
+    const kappas = [0, 1, 2, 3, 4, 5].map((count) =>
+      ncrProcessCredibility([a, { ...b, ncrWeighted: count, ncrCount: count }]));
+    for (let day = 1; day < kappas.length; day += 1) {
+      expect(kappas[day] - kappas[day - 1]).toBeGreaterThan(0);
+      expect(kappas[day] - kappas[day - 1]).toBeLessThan(1 / 23);
+    }
+  });
+
+  it("*** ใบ NC ใบแรกของบริษัท ต้องแทบไม่ขยับคะแนนใคร ***", () => {
     const a = team({ teamId: "A", jobCount: 23, csatSum: 12, csatCount: 3, onTimeBase: 1, onTimeCount: 0 });
     const b = team({ teamId: "B", jobCount: 19, csatSum: 5, csatCount: 1, onTimeBase: 2, onTimeCount: 1 });
     const day0 = scoreAllTeams([a, b]);
@@ -368,6 +435,8 @@ describe("*** ความเงียบจากระบบ NC ไม่ใ�
       // และต้องไม่มีทีมไหนข้ามประตูดาวได้เพราะใบเดียวนั้น (เหตุผลที่ปัดเศษลง ไม่ใช่ปัดใกล้)
       expect(after.isProvisional).toBe(before.isProvisional);
     });
+    // ค่าจริงบนกองงานของบริษัทนี้ (42 ใบ) — ตัวเลขที่คอมเมนต์หัวไฟล์อ้างถึง
+    expect(day1[0].ncrCredibility).toBeCloseTo(0.008, 3);
   });
 
   it("งานที่ไม่มี NC นับเป็นหลักฐานได้เฉพาะในบริษัทที่เปิด NC จริง — ประตูดาวจึงขยับตามความจริง", () => {
