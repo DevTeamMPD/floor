@@ -21,6 +21,15 @@ export const ACCEPTANCE_VERIFY_RPC = "verify_job_acceptance_results";
 export const MEASURING_DEVICES_RPC = "get_measuring_devices";
 export const MEASURING_DEVICE_USAGE_RPC = "get_measuring_device_usage";
 export const MEASURING_DEVICE_UPSERT_RPC = "upsert_measuring_device";
+/**
+ * -- MERGE: ฟังก์ชันปิดงาน "รุ่นเก่า" ที่สองค่านี้มาแทน ยังอยู่ในฐานข้อมูลและยังเรียกได้
+ * -- MERGE:   close_floor_work_order_cs_v3(uuid)          <- แทนด้วย cs_v4
+ * -- MERGE:   close_floor_work_order_special(uuid, text)  <- แทนด้วย special_v2
+ * -- MERGE: ตัวเก่าไม่ผ่านด่านตรวจรับ และ authenticated ยังมีสิทธิ์ EXECUTE อยู่
+ * -- MERGE: การถอนสิทธิ์ต้องเกิด "หลัง" หน้าบ้านใหม่ขึ้น production แล้วเท่านั้น
+ * -- MERGE: (ถอนก่อนหน้านั้น = ทั้งบริษัทปิดงานไม่ได้ทันที เพราะ main ยังเรียกตัวเก่า)
+ * -- MERGE: ขั้นตอนเต็ม + คำสั่งตรวจ อยู่ใน MERGE_CHECKLIST.md ข้อ 4
+ */
 export const CLOSE_CS_RPC = "close_floor_work_order_cs_v4";
 export const CLOSE_SPECIAL_RPC = "close_floor_work_order_special_v2";
 

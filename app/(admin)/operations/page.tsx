@@ -106,6 +106,12 @@ export default function OperationsPage() {
     if (!canCloseWork) return;
     if (!reason?.trim()) return;
     setClosingWork(true);
+    // -- MERGE: หน้านี้สลับมาเรียก close_floor_work_order_special_v2 (ตัวที่มีด่านตรวจรับ) แล้ว
+    // -- MERGE: แต่ตัวเก่า close_floor_work_order_special ยังอยู่ในฐานข้อมูล และ authenticated
+    // -- MERGE: ยังมีสิทธิ์ EXECUTE อยู่ = ยิง RPC ตรง ๆ ก็ปิดงานข้ามด่านตรวจรับได้
+    // -- MERGE: ถอนสิทธิ์ตอนนี้ไม่ได้ เพราะ production ยังรันโค้ดเก่าที่เรียกตัวเก่าอยู่
+    // -- MERGE: ต้องถอน "หลัง" หน้าบ้านใหม่ขึ้น production แล้วเท่านั้น — ขั้นตอนเต็มอยู่ใน
+    // -- MERGE: MERGE_CHECKLIST.md ข้อ 4 (ที่เดียวกันกับตัว cs_v3)
     // ส่งการรับทราบไปเฉพาะตอนที่ผู้ใช้กดรับทราบจริง ๆ ไม่ส่ง true ดักไว้ล่วงหน้า
     // ถ้าส่ง true เสมอ ด่านของ close_floor_work_order_special_v2 จะไม่เคยทำงานเลย
     const { error } = await supabase.rpc(CLOSE_SPECIAL_RPC, {

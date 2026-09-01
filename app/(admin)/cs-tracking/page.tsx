@@ -483,6 +483,14 @@ function CsTrackingInner() {
         </div>
       )}
 
+      {/*
+        -- MERGE: หน้านี้สลับมาเรียก close_floor_work_order_cs_v4 (ตัวที่มีด่านตรวจรับ) แล้ว
+        -- MERGE: แต่ตัวเก่า close_floor_work_order_cs_v3 ยังอยู่ในฐานข้อมูล และ authenticated
+        -- MERGE: ยังมีสิทธิ์ EXECUTE อยู่ = ยิง RPC ตรง ๆ ก็ปิดงานข้ามด่านตรวจรับได้
+        -- MERGE: ถอนสิทธิ์ตอนนี้ไม่ได้ เพราะ production ยังรันโค้ดเก่าที่เรียก v3 อยู่
+        -- MERGE: ต้องถอน "หลัง" หน้าบ้านใหม่ขึ้น production แล้วเท่านั้น — ขั้นตอนเต็มอยู่ใน
+        -- MERGE: MERGE_CHECKLIST.md ข้อ 4 (ที่เดียวกันกับตัว special)
+      */}
       {selected && (
         <EvalModal row={selected} questions={questions} readOnly={localPreview} onClose={() => setSelected(null)} onSaved={() => { void (async () => { if (selected.work_order_id && selected.work_order_status === "waiting_cs") { const { error } = await supabase.rpc(CLOSE_CS_RPC, { p_work_order_id: selected.work_order_id }); if (error) toast.error(`บันทึกผลประเมินแล้ว แต่ยังปิดงานไม่ได้ · ${floorErrorMessage(error)}`, { duration: 15000 }); else toast.success("ประเมินและปิดงานเรียบร้อย"); } await load(); })(); }} />
       )}
