@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import QualityReports from "@/components/reports/quality-reports";
 
 /* ============================ Satisfaction (CSAT) ============================ */
 
@@ -551,6 +552,13 @@ export default function DashboardPage() {
           )}
         </>
       )}
+
+      {/*
+        P4-6 — รายงานคุณภาพภายในตาม ISO 9.1.3
+        อยู่นอกก้อน loading ของ CSAT โดยตั้งใจ: ส่วนบนอ่าน Google Sheet ส่วนนี้อ่านฐานข้อมูล
+        ถ้าชีตล่ม รายงานคุณภาพต้องยังอ่านได้ และโหลดช้าที่ฝั่งหนึ่งต้องไม่หน่วงอีกฝั่ง
+      */}
+      <QualityReports />
     </div>
   );
 }
