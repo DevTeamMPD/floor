@@ -20,6 +20,7 @@ interface CsatQueueItem {
   priority: Priority;
   afterSalesCase: string | null;
   ncrNo: string | null;
+  automationStatus: string | null;
 }
 
 const FLOW = [
@@ -42,12 +43,12 @@ const DEMO_ANCHOR = Date.UTC(2026, 7, 31, 18, 0, 0);
 const offset = (hours: number) => new Date(DEMO_ANCHOR + hours * 60 * 60 * 1000).toISOString();
 
 const DEMO_ROWS: CsatQueueItem[] = [
-  { id: "csat-1", jobNo: "ORD-202608-8331", customer: "คุณสุภาวดี พรหมรักษา", signedAt: offset(-79), dueAt: offset(-7), state: "overdue", phone: "08X-XXX-9142", owner: "ยังไม่รับงาน", score: null, issue: null, priority: "urgent", afterSalesCase: null, ncrNo: null },
-  { id: "csat-2", jobNo: "ORD-202608-8293", customer: "คุณปริญญาพร อัตตพงษ์", signedAt: offset(-66), dueAt: offset(6), state: "due_today", phone: "09X-XXX-7021", owner: "คุณอร · CS", score: null, issue: null, priority: "high", afterSalesCase: null, ncrNo: null },
-  { id: "csat-3", jobNo: "ORD-202608-8278", customer: "บริษัท โฮมแอนด์โค จำกัด", signedAt: offset(-26), dueAt: offset(46), state: "waiting", phone: "02-XXX-8851", owner: "CS Queue", score: null, issue: null, priority: "normal", afterSalesCase: null, ncrNo: null },
-  { id: "csat-4", jobNo: "ORD-202608-8137", customer: "คุณนัชชา playspace", signedAt: offset(-120), dueAt: offset(-48), state: "case_opened", phone: "08X-XXX-1288", owner: "คุณเมย์ · CS", score: 2, issue: "พื้นมีเสียงและรอยต่อเปิด", priority: "high", afterSalesCase: "ASC-202609-000014", ncrNo: null },
-  { id: "csat-5", jobNo: "ORD-202608-8064", customer: "คุณศิริพร วัฒนะ", signedAt: offset(-148), dueAt: offset(-76), state: "completed", phone: "06X-XXX-4407", owner: "คุณเมย์ · CS", score: 5, issue: null, priority: "normal", afterSalesCase: null, ncrNo: null },
-  { id: "csat-6", jobNo: "ORD-202608-7970", customer: "บริษัท สยามเวิร์ค จำกัด", signedAt: offset(-218), dueAt: offset(-146), state: "case_opened", phone: "02-XXX-2070", owner: "คุณอร · CS", score: 1, issue: "สินค้าเฉดสีต่างกันหลายกล่อง", priority: "urgent", afterSalesCase: "ASC-202609-000011", ncrNo: "NCR-2569-0017" },
+  { id: "csat-1", jobNo: "ORD-202608-8331", customer: "คุณสุภาวดี พรหมรักษา", signedAt: offset(-79), dueAt: offset(-7), state: "overdue", phone: "08X-XXX-9142", owner: "ยังไม่รับงาน", score: null, issue: null, priority: "urgent", afterSalesCase: null, ncrNo: null, automationStatus: null },
+  { id: "csat-2", jobNo: "ORD-202608-8293", customer: "คุณปริญญาพร อัตตพงษ์", signedAt: offset(-66), dueAt: offset(6), state: "due_today", phone: "09X-XXX-7021", owner: "คุณอร · CS", score: null, issue: null, priority: "high", afterSalesCase: null, ncrNo: null, automationStatus: null },
+  { id: "csat-3", jobNo: "ORD-202608-8278", customer: "บริษัท โฮมแอนด์โค จำกัด", signedAt: offset(-26), dueAt: offset(46), state: "waiting", phone: "02-XXX-8851", owner: "CS Queue", score: null, issue: null, priority: "normal", afterSalesCase: null, ncrNo: null, automationStatus: null },
+  { id: "csat-4", jobNo: "ORD-202608-8137", customer: "คุณนัชชา playspace", signedAt: offset(-120), dueAt: offset(-48), state: "case_opened", phone: "08X-XXX-1288", owner: "คุณเมย์ · CS", score: 2, issue: "พื้นมีเสียงและรอยต่อเปิด", priority: "high", afterSalesCase: "ASC-202609-000014", ncrNo: null, automationStatus: "succeeded" },
+  { id: "csat-5", jobNo: "ORD-202608-8064", customer: "คุณศิริพร วัฒนะ", signedAt: offset(-148), dueAt: offset(-76), state: "completed", phone: "06X-XXX-4407", owner: "คุณเมย์ · CS", score: 5, issue: null, priority: "normal", afterSalesCase: null, ncrNo: null, automationStatus: null },
+  { id: "csat-6", jobNo: "ORD-202608-7970", customer: "บริษัท สยามเวิร์ค จำกัด", signedAt: offset(-218), dueAt: offset(-146), state: "case_opened", phone: "02-XXX-2070", owner: "คุณอร · CS", score: 1, issue: "สินค้าเฉดสีต่างกันหลายกล่อง", priority: "urgent", afterSalesCase: "ASC-202609-000011", ncrNo: "NCR-2569-0017", automationStatus: "succeeded" },
 ];
 
 const STATE_LABEL: Record<QueueState, { label: string; cls: string }> = {
@@ -100,16 +101,18 @@ export default function CsatAutomationPage() {
       const jobNos = [...new Set((followups ?? []).map((row) => row.job_no))];
       if (!jobNos.length) { if (active) { setQueueRows([]); setLoading(false); } return; }
 
-      const [jobsResult, evaluationsResult, casesResult, ncrResult] = await Promise.all([
+      const [jobsResult, evaluationsResult, casesResult, ncrResult, automationResult] = await Promise.all([
         supabase.from("install_jobs").select("job_no,customer_name,customer_phone").in("job_no", jobNos),
         supabase.from("job_evaluations").select("id,job_no,satisfaction_score,issues_text").in("job_no", jobNos),
         supabase.from("floor_after_sales_cases").select("case_no,job_no").in("job_no", jobNos).not("status", "eq", "closed"),
         supabase.from("ncr_reports").select("id,job_no").in("job_no", jobNos).not("status", "eq", "closed"),
+        supabase.from("floor_csat_automation_jobs").select("evaluation_id,status,result_case_id").in("job_no", jobNos),
       ]);
       const jobs = new Map((jobsResult.data ?? []).map((row) => [row.job_no, row]));
       const evaluations = new Map((evaluationsResult.data ?? []).map((row) => [row.job_no, row]));
       const cases = new Map((casesResult.data ?? []).map((row) => [row.job_no, row.case_no]));
       const ncrs = new Map((ncrResult.data ?? []).map((row) => [row.job_no, row.id]));
+      const automations = new Map((automationResult.data ?? []).map((row) => [row.evaluation_id, row.status]));
       const nowMs = Date.now();
       const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date());
       const mapped: CsatQueueItem[] = (followups ?? []).map((followup) => {
@@ -128,6 +131,7 @@ export default function CsatAutomationPage() {
           phone: job?.customer_phone ?? "—", owner: "CS Queue", score,
           issue: evaluation?.issues_text ?? null, priority: state === "overdue" || (score !== null && score <= 2) ? "urgent" : state === "due_today" ? "high" : "normal",
           afterSalesCase: caseNo, ncrNo: ncrs.get(followup.job_no) ?? null,
+          automationStatus: evaluation?.id ? automations.get(evaluation.id) ?? null : null,
         };
       });
       if (active) { setQueueRows(mapped); setLoading(false); }
@@ -155,7 +159,7 @@ export default function CsatAutomationPage() {
     <div className="mx-auto max-w-7xl space-y-5">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div><p className="text-xs font-black uppercase tracking-[0.18em] text-blue-600">Customer Experience Automation</p><h1 className="mt-1 text-2xl font-black text-slate-950">ศูนย์ติดตาม CSAT อัตโนมัติ</h1><p className="mt-1 text-sm text-slate-500">เริ่มนับ 3 วันหลังลูกค้าเซ็น ติดตามทุกงาน และเปิดเคสจากคะแนนต่ำโดยไม่กรอกข้อมูลซ้ำ</p></div>
-        <div className="flex flex-wrap gap-2"><a href="/after-sales" className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700">บริการหลังการขาย</a><a href="/ncr" className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700">NCR</a><button disabled className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white opacity-40">บันทึก CSAT</button></div>
+        <div className="flex flex-wrap gap-2"><a href="/after-sales" className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700">บริการหลังการขาย</a><a href="/ncr" className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700">NCR</a><a href="/cs-tracking" className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white">บันทึก CSAT</a></div>
       </header>
 
       {localPreview ? <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-800">Local preview — ใช้ข้อมูลจำลองและปิดการบันทึกทั้งหมด จึงไม่กระทบงานจริง</div> : <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">Production — แสดงคิวจริงจากลูกค้าที่เซ็นรับงานและครบกำหนดติดตามภายใน 3 วัน</div>}
@@ -182,7 +186,7 @@ export default function CsatAutomationPage() {
           <div><p className="text-xs font-bold text-slate-500">ผู้รับผิดชอบ</p><p className={`mt-1 text-sm font-bold ${row.owner === "ยังไม่รับงาน" ? "text-red-700" : "text-slate-800"}`}>{row.owner}</p></div>
           <div><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black ${STATE_LABEL[row.state].cls}`}>{STATE_LABEL[row.state].label}</span>{row.score !== null && <div className="mt-1 text-xs"><Stars score={row.score} /></div>}</div>
           <div><p className={`text-sm font-black ${row.state === "overdue" ? "text-red-700" : "text-slate-800"}`}>{remaining(row)}</p><p className="mt-1 text-xs text-slate-400">Due {fmt(row.dueAt)}</p></div>
-          <div className="flex items-center justify-between gap-4 lg:justify-end"><span className="text-xs font-bold text-blue-600">{row.afterSalesCase || row.ncrNo || "ดูรายละเอียด"}</span><span className="text-xl text-slate-300">›</span></div>
+          <div className="flex items-center justify-between gap-4 lg:justify-end"><span className={`text-xs font-bold ${row.automationStatus === "failed" ? "text-red-600" : "text-blue-600"}`}>{row.afterSalesCase || row.ncrNo || (["pending","processing","retrying"].includes(row.automationStatus ?? "") ? "กำลังเปิดเคส…" : row.automationStatus === "failed" ? "เปิดเคสไม่สำเร็จ" : "ดูรายละเอียด")}</span><span className="text-xl text-slate-300">›</span></div>
         </button>)}{!loading && rows.length === 0 && <div className="p-12 text-center text-sm text-slate-400">ไม่พบรายการตามตัวกรอง</div>}</div>
       </section>
 
@@ -209,11 +213,11 @@ export default function CsatAutomationPage() {
         <aside className="space-y-4"><section className="rounded-xl border border-slate-200 p-4"><h3 className="text-sm font-black text-slate-900">Automation timeline</h3><div className="mt-4 space-y-4">{[
           ["ลูกค้าเซ็นรับงาน", fmt(selected.signedAt), true], ["สร้าง CSAT follow-up", "ตั้ง due อัตโนมัติ +3 วัน", true],
           ["บันทึกคะแนน", selected.score !== null ? `${selected.score}/5 ดาว` : "ยังรอ CS", selected.score !== null],
-          ["เปิด After-sales case", selected.afterSalesCase || "ยังไม่เข้าเงื่อนไข", !!selected.afterSalesCase], ["ยกระดับ NCR", selected.ncrNo || "ยังไม่เข้าเงื่อนไข", !!selected.ncrNo],
+          ["เปิด After-sales case", selected.afterSalesCase || (["pending","processing","retrying"].includes(selected.automationStatus ?? "") ? "อยู่ในคิวอัตโนมัติ" : selected.automationStatus === "failed" ? "รอตรวจสอบการประมวลผล" : "ยังไม่เข้าเงื่อนไข"), !!selected.afterSalesCase], ["ยกระดับ NCR", selected.ncrNo || "ยังไม่เข้าเงื่อนไข", !!selected.ncrNo],
         ].map(([title, detail, done]) => <div key={String(title)} className="flex gap-3"><span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-black ${done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{done ? "✓" : "·"}</span><div><p className="text-xs font-black text-slate-800">{title}</p><p className="mt-0.5 text-xs text-slate-500">{detail}</p></div></div>)}</div></section>
           {selected.afterSalesCase && <a href="/after-sales" className="block rounded-xl bg-blue-600 px-4 py-3 text-center text-sm font-black text-white">เปิดเคส {selected.afterSalesCase}</a>}
           {selected.ncrNo && <a href="/ncr" className="block rounded-xl bg-red-600 px-4 py-3 text-center text-sm font-black text-white">เปิด {selected.ncrNo}</a>}
-          {!selected.afterSalesCase && <button disabled className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white opacity-35">{localPreview ? "Local preview — ปิดการบันทึก" : "บันทึกผ่านหน้าคิว CS"}</button>}
+          {!selected.afterSalesCase && (localPreview ? <button disabled className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white opacity-35">Local preview — ปิดการบันทึก</button> : <a href={`/cs-tracking?job=${encodeURIComponent(selected.jobNo)}`} className="block w-full rounded-xl bg-slate-900 px-4 py-3 text-center text-sm font-black text-white">บันทึกผ่านหน้าคิว CS</a>)}
         </aside>
       </div>
     </div></div>}
