@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { floorErrorMessage } from "@/lib/floor-error-message";
 import { Badge } from "@/components/ui/badge";
 import type { StaffRole } from "@/lib/staff";
+import MeasuringDeviceRegistry from "@/components/job-templates/measuring-device-registry";
 
 type TaskField = "ball_pit" | "workshop_set" | "gym" | "floor" | "other";
 type TemplateStatus = "draft" | "active" | "retired";
@@ -515,6 +516,10 @@ export default function JobTemplatesPage() {
 
   const clCurrent = clSelectedId ? clTemplates.find((t) => t.id === clSelectedId) ?? null : null;
   const clIsNew = clSelectedId === null;
+  // ชนิดเครื่องมือวัดที่แม่แบบเกณฑ์ตรวจรับ "ประกาศไว้แล้ว" — ใช้เตือนว่าชนิดไหนยังไม่มีตัวจริงในทะเบียน
+  const measuringKindsInUse = Array.from(new Set(
+    clItems.map((item) => item.measuring_device_kind.trim()).filter((kind) => kind !== ""),
+  )).sort();
   const clEditable = canEdit && (clIsNew || clCurrent?.status === "draft" || (clCurrent?.status === "active" && clEditMode));
 
   const prCurrent = prSelectedId ? prTemplates.find((t) => t.id === prSelectedId) ?? null : null;
@@ -821,6 +826,13 @@ export default function JobTemplatesPage() {
           </div>
         </section>
       ) : null}
+
+      {/* ----------------------------------------------------------------
+          ทะเบียนเครื่องมือวัด — อยู่หน้าเดียวกับแม่แบบโดยตั้งใจ
+          เพราะช่อง "ชนิดเครื่องมือวัด" ของเกณฑ์แต่ละข้อถูกพิมพ์ที่หน้านี้
+          คนที่ประกาศว่าต้องวัดด้วยอะไร ควรเห็นทันทีว่าบริษัทมีเครื่องนั้นจริงหรือยัง
+      ---------------------------------------------------------------- */}
+      <MeasuringDeviceRegistry canEdit={canEdit} kindsInUse={measuringKindsInUse} />
 
       {/* ---- job type modal ---- */}
       {jobTypeForm ? (
