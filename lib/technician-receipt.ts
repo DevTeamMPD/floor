@@ -173,8 +173,17 @@ export function parseReceiptPayload(data: unknown): TechnicianReceiptPayload {
 /**
  * บรรทัด "โน้ต Freeform จากหัวหน้าช่าง" ไม่ใช่ของที่หยิบได้ จึงไม่ควรมีปุ่มตรวจรับ
  * เงื่อนไขเดียวกับ isFreeformWorkNote() ใน app/work/[token]/page.tsx (แหล่งเดียวกัน ตัวเลขเดียวกัน)
+ *
+ * P4-1: รับ shape ขั้นต่ำแทนที่จะรับ TechnicianReceiptLine ทั้งก้อน เพื่อให้แผงบันทึกยอดใช้/คืน
+ * (lib/job-usage.ts) ใช้กฎ "บรรทัดไหนไม่ใช่ของ" ตัวเดียวกันได้ ไม่ต้องมีกฎชุดที่สองที่ค่อย ๆ เพี้ยนจากกัน
  */
-export function isNoteOnlyLine(line: TechnicianReceiptLine): boolean {
+export interface NoteOnlyLineShape {
+  category: string | null;
+  plannedQty: number | string | null;
+  unit: string;
+}
+
+export function isNoteOnlyLine(line: NoteOnlyLineShape): boolean {
   return line.category === "tool" && (num(line.plannedQty) ?? 0) === 0 && line.unit === "รายการ";
 }
 

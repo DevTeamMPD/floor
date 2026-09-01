@@ -48,6 +48,8 @@ export interface WorkOrderItem {
   // P3-5: ผลการหยิบรายบรรทัดของคลัง — null ทั้งหมดในแถวเดิม เพราะยังไม่เคยมีใครหยิบผ่านทางนี้
   pick_status?: "picked_full" | "picked_partial" | "unavailable" | null;
   picked_by?: string | null; picked_at?: string | null; pick_note?: string | null;
+  // P4-1: ใครปิดยอด "ใช้ไป/คืนแล้ว" ของบรรทัดนี้เมื่อไหร่ — null ในแถวเดิมทั้งหมด
+  usage_recorded_at?: string | null; usage_recorded_by?: string | null; usage_note?: string | null;
 }
 
 export interface WorkOrderEvent {

@@ -14,6 +14,7 @@ import {
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import RemnantReportForm, { MaterialMovement, RemnantReportData } from "@/components/technician/remnant-report-form";
 import TechnicianReceiptConfirmation from "@/components/technician/receipt-confirmation";
+import TechnicianUsageReturn from "@/components/technician/usage-return";
 import TechnicianPushButton from "@/components/notifications/technician-push-button";
 import TicketChat from "@/components/tickets/ticket-chat";
 import LendiSkeleton from "@/components/brand/lendi-skeleton";
@@ -779,6 +780,15 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
               subtitle="ยืนยันทีละรายการ — ถ้าได้ไม่ครบให้บอกเหตุผล แล้วระบบจะเปิดเรื่องให้เอง ไม่ต้องโทรแจ้งซ้ำ"
             >
               <TechnicianReceiptConfirmation token={token} pin={pin.trim()} assignmentId={selected.assignmentId} demoMode={demoMode} />
+            </WorkSection> : null}
+            {/* P4-1: ปิดยอดของหลังติดตั้ง — ใช้ไปเท่าไหร่ เอากลับมาคืนเท่าไหร่ และเครื่องมือกลับครบไหม
+                วางไว้ต่อจากการตรวจรับโดยตั้งใจ: ช่างตรวจรับตอนของมาถึง แล้วปิดยอดตอนงานจบ เป็นลำดับเดียวกับที่ทำจริงหน้างาน
+                ทุกตัวเลขที่บันทึกจะไปโผล่ใน stock_movements ของงานนี้ทันที และเครื่องมือที่ยังไม่คืนจะขึ้นในรายการของคลัง */}
+            {selected.assignmentId && !selected.isTeamQueue ? <WorkSection
+              title="🧾 ปิดยอดของหลังติดตั้ง"
+              subtitle="ใช้ไปเท่าไหร่ · เอากลับมาคืนเท่าไหร่ — เครื่องมือที่ยังไม่คืนคลังจะเห็นว่ายังอยู่กับทีม"
+            >
+              <TechnicianUsageReturn token={token} pin={pin.trim()} assignmentId={selected.assignmentId} demoMode={demoMode} />
             </WorkSection> : null}
           </div>
 
