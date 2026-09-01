@@ -10,6 +10,7 @@ import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-detail
 import TechnicianAssignmentButton from "@/components/appointments/technician-assignment";
 import { WORK_ITEM_CATEGORIES, WORK_ITEM_CATEGORY_LABELS, WORK_ORDER_STATUS_LABELS, type WorkItemCategory, type WorkOrder, type WorkOrderEvent, workOrderEventLabel, workOrderStatusClass } from "@/lib/work-orders";
 import { JOB_PREP_SOURCE_LABELS, fetchJobPrepList, isLegacyPrepList, type JobPrepDraftItem } from "@/lib/job-prep-list";
+import { PREP_CHANGE_LABELS, addJobPrepItem, fetchJobPrepOverrides, generateJobPrepItems, latestOverrideByItem, prepGenerateMessage, removeJobPrepItem, removedOverrides, saveJobPrepItemOverride, type JobPrepOverride } from "@/lib/job-prep-overrides";
 import type { StaffRole } from "@/lib/staff";
 import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
 import { InlineWorkOrderJobContext } from "@/components/work-orders/inline-work-order-context";
@@ -76,6 +77,8 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
   const supabase = useMemo(() => createClient(), []);
   const [job, setJob] = useState<Job | null>(null); const [appointment, setAppointment] = useState<Appointment | null>(null);
   const [order, setOrder] = useState<WorkOrder | null>(null); const [items, setItems] = useState<DraftItem[]>([]); const [events, setEvents] = useState<WorkOrderEvent[]>([]);
+  // ส่วนต่างจากแม่แบบ — โหลดคู่กับรายการเสมอ เพื่อให้ป้ายบนบรรทัดไม่หลุดจากตัวเลขที่แสดง
+  const [overrides, setOverrides] = useState<JobPrepOverride[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]); const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [teams, setTeams] = useState<Team[]>([]); const [materials, setMaterials] = useState<Material[]>([]);
   const [role, setRole] = useState<StaffRole | null>(null); const [note, setNote] = useState(""); const [warehouseFiles, setWarehouseFiles] = useState<WarehouseFilePreview[]>([]);
@@ -119,11 +122,12 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
     setJob(loadedJob); setAppointment(appt); setRole((profileResult.data?.role as StaffRole | undefined) ?? null); setTechnicians((techResult.data ?? []) as Technician[]); setTeams((teamResult.data ?? []) as Team[]); setMaterials(loadedMaterials);
     setOrder(wo); setNote(wo?.note ?? "");
     if (appt && wo) {
-      const [assignmentResult, prepResult, eventResult] = await Promise.all([
+      const [assignmentResult, prepResult, overrideResult, eventResult] = await Promise.all([
         supabase.from("appointment_technicians").select("*").eq("appointment_id", appt.id).eq("is_active", true),
         // ทางอ่านเดียว: RPC ตัดสินเองว่าจะให้บรรทัดจริงจาก floor_work_order_items
         // หรือถอยไปแผนยุคเดิมใน install_jobs.pick_plan — หน้าจอไม่ต้องรู้แล้ว
         fetchJobPrepList(supabase, decodedJobNo),
+        fetchJobPrepOverrides(supabase, decodedJobNo),
         supabase.from("floor_work_order_events").select("*").eq("work_order_id", wo.id).order("occurred_at", { ascending: false }),
       ]);
       setAssignments((assignmentResult.data ?? []) as Assignment[]);
@@ -132,8 +136,11 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
       // เหลือ fallback ฝั่งหน้าจอไว้ชั้นเดียว: ร่างจาก SKU ต้นทาง ซึ่งไม่ใช่ข้อมูลที่เก็บในฐานข้อมูล
       // จึงไม่ใช่ "แหล่งที่สาม" ของใบเบิกของ และรวมเข้า RPC ไม่ได้
       setItems(prepResult.items.length ? prepResult.items : skuItems(loadedJob, loadedMaterials));
+      // อ่านส่วนต่างไม่สำเร็จต้องเตือน ไม่ใช่แสดงรายการโดยไม่มีป้าย ซึ่งอ่านได้ว่า "ตรงตามแม่แบบทุกบรรทัด"
+      if (overrideResult.error) toast.error(floorErrorMessage(overrideResult.error));
+      setOverrides(overrideResult.overrides);
       setEvents((eventResult.data ?? []) as WorkOrderEvent[]);
-    } else { setAssignments([]); setItems([]); setEvents([]); }
+    } else { setAssignments([]); setItems([]); setOverrides([]); setEvents([]); }
     setLoading(false);
   }, [jobNo, supabase]);
   useEffect(() => { void load(); }, [load]);
@@ -155,6 +162,70 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
     warehouseFilesRef.current.forEach((item) => URL.revokeObjectURL(item.url));
     setWarehouseFiles([]);
   }
+  // ---------------------------------------------------------------------------
+  // P3-2 / P3-3: สร้างรายการจากแม่แบบ และแก้ให้ต่างจากแม่แบบพร้อมเหตุผล
+  // ทุกทางเดินผ่าน RPC ทั้งหมด หน้าจอไม่เขียน floor_work_order_items หรือ
+  // job_prep_item_overrides ตรง ๆ เลย และ RPC บังคับกรอกเหตุผลอยู่แล้ว
+  // ---------------------------------------------------------------------------
+  async function generateFromTemplate() {
+    if (!order) return;
+    setSaving(true);
+    const { result, error } = await generateJobPrepItems(supabase, order.id);
+    setSaving(false);
+    if (error) { toast.error(floorErrorMessage(error)); return; }
+    toast.success(result ? prepGenerateMessage(result) : "สร้างรายการจากแม่แบบแล้ว");
+    void refreshAfterChange();
+  }
+  function askReason(question: string) {
+    const reason = window.prompt(question);
+    if (reason === null) return null;
+    if (!reason.trim()) { toast.error("ต้องระบุเหตุผล เพื่อให้ตรวจย้อนกลับได้ว่าทำไมจึงไม่ใช้ตัวเลขของแม่แบบ"); return null; }
+    return reason.trim();
+  }
+  async function editItemWithReason(item: DraftItem) {
+    if (!item.id) return;
+    const qtyText = window.prompt(`จำนวนใหม่ของ “${item.itemName}” (ตอนนี้ ${item.plannedQty} ${item.unit})`, item.plannedQty);
+    if (qtyText === null) return;
+    const qty = Number(qtyText);
+    if (!Number.isFinite(qty) || qty < 0) { toast.error("จำนวนต้องเป็นตัวเลขไม่ติดลบ"); return; }
+    const reason = askReason("เหตุผลที่แก้ต่างจากแม่แบบ (บังคับกรอก)");
+    if (!reason) return;
+    setSaving(true);
+    const { error } = await saveJobPrepItemOverride(supabase, { itemId: item.id, plannedQty: qty, reason });
+    setSaving(false);
+    if (error) toast.error(floorErrorMessage(error));
+    else { toast.success("บันทึกจำนวนใหม่และเหตุผลแล้ว"); void refreshAfterChange(); }
+  }
+  async function removeItemWithReason(item: DraftItem) {
+    if (!item.id) return;
+    const reason = askReason(`เหตุผลที่ลบ “${item.itemName}” ออกจากรายการ (บังคับกรอก)`);
+    if (!reason) return;
+    setSaving(true);
+    const { error } = await removeJobPrepItem(supabase, { itemId: item.id, reason });
+    setSaving(false);
+    if (error) toast.error(floorErrorMessage(error));
+    else { toast.success("ลบรายการและบันทึกเหตุผลแล้ว"); void refreshAfterChange(); }
+  }
+  async function addItemOutsideTemplate() {
+    if (!order) return;
+    const itemName = window.prompt("ชื่อรายการที่ไม่มีในแม่แบบ");
+    if (!itemName?.trim()) return;
+    const qtyText = window.prompt(`จำนวนของ “${itemName.trim()}”`, "1");
+    if (qtyText === null) return;
+    const qty = Number(qtyText);
+    if (!Number.isFinite(qty) || qty < 0) { toast.error("จำนวนต้องเป็นตัวเลขไม่ติดลบ"); return; }
+    const unit = window.prompt("หน่วย", "ชิ้น");
+    if (unit === null) return;
+    const isTool = window.confirm("เป็นเครื่องมือหรือไม่?\n\nตกลง = เครื่องมือ · ยกเลิก = ของสิ้นเปลือง");
+    const reason = askReason("เหตุผลที่ต้องเพิ่มรายการนอกแม่แบบ (บังคับกรอก)");
+    if (!reason) return;
+    setSaving(true);
+    const { error } = await addJobPrepItem(supabase, { workOrderId: order.id, itemName: itemName.trim(), unit: unit.trim() || "ชิ้น", plannedQty: qty, itemKind: isTool ? "tool" : "consumable", reason });
+    setSaving(false);
+    if (error) toast.error(floorErrorMessage(error));
+    else { toast.success("เพิ่มรายการนอกแม่แบบและบันทึกเหตุผลแล้ว"); void refreshAfterChange(); }
+  }
+
   function selectMaterial(index: number, sku: string) {
     const material = materials.find((row) => row.sku === sku);
     patchItem(index, { sku, ...(material ? { itemName: material.name, unit: material.unit || "ชิ้น" } : {}) });
@@ -200,6 +271,9 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
   const prepSourceNotice = items.length > 0 && items.every((item) => item.source !== "work_order_item")
     ? JOB_PREP_SOURCE_LABELS[isLegacyPrepList(items) ? "pick_plan_legacy" : "sku_catalog"]
     : null;
+  // ส่วนต่างล่าสุดต่อบรรทัด (ตัวเลขของแม่แบบมาจากครั้งแรกที่แก้ ไม่ใช่ค่าที่คนแก้ไว้เอง)
+  const overrideByItem = latestOverrideByItem(overrides);
+  const removedFromTemplate = removedOverrides(overrides);
 
   const missing = [!job.customer_phone ? "เบอร์โทร" : null, !job.address && !job.location_url ? "สถานที่/แผนที่" : null, !job.product_name && !appointment.requirement ? "สินค้า/ขอบเขตงาน" : null, !hasLead ? "หัวหน้าทีมติดตั้ง" : null, !items.length ? "รายการวัสดุ/อุปกรณ์" : null, items.some((item) => item.category === "floor_material" && !item.sku.trim()) ? "SKU วัสดุปูพื้น" : null, items.some((item) => item.plannedQty === "") ? "จำนวนตามแผน" : null].filter((value): value is string => Boolean(value));
 
@@ -220,10 +294,37 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
           {job.source === "bbps" ? <div className="mt-5"><BbpsWorkOrderDetails rawPayload={job.raw_payload} /></div> : null}
         </Card>
         <Card title="3. วัสดุ อุปกรณ์ และของที่ต้องเตรียม" subtitle="หัวหน้ากำหนด SKU และจำนวนตามแผน คลังกรอกเฉพาะจำนวนหยิบจริง">
+          {canEdit ? <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-sm font-semibold text-sky-950">สร้างของสิ้นเปลืองและเครื่องมือจากแม่แบบให้อัตโนมัติ</div>
+                <p className="mt-1 text-xs text-sky-800">คิดจากแม่แบบที่เปิดใช้งานอยู่ · จำนวนคงที่ / ต่อ ตร.ม. (จากข้อมูลสำรวจ) / ต่อชิ้นงาน (จากจำนวนแผ่นวัสดุปูพื้นในใบนี้) แล้วบวกเผื่อเสียหาย</p>
+                <p className="mt-1 text-xs text-sky-700"><b>การปัดเศษ: ปัดขึ้นเสมอ</b> — หน่วยที่นับเป็นชิ้น (หลอด ม้วน ชุด) ปัดขึ้นเป็นจำนวนเต็ม หน่วยที่แบ่งย่อยได้ (เมตร ตร.ม. ลิตร กก.) ปัดขึ้นที่ทศนิยม 2 ตำแหน่ง เพราะหยิบของครึ่งชิ้นออกจากคลังไม่ได้ และของขาดหน้างานแพงกว่าเผื่อเกินหนึ่งหน่วย</p>
+                <p className="mt-1 text-xs text-sky-700">กดซ้ำได้ ระบบจะไม่สร้างบรรทัดซ้ำ และจะไม่ทับบรรทัดที่แก้ไว้เอง บรรทัดที่คลังหยิบไปแล้ว หรือบรรทัดที่ลบทิ้งไปแล้ว</p>
+              </div>
+              <button onClick={() => void generateFromTemplate()} disabled={saving} className="shrink-0 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white disabled:bg-slate-200 disabled:text-slate-500">⟳ สร้างรายการจากแม่แบบ</button>
+            </div>
+          </div> : null}
+          {removedFromTemplate.length ? <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4">
+            <div className="text-sm font-semibold text-rose-900">ลบออกจากแม่แบบ {removedFromTemplate.length} รายการ</div>
+            <div className="mt-2 space-y-1">{removedFromTemplate.map((row) => <p key={row.id} className="text-xs text-rose-800">• {row.templateItemName} · แม่แบบว่า {row.templateQty ?? "—"} {row.templateUnit} — {row.reason} <span className="text-rose-600">({row.changedByName || "ไม่ระบุผู้แก้"} · {row.changedAt ? thaiDate(row.changedAt) : "—"})</span></p>)}</div>
+          </div> : null}
           {prepSourceNotice ? <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4"><div className="text-sm font-semibold text-amber-900">รายการนี้ยังไม่ได้บันทึกเป็นบรรทัดในใบสั่งงาน</div><p className="mt-1 text-sm text-amber-800">ที่มา: {prepSourceNotice}</p><p className="mt-1 text-xs text-amber-700">ตรวจและแก้ให้ตรงหน้างานก่อน แล้วกดยืนยันใบสั่งงานเพื่อบันทึกเป็นรายการจริง</p></div> : null}
           {materialNotes.length ? <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4"><div className="text-sm font-semibold text-indigo-950">ข้อความวัสดุจาก BBPS</div><div className="mt-2 space-y-1">{materialNotes.map((text) => <p key={text} className="whitespace-pre-wrap text-sm text-indigo-800">{text}</p>)}</div><p className="mt-2 text-xs text-indigo-600">หัวหน้าช่างต้องเลือก SKU และจำนวนจริงด้านล่างก่อนอนุมัติ</p></div> : null}
-          <div className="space-y-3">{items.map((item, index) => { const stock = materials.find((row) => row.sku === item.sku); const freeform = isFreeformNote(item); return <div key={item.id ?? index} className={`rounded-xl border p-4 ${freeform ? "border-violet-200 bg-violet-50/50" : item.category === "floor_material" && !item.sku ? "border-amber-300 bg-amber-50/50" : "border-slate-200"}`}>
-            <div className="mb-3 flex items-center justify-between"><div className="font-medium text-slate-900">รายการที่ {index + 1}</div>{canEdit ? <button onClick={() => removeItem(index)} className="text-xs font-medium text-red-500">ลบรายการ</button> : null}</div>
+          <div className="space-y-3">{items.map((item, index) => { const stock = materials.find((row) => row.sku === item.sku); const freeform = isFreeformNote(item); const diff = item.id ? overrideByItem.get(item.id) : undefined; return <div key={item.id ?? index} className={`rounded-xl border p-4 ${freeform ? "border-violet-200 bg-violet-50/50" : item.category === "floor_material" && !item.sku ? "border-amber-300 bg-amber-50/50" : "border-slate-200"}`}>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="font-medium text-slate-900">รายการที่ {index + 1}</div>
+                {diff ? <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-900">{PREP_CHANGE_LABELS[diff.changeKind]} · แม่แบบ {diff.templateQty ?? "—"} {diff.templateUnit || item.unit} → แก้เป็น {diff.humanQty ?? "—"} {diff.humanUnit || item.unit}</span>
+                  : item.isManualOverride ? <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-900">ต่างจากแม่แบบ</span>
+                  : item.templateItemId ? <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">ตรงตามแม่แบบ</span> : null}
+              </div>
+              {canEdit ? (item.id ? <div className="flex gap-2">
+                <button onClick={() => void editItemWithReason(item)} disabled={saving} className="text-xs font-medium text-amber-700">แก้จำนวน (บันทึกเหตุผล)</button>
+                <button onClick={() => void removeItemWithReason(item)} disabled={saving} className="text-xs font-medium text-red-500">ลบ (บันทึกเหตุผล)</button>
+              </div> : <button onClick={() => removeItem(index)} className="text-xs font-medium text-red-500">ลบรายการ</button>) : null}
+            </div>
+            {diff ? <p className="-mt-1 mb-3 text-xs text-amber-800">เหตุผล: {diff.reason} <span className="text-amber-600">({diff.changedByName || "ไม่ระบุผู้แก้"} · {diff.changedAt ? thaiDate(diff.changedAt) : "—"})</span></p> : null}
             {freeform ? <div className="rounded-xl border border-violet-200 bg-white p-3"><div className="text-sm font-semibold text-violet-950">📝 โน้ต Freeform</div><p className="mt-1 text-xs text-violet-700">คำสั่งหรือข้อควรระวังถึงคลังและทีมช่าง · ไม่ใช่รายการเบิก จึงไม่ต้องระบุ SKU หรือจำนวน</p><label className="mt-3 block text-xs font-medium text-slate-600">ข้อความ *<textarea value={item.note} disabled={!canEdit} onChange={(e) => patchItem(index, { note: e.target.value })} rows={4} placeholder="เช่น นัดลูกค้าก่อนเข้าหน้างาน / ห้ามวางวัสดุในโถง / ต้องนำอุปกรณ์ป้องกันเพิ่ม" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm disabled:bg-slate-100" /></label></div> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <label className="text-xs font-medium text-slate-500">ประเภท *<select value={item.category} disabled={!canEdit} onChange={(e) => patchItem(index, { category: e.target.value as WorkItemCategory })} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 text-sm">{WORK_ITEM_CATEGORIES.map((category) => <option key={category} value={category}>{WORK_ITEM_CATEGORY_LABELS[category]}</option>)}</select></label>
               <label className="text-xs font-medium text-slate-500">SKU {item.category === "floor_material" ? "*" : ""}{item.category === "floor_material" ? <select value={item.sku} disabled={!canEdit} onChange={(e) => selectMaterial(index, e.target.value)} className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 font-mono text-sm"><option value="">เลือก SKU</option>{materials.map((material) => <option key={material.id} value={material.sku}>{material.sku} · {material.name}</option>)}</select> : <input list="floor-material-skus" value={item.sku} disabled={!canEdit} onChange={(e) => selectMaterial(index, e.target.value)} placeholder="พิมพ์หรือเลือก SKU" className="mt-1 w-full rounded-lg border bg-white px-3 py-2.5 font-mono text-sm" />}{stock?.qty_on_hand != null ? <span className="mt-1 block text-[11px] text-emerald-600">คงเหลือ {Number(stock.qty_on_hand).toLocaleString()} {stock.unit || "หน่วย"}</span> : item.sku ? <span className="mt-1 block text-[11px] text-slate-500">รายการบริการจาก Catalog · คลังยังไม่ได้ระบุยอดคงเหลือ</span> : null}</label>
@@ -236,7 +337,7 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
             </div>}
           </div>; })}</div>
           <datalist id="floor-material-skus">{materials.map((material) => <option key={material.id} value={material.sku}>{material.name}</option>)}</datalist>
-          {canEdit ? <div className="mt-3 flex flex-wrap gap-2">{WORK_ITEM_CATEGORIES.map((category) => <button key={category} onClick={() => addItem(category)} className="rounded-lg border border-dashed border-blue-300 px-3 py-2 text-xs text-blue-700">+ {WORK_ITEM_CATEGORY_LABELS[category]}</button>)}<button onClick={addFreeformNote} className="rounded-lg border border-dashed border-violet-300 bg-violet-50 px-3 py-2 text-xs font-medium text-violet-700">+ โน้ต Freeform</button></div> : null}
+          {canEdit ? <div className="mt-3 flex flex-wrap gap-2">{WORK_ITEM_CATEGORIES.map((category) => <button key={category} onClick={() => addItem(category)} className="rounded-lg border border-dashed border-blue-300 px-3 py-2 text-xs text-blue-700">+ {WORK_ITEM_CATEGORY_LABELS[category]}</button>)}<button onClick={addFreeformNote} className="rounded-lg border border-dashed border-violet-300 bg-violet-50 px-3 py-2 text-xs font-medium text-violet-700">+ โน้ต Freeform</button><button onClick={() => void addItemOutsideTemplate()} disabled={saving} className="rounded-lg border border-dashed border-amber-400 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">+ เพิ่มรายการนอกแม่แบบ (บันทึกเหตุผล)</button></div> : null}
         </Card>
       </div>
 
