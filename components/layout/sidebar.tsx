@@ -48,7 +48,7 @@ const MOBILE_NAV_BY_ROLE: Partial<Record<StaffRole, string[]>> = {
 const DEFAULT_MOBILE_NAV = ["/home", "/operations", "/orders", "/appointments"];
 
 function NavLink({ item, active, onClick }: { item: NavItem; active: boolean; onClick?: () => void }) {
-  return <Link href={item.href} onClick={onClick} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${active ? "bg-blue-600 font-medium text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}>
+  return <Link href={item.href} onClick={onClick} prefetch={false} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${active ? "bg-blue-600 font-medium text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}>
     <span>{item.icon}</span><span>{item.label}</span>
   </Link>;
 }
@@ -106,7 +106,7 @@ export default function Sidebar({ staff }: { staff: StaffProfile }) {
       </div>
     </div> : null}
     <nav aria-label="เมนูด่วนสำหรับมือถือ" className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-slate-200 bg-white shadow-[0_-4px_18px_rgba(15,23,42,0.08)] md:hidden" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
-      {mobile.map((item) => <Link key={item.href} href={item.href} className={`flex min-h-[56px] flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2 text-[11px] ${active(item) ? "bg-blue-50 text-blue-700" : "text-slate-500"}`}><span className="text-lg leading-none">{item.icon}</span><span className="max-w-20 truncate font-medium">{item.label}</span></Link>)}
+      {mobile.map((item) => <Link key={item.href} href={item.href} prefetch={false} className={`flex min-h-[56px] flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2 text-[11px] ${active(item) ? "bg-blue-50 text-blue-700" : "text-slate-500"}`}><span className="text-lg leading-none">{item.icon}</span><span className="max-w-20 truncate font-medium">{item.label}</span></Link>)}
       <button onClick={() => setMenuOpen(true)} className="flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] text-slate-500"><span className="text-lg leading-none">☰</span><span className="font-medium">เพิ่มเติม</span></button>
     </nav>
   </>;
