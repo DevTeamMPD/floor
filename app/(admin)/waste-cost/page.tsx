@@ -395,7 +395,7 @@ function StageBadge({ stage }: { stage: number }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function WasteCostPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [salesByBillRef, setSalesByBillRef] = useState<Record<string, WasteSalesSummary>>({});
@@ -407,6 +407,9 @@ export default function WasteCostPage() {
   const [mat110, setMat110] = useState<Material | null>(null);
   const [search, setSearch] = useState("");
   const [loadingJobs, setLoadingJobs] = useState(true);
+  const [editingAppointment, setEditingAppointment] = useState(false);
+  const [appointmentDateDraft, setAppointmentDateDraft] = useState("");
+  const [savingAppointment, setSavingAppointment] = useState(false);
 
   const [overviewZonesMap, setOverviewZonesMap] = useState<Record<string, Zone[]>>({});
   const [loadingOverview, setLoadingOverview] = useState(false);
@@ -824,10 +827,49 @@ export default function WasteCostPage() {
   useEffect(() => {
     if (!selectedJobNo) {
       setExclusionReason("");
+      setEditingAppointment(false);
+      setAppointmentDateDraft("");
       return;
     }
     setExclusionReason(exclusionsByJobNo[selectedJobNo]?.reason ?? "");
-  }, [selectedJobNo, exclusionsByJobNo]);
+    const job = jobs.find((row) => row.job_no === selectedJobNo);
+    setAppointmentDateDraft(job?.appt_date ?? "");
+    setEditingAppointment(false);
+  }, [selectedJobNo, exclusionsByJobNo, jobs]);
+
+  const saveAppointmentDate = async () => {
+    if (!selectedJobNo || savingAppointment) return;
+    if (!appointmentDateDraft) {
+      toast.error("กรุณาเลือกวันนัด");
+      return;
+    }
+
+    setSavingAppointment(true);
+    if (IS_LOCAL_PREVIEW) {
+      setJobs((previous) => previous.map((job) =>
+        job.job_no === selectedJobNo ? { ...job, appt_date: appointmentDateDraft } : job
+      ));
+      setSavingAppointment(false);
+      setEditingAppointment(false);
+      toast.success("บันทึกวันนัดแล้ว (ข้อมูลสาธิต Local)");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("install_jobs")
+      .update({ appt_date: appointmentDateDraft })
+      .eq("job_no", selectedJobNo);
+    setSavingAppointment(false);
+    if (error) {
+      toast.error("แก้ไขวันนัดไม่ได้: " + floorErrorMessage(error));
+      return;
+    }
+    setJobs((previous) => previous.map((job) =>
+      job.job_no === selectedJobNo ? { ...job, appt_date: appointmentDateDraft } : job
+    ));
+    setEditingAppointment(false);
+    toast.success("บันทึกวันนัดในใบงานแล้ว");
+  };
 
   const excludeSelectedJob = async () => {
     if (!selectedJobNo || savingExclusion || exclusionsByJobNo[selectedJobNo]) return;
@@ -1050,10 +1092,10 @@ export default function WasteCostPage() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-full gap-4 min-h-0">
+    <div className="flex min-h-0 gap-4 md:h-[calc(100dvh-3rem)] md:overflow-hidden">
 
       {/* ── Left: Job list ── */}
-      <div className="w-64 flex-shrink-0 flex flex-col border border-slate-200 rounded-xl overflow-hidden bg-white">
+      <div className="flex w-64 flex-shrink-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white md:sticky md:top-6 md:h-full">
         <div className="p-3 border-b border-slate-100 bg-slate-50 space-y-2">
           <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">ต้นทุนเศษ</h2>
           <button
@@ -1086,7 +1128,7 @@ export default function WasteCostPage() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {loadingJobs ? (
             <p className="text-xs text-slate-400 text-center py-8">⏳ กำลังโหลด…</p>
           ) : filteredJobs.length === 0 ? (
@@ -1125,7 +1167,7 @@ export default function WasteCostPage() {
       </div>
 
       {/* ── Right panel ── */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
 
         {/* ===== OVERVIEW ===== */}
         {viewMode === "overview" && (
@@ -1323,8 +1365,52 @@ export default function WasteCostPage() {
                     <p className="font-mono text-blue-600">{(selectedJob?.order_no as string | null) || "—"}</p>
                   </div>
                   <div>
-                    <p className="text-slate-400 text-[10px] mb-0.5">วันนัด</p>
-                    <p className="text-slate-800">{fmtDate((selectedJob?.appt_date as string | null) ?? null)}</p>
+                    <div className="mb-0.5 flex items-center justify-between gap-2">
+                      <p className="text-[10px] text-slate-400">วันนัด · จากใบงาน</p>
+                      {!editingAppointment && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAppointmentDateDraft(selectedJob?.appt_date ?? "");
+                            setEditingAppointment(true);
+                          }}
+                          className="text-[10px] font-semibold text-blue-600 hover:underline"
+                        >
+                          ✎ แก้ไข
+                        </button>
+                      )}
+                    </div>
+                    {editingAppointment ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          type="date"
+                          value={appointmentDateDraft}
+                          onInput={(event) => setAppointmentDateDraft(event.currentTarget.value)}
+                          className="min-w-0 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                        />
+                        <button
+                          type="button"
+                          onClick={saveAppointmentDate}
+                          disabled={savingAppointment || !appointmentDateDraft}
+                          className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-[10px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {savingAppointment ? "กำลังบันทึก…" : "บันทึก"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAppointmentDateDraft(selectedJob?.appt_date ?? "");
+                            setEditingAppointment(false);
+                          }}
+                          disabled={savingAppointment}
+                          className="px-1 py-1.5 text-[10px] text-slate-500 hover:text-slate-800 disabled:opacity-50"
+                        >
+                          ยกเลิก
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="font-medium text-slate-800">{fmtDate(selectedJob?.appt_date ?? null)}</p>
+                    )}
                   </div>
                   <div className="col-span-2">
                     <p className="text-slate-400 text-[10px] mb-0.5">ที่อยู่</p>
