@@ -7,7 +7,12 @@ const BKK = "+07:00";
 const WORK_START = "09:00";
 const WORK_END = "17:00";
 
-export interface BbpsWorkOrder { seq?: number; start?: string | null; end?: string | null }
+export interface BbpsWorkOrder {
+  seq?: number;
+  start?: string | null;
+  end?: string | null;
+  contact_phone?: string | null;
+}
 export interface BbpsJob {
   id: string;
   quoteNumber?: string | null;
@@ -22,6 +27,25 @@ export interface BbpsJob {
   installStart?: string | null;
   installEnd?: string | null;
   workOrders?: BbpsWorkOrder[] | null;
+}
+
+function nonBlank(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+/**
+ * contract รุ่นแรกเก็บเบอร์ผู้ติดต่อหน้างานไว้ใน workOrders[].contact_phone
+ * แต่ Floor อ่าน customerPhone ระดับบน จึงต้องรองรับทั้ง payload ใหม่และรายการเก่าที่ค้างใน outbox
+ */
+export function contactPhoneFor(j: BbpsJob): string | null {
+  const canonical = nonBlank(j.customerPhone);
+  if (canonical) return canonical;
+
+  return [...(j.workOrders ?? [])]
+    .sort((a, b) => (a.seq ?? Number.MAX_SAFE_INTEGER) - (b.seq ?? Number.MAX_SAFE_INTEGER))
+    .map((workOrder) => nonBlank(workOrder.contact_phone))
+    .find((phone): phone is string => phone !== null) ?? null;
 }
 
 function yearOf(s: string | null | undefined): number | null {
@@ -243,10 +267,11 @@ async function upsertTicket(supabase: SupabaseClient, j: BbpsJob, dates: string[
 
   const jobNo = (existing?.job_no as string | undefined) ?? fallbackJobNo;
   const firstDate = dates[0] ?? null;
+  const customerPhone = contactPhoneFor(j);
   const missing = [
     !j.quoteNumber ? "เลขอ้างอิง BBPS" : null,
     !j.customerName ? "ชื่อลูกค้า" : null,
-    !j.customerPhone ? "เบอร์โทร" : null,
+    !customerPhone ? "เบอร์โทร" : null,
     !j.address && !j.locationUrl ? "ที่อยู่หรือแผนที่" : null,
   ].filter((x): x is string => Boolean(x));
   const needsInfo = missing.length > 0;
@@ -254,7 +279,7 @@ async function upsertTicket(supabase: SupabaseClient, j: BbpsJob, dates: string[
     order_no: j.quoteNumber || fallbackJobNo,
     bill_no: j.quoteNumber || null,
     customer_name: j.customerName || null,
-    customer_phone: j.customerPhone || null,
+    customer_phone: customerPhone,
     address: j.address || null,
     ...(j.locationUrl ? { location_url: j.locationUrl } : {}),
     ...(j.productName ? { product_name: j.productName } : {}),

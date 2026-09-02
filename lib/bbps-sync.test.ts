@@ -6,10 +6,39 @@ import {
   formatClashNote,
   mergeClashFlag,
   buildClashNotice,
+  contactPhoneFor,
   CLASH_FLAG_PREFIX,
   type BbpsJob,
   type ClashRow,
 } from "./bbps-sync";
+
+describe("contactPhoneFor", () => {
+  it("ใช้ customerPhone ระดับบนเป็น contract หลัก", () => {
+    expect(contactPhoneFor({
+      id: "1",
+      customerPhone: " 081-111-1111 ",
+      workOrders: [{ seq: 1, contact_phone: "082-222-2222" }],
+    })).toBe("081-111-1111");
+  });
+
+  it("fallback ไปที่ contact_phone ของใบสั่งงานลำดับแรกสำหรับ payload รุ่นเก่า", () => {
+    expect(contactPhoneFor({
+      id: "1",
+      workOrders: [
+        { seq: 2, contact_phone: "082-222-2222" },
+        { seq: 1, contact_phone: "089-1330101" },
+      ],
+    })).toBe("089-1330101");
+  });
+
+  it("ข้ามค่าว่าง และคืน null เมื่อไม่มีเบอร์ติดต่อ", () => {
+    expect(contactPhoneFor({
+      id: "1",
+      customerPhone: " ",
+      workOrders: [{ seq: 1, contact_phone: "" }, { seq: 2, contact_phone: null }],
+    })).toBeNull();
+  });
+});
 
 describe("collectBlockDates", () => {
   it("วันเดียว → คืนวันนั้น (ไม่เลื่อนวันจาก timezone)", () => {
