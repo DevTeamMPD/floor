@@ -16,12 +16,12 @@ function cx(...parts: (string | false | undefined)[]) {
 
 interface MaterialItem {
   thickness?: string; color?: string;
-  widthCm?: "110" | "140" | "";
+  widthCm?: string;
   lengthCm?: string; qty?: string;
 }
 interface ReturnItem {
   thickness?: string; color?: string;
-  widthCm?: "110" | "140" | "";
+  widthCm?: string;
   lengthCm?: string; qty?: string;
 }
 interface HandoverData {
@@ -33,7 +33,7 @@ interface HandoverData {
 
 interface EditRow {
   _localId: string;
-  widthCm: "110" | "140" | "";
+  widthCm: string;
   lengthCm: string;
   qty: string;
   thickness: string;
@@ -58,6 +58,7 @@ interface Material { id: string; sku: string; unit_cost: number | null; }
 interface StockSummary {
   issued_140: number; returned_140: number;
   issued_110: number; returned_110: number;
+  byWidth: Record<string, { issued: number; returned: number }>;
 }
 
 interface Movement {
@@ -81,22 +82,32 @@ function parseHandoverSummary(raw: unknown): StockSummary | null {
     else if (typeof raw === "object") h = raw as HandoverData;
     else return null;
 
-    const s: StockSummary = { issued_140: 0, returned_140: 0, issued_110: 0, returned_110: 0 };
+    const s: StockSummary = { issued_140: 0, returned_140: 0, issued_110: 0, returned_110: 0, byWidth: {} };
     let hasData = false;
     for (const m of h.materials ?? []) {
       const qty = Number(m.qty) || 1;
       const len = Number(m.lengthCm ?? 0);
-      if (len > 0) {
-        if (m.widthCm === "140") { s.issued_140 += qty * len; hasData = true; }
-        if (m.widthCm === "110") { s.issued_110 += qty * len; hasData = true; }
+      const width = Number(m.widthCm ?? 0);
+      if (len > 0 && width > 0) {
+        const widthKey = String(width);
+        s.byWidth[widthKey] ??= { issued: 0, returned: 0 };
+        s.byWidth[widthKey].issued += qty * len;
+        if (width === 140) s.issued_140 += qty * len;
+        if (width === 110) s.issued_110 += qty * len;
+        hasData = true;
       }
     }
     for (const r of h.returnItems ?? []) {
       const qty = Number(r.qty) || 1;
       const len = Number(r.lengthCm ?? 0);
-      if (len > 0) {
-        if (r.widthCm === "140") { s.returned_140 += qty * len; hasData = true; }
-        if (r.widthCm === "110") { s.returned_110 += qty * len; hasData = true; }
+      const width = Number(r.widthCm ?? 0);
+      if (len > 0 && width > 0) {
+        const widthKey = String(width);
+        s.byWidth[widthKey] ??= { issued: 0, returned: 0 };
+        s.byWidth[widthKey].returned += qty * len;
+        if (width === 140) s.returned_140 += qty * len;
+        if (width === 110) s.returned_110 += qty * len;
+        hasData = true;
       }
     }
     return hasData ? s : null;
@@ -119,12 +130,17 @@ function makeEditRow(): EditRow {
 function handoverToEditRows(items: (MaterialItem | ReturnItem)[]): EditRow[] {
   return items.map((m) => ({
     _localId: Math.random().toString(36).slice(2),
-    widthCm: (m.widthCm ?? "") as "110" | "140" | "",
+    widthCm: m.widthCm ?? "",
     lengthCm: m.lengthCm ?? "",
     qty: m.qty ?? "1",
     thickness: m.thickness ?? "",
     color: m.color ?? "",
   }));
+}
+
+function actualAreaFromSummary(summary: StockSummary): number {
+  return Object.entries(summary.byWidth).reduce((area, [width, totals]) =>
+    area + (totals.issued - totals.returned) * Number(width), 0);
 }
 
 interface ObstacleReduction { alongWidth: number; alongLength: number; }
@@ -365,16 +381,19 @@ export default function WasteCostPage() {
       .order("created_at", { ascending: false });
     setMovements(data ?? []);
     if (!handoverSummary) {
-      const s: StockSummary = { issued_140: 0, returned_140: 0, issued_110: 0, returned_110: 0 };
+      const s: StockSummary = {
+        issued_140: 0, returned_140: 0, issued_110: 0, returned_110: 0,
+        byWidth: { "140": { issued: 0, returned: 0 }, "110": { issued: 0, returned: 0 } },
+      };
       let hasData = false;
       (data ?? []).forEach((row) => {
         const q = Number(row.qty);
         if (row.material_id === mat140.id) {
-          if (row.type === "out") { s.issued_140 += q; hasData = true; }
-          else if (row.type === "return") { s.returned_140 += q; hasData = true; }
+          if (row.type === "out") { s.issued_140 += q; s.byWidth["140"].issued += q; hasData = true; }
+          else if (row.type === "return") { s.returned_140 += q; s.byWidth["140"].returned += q; hasData = true; }
         } else if (row.material_id === mat110.id) {
-          if (row.type === "out") { s.issued_110 += q; hasData = true; }
-          else if (row.type === "return") { s.returned_110 += q; hasData = true; }
+          if (row.type === "out") { s.issued_110 += q; s.byWidth["110"].issued += q; hasData = true; }
+          else if (row.type === "return") { s.returned_110 += q; s.byWidth["110"].returned += q; hasData = true; }
         }
       });
       setStockSummary(hasData ? s : null);
@@ -543,6 +562,12 @@ export default function WasteCostPage() {
 
   const saveHandoverEdit = async () => {
     if (!selectedJobNo) return;
+    const invalidWidth = [...editMats, ...editRets].some((row) =>
+      row.widthCm !== "" && (!Number.isFinite(Number(row.widthCm)) || Number(row.widthCm) <= 0));
+    if (invalidWidth) {
+      toast.error("ความกว้างต้องเป็นตัวเลขมากกว่า 0 ซม.");
+      return;
+    }
     setSavingHandover(true);
     const job = jobs.find((j) => j.job_no === selectedJobNo);
     const existing = parseHandoverData(job?.handover_data);
@@ -623,10 +648,7 @@ export default function WasteCostPage() {
     };
   }, [stockSummary, expected]);
 
-  const totalActualArea = useMemo(() => {
-    if (!wasteCalc) return null;
-    return wasteCalc.actual140 * 140 + wasteCalc.actual110 * 110;
-  }, [wasteCalc]);
+  const totalActualArea = useMemo(() => stockSummary ? actualAreaFromSummary(stockSummary) : null, [stockSummary]);
 
   const wasteAreaCm2 = totalActualArea !== null && totalZoneArea > 0
     ? totalActualArea - totalZoneArea : null;
@@ -662,7 +684,7 @@ export default function WasteCostPage() {
       const wasteCost = actualCost !== null ? actualCost - expectedCost : null;
       // area
       const zoneArea = jzones.reduce((s, z) => s + (z.width_cm > 0 && z.length_cm > 0 ? z.width_cm * z.length_cm : 0), 0);
-      const actArea = actual140 !== null && actual110 !== null ? actual140 * 140 + actual110 * 110 : null;
+      const actArea = mov ? actualAreaFromSummary(mov) : null;
       const wasteArea = actArea !== null && zoneArea > 0 ? actArea - zoneArea : null;
       const wasteAreaPct = wasteArea !== null && zoneArea > 0 ? (wasteArea / zoneArea) * 100 : null;
       return {
@@ -1333,12 +1355,12 @@ export default function WasteCostPage() {
                   </p>
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
-                    {[
-                      { label: "เบิก RS-140", val: stockSummary.issued_140, cls: "text-red-600" },
-                      { label: "คืน RS-140", val: stockSummary.returned_140, cls: "text-blue-600" },
-                      { label: "เบิก RS-110", val: stockSummary.issued_110, cls: "text-red-600" },
-                      { label: "คืน RS-110", val: stockSummary.returned_110, cls: "text-blue-600" },
-                    ].map((s) => (
+                    {Object.entries(stockSummary.byWidth)
+                      .sort(([a], [b]) => Number(b) - Number(a))
+                      .flatMap(([width, totals]) => [
+                        { label: `เบิก กว้าง ${width} ซม.`, val: totals.issued, cls: "text-red-600" },
+                        { label: `คืน กว้าง ${width} ซม.`, val: totals.returned, cls: "text-blue-600" },
+                      ]).map((s) => (
                       <div key={s.label} className="bg-slate-50 rounded-lg px-3 py-2 text-center">
                         <p className="text-[10px] text-slate-400">{s.label}</p>
                         <p className={`text-sm font-bold font-mono ${s.cls}`}>{fmtCm(s.val)} cm</p>
@@ -1386,13 +1408,9 @@ export default function WasteCostPage() {
                             {editMats.map((r) => (
                               <tr key={r._localId}>
                                 <td className="py-1.5 pr-2">
-                                  <select value={r.widthCm}
-                                    onChange={(e) => patchMat(r._localId, "widthCm", e.target.value as "110" | "140" | "")}
-                                    className="px-2 py-1 border border-slate-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400">
-                                    <option value="">—</option>
-                                    <option value="140">RS-140</option>
-                                    <option value="110">RS-110</option>
-                                  </select>
+                                  <input type="number" min="0.1" step="0.1" list="material-width-presets" value={r.widthCm}
+                                    onChange={(e) => patchMat(r._localId, "widthCm", e.target.value)} placeholder="เช่น 125"
+                                    className="w-24 px-2 py-1 border border-slate-200 rounded text-right text-xs focus:outline-none focus:ring-1 focus:ring-blue-400" />
                                 </td>
                                 <td className="py-1.5 pr-2 text-right">
                                   <input type="number" min={0} value={r.lengthCm} onChange={(e) => patchMat(r._localId, "lengthCm", e.target.value)} placeholder="0"
@@ -1443,13 +1461,9 @@ export default function WasteCostPage() {
                             {editRets.map((r) => (
                               <tr key={r._localId}>
                                 <td className="py-1.5 pr-2">
-                                  <select value={r.widthCm}
-                                    onChange={(e) => patchRet(r._localId, "widthCm", e.target.value as "110" | "140" | "")}
-                                    className="px-2 py-1 border border-slate-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400">
-                                    <option value="">—</option>
-                                    <option value="140">RS-140</option>
-                                    <option value="110">RS-110</option>
-                                  </select>
+                                  <input type="number" min="0.1" step="0.1" list="material-width-presets" value={r.widthCm}
+                                    onChange={(e) => patchRet(r._localId, "widthCm", e.target.value)} placeholder="เช่น 125"
+                                    className="w-24 px-2 py-1 border border-slate-200 rounded text-right text-xs focus:outline-none focus:ring-1 focus:ring-blue-400" />
                                 </td>
                                 <td className="py-1.5 pr-2 text-right">
                                   <input type="number" min={0} value={r.lengthCm} onChange={(e) => patchRet(r._localId, "lengthCm", e.target.value)} placeholder="0"
@@ -1480,6 +1494,8 @@ export default function WasteCostPage() {
                       </div>
                     )}
 
+                    <datalist id="material-width-presets"><option value="110" /><option value="140" /></datalist>
+                    <p className="mt-2 text-[10px] text-slate-400">ระบุความกว้างจริงเป็นเซนติเมตรได้ทุกค่า เช่น 90, 125 หรือ 152.5</p>
                     <div className="flex gap-2 mt-4 pt-3 border-t border-slate-100">
                       <button onClick={saveHandoverEdit} disabled={savingHandover}
                         className="px-4 py-1.5 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50">
@@ -1616,7 +1632,7 @@ export default function WasteCostPage() {
 
                   {wasteAreaCm2 !== null && (
                     <p className="text-[10px] text-slate-300 mt-3">
-                      พื้นที่แผ่นจริง = (เบิก RS-140 × 140) + (เบิก RS-110 × 110) หน่วย cm² — พื้นที่โซน = ผลรวม กว้าง × ยาว ทุกโซน
+                      พื้นที่แผ่นจริง = ผลรวม (ความยาวสุทธิ × ความกว้างจริง) ของวัสดุทุกขนาด — พื้นที่โซน = ผลรวม กว้าง × ยาว ทุกโซน
                     </p>
                   )}
                 </div>
