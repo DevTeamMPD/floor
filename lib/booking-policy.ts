@@ -17,6 +17,10 @@ export function isHolidayBooking(form: HolidayBookingDraft) {
   return HOLIDAY_BOOKING_PATTERN.test(form.notes) && !form.bill_no.trim() && !form.customer_name.trim();
 }
 
+export function enableHolidayBooking<T extends HolidayBookingDraft>(form: T): T {
+  return { ...form, notes: "วันหยุด", bill_no: "", customer_name: "" };
+}
+
 export function hasUnrestrictedHolidayBookingPrivilege(email: string | null | undefined) {
   return normalizeEmail(email) === UNRESTRICTED_HOLIDAY_BOOKING_EMAIL;
 }

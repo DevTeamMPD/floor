@@ -10,7 +10,7 @@ import { WORK_ORDER_STATUS_LABELS, workOrderEventLabel, workOrderStatusClass, ty
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import TicketChat from "@/components/tickets/ticket-chat";
 import LendiSkeleton from "@/components/brand/lendi-skeleton";
-import { canBypassBookingPolicy, hasUnrestrictedHolidayBookingPrivilege, isHolidayBooking } from "@/lib/booking-policy";
+import { canBypassBookingPolicy, enableHolidayBooking, hasUnrestrictedHolidayBookingPrivilege, isHolidayBooking } from "@/lib/booking-policy";
 
 interface Team { id: string; name: string }
 interface Appt {
@@ -455,6 +455,13 @@ export default function ShareQueuePage() {
   function clearQueueDraft() {
     window.localStorage.removeItem(QUEUE_DRAFT_KEY);
     setQueueDraft(null);
+  }
+
+  function toggleHolidayBooking() {
+    setForm((current) => {
+      if (!current) return current;
+      return isHolidayBooking(current) ? { ...current, notes: "" } : enableHolidayBooking(current);
+    });
   }
 
   function closeFormWithDraft() {
@@ -1051,7 +1058,7 @@ export default function ShareQueuePage() {
           ))}
           <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-slate-200" />🏖️ วันหยุด</span>
           <span className="inline-flex items-center gap-1 text-slate-400"><span className="inline-block w-3 h-3 rounded border border-dashed border-slate-400" />รอยืนยัน (เส้นประ)</span>
-          <span className="inline-flex items-center gap-1 text-amber-700"><span className="inline-block h-3 w-3 rounded bg-amber-200" />ทีม B ยังไม่พร้อมจอง (เกิน {TEAM_B_MAX_LEAD_DAYS} วัน · ยกเว้นวันที่มีคิว BBPS แล้ว)</span>
+          <span className={`inline-flex items-center gap-1 ${hasHolidayBookingPrivilege ? "text-emerald-700" : "text-amber-700"}`}><span className={`inline-block h-3 w-3 rounded ${hasHolidayBookingPrivilege ? "bg-emerald-200" : "bg-amber-200"}`} />{hasHolidayBookingPrivilege ? `งานปกติทีม B เกิน ${TEAM_B_MAX_LEAD_DAYS} วัน · วันหยุดจองได้` : `ทีม B ยังไม่พร้อมจอง (เกิน ${TEAM_B_MAX_LEAD_DAYS} วัน · ยกเว้นวันที่มีคิว BBPS แล้ว)`}</span>
           {refreshing ? <span className="text-blue-700">◌ กำลังอัปเดตคิว…</span> : queueUpdatedAt ? <span className="text-emerald-700">● อัปเดตคิวล่าสุดแล้ว {new Date(queueUpdatedAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })}</span> : null}
         </div>
 
@@ -1079,7 +1086,7 @@ export default function ShareQueuePage() {
                     </div>
                     <div className="mt-0.5 space-y-0.5 flex-1">
                       {meetingMark && <div title={meetingMark} className="rounded border border-violet-200 bg-violet-50 px-1 py-0.5 text-[9px] leading-tight text-violet-800">📌 09:00–12:00 Meeting พี่พั๊น + ทีม DC<br />รับคิวบ่าย ≤15 ตร.ม.</div>}
-                      {teamBUnavailable && <div className="rounded border border-amber-200 bg-amber-50 px-1 py-0.5 text-[9px] leading-tight text-amber-800">⏳ ทีม B · ยังไม่พร้อมจอง</div>}
+                      {teamBUnavailable && (hasHolidayBookingPrivilege ? <div className="rounded border border-emerald-200 bg-emerald-50 px-1 py-0.5 text-[9px] leading-tight text-emerald-800">🏖️ วันหยุดทีม B · จองได้</div> : <div className="rounded border border-amber-200 bg-amber-50 px-1 py-0.5 text-[9px] leading-tight text-amber-800">⏳ ทีม B · ยังไม่พร้อมจอง</div>)}
                       {dayAppts.map((a) => (
                         <button key={a.id} onClick={(ev) => { ev.stopPropagation(); openDetail(a); }} className={`w-full text-left rounded px-1 py-0.5 text-[10px] leading-tight ${chipCls(a)} hover:brightness-95`}>
                           <span className="font-semibold">{isHoliday(a) ? "🏖️" : fmtTime(a.slot_start)}</span> {teamName(a.tech_id)}
@@ -1108,7 +1115,7 @@ export default function ShareQueuePage() {
                   </div>
                   <div className="p-1.5 space-y-1.5 flex-1">
                     {meetingMark && <div title={meetingMark} className="rounded-lg border border-violet-200 bg-violet-50 px-1.5 py-1 text-[10px] leading-tight text-violet-800">📌 09:00–12:00 Meeting พี่พั๊น + ทีม DC<br />รับคิวบ่าย ≤15 ตร.ม.</div>}
-                    {teamBUnavailable && <div className="rounded-lg border border-amber-200 bg-amber-50 px-1.5 py-1 text-[10px] leading-tight text-amber-800">⏳ ทีม B ยังไม่พร้อมจอง</div>}
+                    {teamBUnavailable && (hasHolidayBookingPrivilege ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-1.5 py-1 text-[10px] leading-tight text-emerald-800">🏖️ วันหยุดทีม B · จองได้</div> : <div className="rounded-lg border border-amber-200 bg-amber-50 px-1.5 py-1 text-[10px] leading-tight text-amber-800">⏳ ทีม B ยังไม่พร้อมจอง</div>)}
                     {dayAppts.map((a) => {
                       const st = STATUS[a.status] ?? STATUS.proposed;
                       return (
@@ -1426,6 +1433,7 @@ export default function ShareQueuePage() {
             <div className="p-5 overflow-y-auto space-y-4">
               {/* นัด/ทีม */}
               <div className="space-y-3">
+                {hasHolidayBookingPrivilege && !isHol && <button type="button" onClick={toggleHolidayBooking} className="w-full rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-left text-sm font-semibold text-emerald-800 hover:bg-emerald-100">🏖️ ลงวันหยุดทีม B — เลือกวันได้โดยไม่จำกัด 10 วัน</button>}
                 <div>
                   <label className="text-xs text-slate-500 block mb-1">ทีมช่าง</label>
                   <select value={form.tech_id} onChange={(e) => {
@@ -1489,7 +1497,7 @@ export default function ShareQueuePage() {
               <div className="border-t pt-3 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold text-slate-700">🧾 ข้อมูลลูกค้า / บิล</p>
-                  <button type="button" onClick={() => setForm({ ...form, notes: /วันหยุด/.test(form.notes) ? "" : "วันหยุด" })} className={`text-[11px] px-2 py-0.5 rounded-full border ${/วันหยุด/.test(form.notes) ? "bg-slate-200 text-slate-600 border-slate-300" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>🏖️ ตั้งเป็นวันหยุด</button>
+                  <button type="button" onClick={toggleHolidayBooking} className={`text-[11px] px-2 py-0.5 rounded-full border ${isHol ? "bg-slate-200 text-slate-600 border-slate-300" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>🏖️ {isHol ? "ยกเลิกโหมดวันหยุด" : "ตั้งเป็นวันหยุด"}</button>
                 </div>
                 {isHol ? (
                   <p className="text-[11px] text-slate-400">โหมดวันหยุด — จะลงเป็นวันหยุดของทีม ไม่เปิดบิล</p>
