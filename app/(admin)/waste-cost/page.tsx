@@ -1,8 +1,14 @@
 "use client";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { Fragment, useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { floorErrorMessage } from "@/lib/floor-error-message";
+import {
+  normalizeBillReference,
+  parseWasteSalesSummary,
+  wasteCostToSalesPercent,
+  type WasteSalesSummary,
+} from "@/lib/waste-sales";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Obstacle { id: string; name: string; width_cm: number; length_cm: number; deduct: boolean; }
@@ -53,12 +59,28 @@ interface Job {
   handover_data: unknown;
 }
 
+interface WasteAnalysisExclusion {
+  job_no: string;
+  reason: string;
+  excluded_at: string;
+}
+
 interface Material { id: string; sku: string; unit_cost: number | null; }
 
 interface StockSummary {
   issued_140: number; returned_140: number;
   issued_110: number; returned_110: number;
   byWidth: Record<string, { issued: number; returned: number }>;
+}
+
+interface SheetCostSummary {
+  issued16: number;
+  returned16: number;
+  net16: number;
+  issued06: number;
+  returned06: number;
+  net06: number;
+  costExVat: number | null;
 }
 
 interface Movement {
@@ -72,6 +94,62 @@ interface Movement {
 
 interface StripCalc { n140: number; n110: number; total140: number; total110: number; effStripLen: number; }
 interface RemnantPiece { id: string; width_bin: number; length_cm: number; mat_type: string; status: string; reserved_for: string | null; source_job: string | null; note: string | null; }
+
+const IS_LOCAL_PREVIEW = process.env.NODE_ENV !== "production";
+const VAT_RATE = 0.07;
+const SHEET_COST_EX_VAT = { "1.6": 750, "0.6": 550 } as const;
+
+const LOCAL_PREVIEW_JOBS: Job[] = [
+  {
+    job_no: "ORD-LOCAL-287992", bill_no: "287992", order_no: "287992",
+    customer_name: "ลูกค้าตัวอย่าง — เชื่อมด้วย order_no", customer_phone: "089-000-0001",
+    address: "กรุงเทพมหานคร", product_name: "Rollsafe 1.6 cm — Whitebuzz",
+    appt_date: "2026-09-03", stage: 5,
+    handover_data: { materials: [{ thickness: "1.6", widthCm: "140", lengthCm: "1200", qty: "4" }], returnItems: [{ thickness: "1.6", widthCm: "140", lengthCm: "180", qty: "1" }] },
+  },
+  {
+    job_no: "ORD-LOCAL-286099", bill_no: "286099", order_no: "SP-LOCAL-286099",
+    customer_name: "ลูกค้าตัวอย่าง — เชื่อมด้วย bill_no", customer_phone: "089-000-0002",
+    address: "สมุทรปราการ", product_name: "Safespace 0.6 cm — Barkley beige",
+    appt_date: "2026-09-05", stage: 4,
+    handover_data: { materials: [{ thickness: "0.6", widthCm: "110", lengthCm: "1000", qty: "6" }], returnItems: [{ thickness: "0.6", widthCm: "110", lengthCm: "120", qty: "1" }] },
+  },
+  {
+    job_no: "BBPS-32cdf295-824c-4f2d-8562-57b368c186ce", bill_no: "QT-20260827-002", order_no: "QT-20260827-002",
+    customer_name: "นายวัฒนชัย ดำรงกิตติกุล", customer_phone: "089-133-0101",
+    address: null, product_name: null, appt_date: "2026-09-09", stage: 1, handover_data: null,
+  },
+];
+
+const LOCAL_PREVIEW_SALES: Record<string, WasteSalesSummary> = {
+  "287992": {
+    billRef: "287992", matchedVia: "order_no", salesAmount: 1599, netAmount: 1445.4,
+    shippingCost: 0, transactionLines: 1, sourceBillNos: ["SP-LOCAL-287992"],
+    sourceOrderNos: ["287992"], orderStatuses: ["เสร็จสิ้น"], latestTxnDate: "2026-08-27",
+  },
+  "286099": {
+    billRef: "286099", matchedVia: "bill_no", salesAmount: 36800, netAmount: 33294,
+    shippingCost: 500, transactionLines: 3, sourceBillNos: ["286099"],
+    sourceOrderNos: ["SP-LOCAL-286099"], orderStatuses: ["เสร็จสิ้น"], latestTxnDate: "2026-08-26",
+  },
+  "QT-20260827-002": {
+    billRef: "QT-20260827-002", matchedVia: "not_found", salesAmount: null, netAmount: null,
+    shippingCost: null, transactionLines: 0, sourceBillNos: [], sourceOrderNos: [], orderStatuses: [], latestTxnDate: null,
+  },
+};
+
+const LOCAL_PREVIEW_ZONES: Record<string, Zone[]> = {
+  "ORD-LOCAL-287992": [{ id: "zone-local-1", job_no: "ORD-LOCAL-287992", zone_name: "ห้องนั่งเล่น", width_cm: 420, length_cm: 530, obstacles: [] }],
+  "ORD-LOCAL-286099": [{ id: "zone-local-2", job_no: "ORD-LOCAL-286099", zone_name: "ห้องนอน", width_cm: 360, length_cm: 410, obstacles: [] }],
+};
+
+const LOCAL_PREVIEW_EXCLUSIONS: Record<string, WasteAnalysisExclusion> = {
+  "BBPS-32cdf295-824c-4f2d-8562-57b368c186ce": {
+    job_no: "BBPS-32cdf295-824c-4f2d-8562-57b368c186ce",
+    reason: "บิลนี้ไม่ต้องการนำมาวิเคราะห์",
+    excluded_at: "2026-09-02T00:00:00+07:00",
+  },
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function parseHandoverSummary(raw: unknown): StockSummary | null {
@@ -121,6 +199,51 @@ function parseHandoverData(raw: unknown): HandoverData {
     if (typeof raw === "object") return raw as HandoverData;
   } catch { /* ignore */ }
   return { materials: [], returnItems: [] };
+}
+
+function materialThickness(value: string | undefined): keyof typeof SHEET_COST_EX_VAT | null {
+  const normalized = value?.replace(",", ".").trim() ?? "";
+  if (/\b1\.6\b/.test(normalized)) return "1.6";
+  if (/\b0\.6\b/.test(normalized)) return "0.6";
+  return null;
+}
+
+function itemQty(value: string | undefined): number {
+  const qty = Number(value ?? 1);
+  return Number.isFinite(qty) && qty > 0 ? qty : 0;
+}
+
+function calculateSheetCost(raw: unknown): SheetCostSummary {
+  const handover = parseHandoverData(raw);
+  let issued16 = 0;
+  let returned16 = 0;
+  let issued06 = 0;
+  let returned06 = 0;
+
+  for (const item of handover.materials ?? []) {
+    const thickness = materialThickness(item.thickness);
+    if (thickness === "1.6") issued16 += itemQty(item.qty);
+    if (thickness === "0.6") issued06 += itemQty(item.qty);
+  }
+  for (const item of handover.returnItems ?? []) {
+    const thickness = materialThickness(item.thickness);
+    if (thickness === "1.6") returned16 += itemQty(item.qty);
+    if (thickness === "0.6") returned06 += itemQty(item.qty);
+  }
+
+  const net16 = Math.max(0, issued16 - returned16);
+  const net06 = Math.max(0, issued06 - returned06);
+  const recognizedSheets = issued16 + returned16 + issued06 + returned06;
+  return {
+    issued16, returned16, net16, issued06, returned06, net06,
+    costExVat: recognizedSheets > 0
+      ? net16 * SHEET_COST_EX_VAT["1.6"] + net06 * SHEET_COST_EX_VAT["0.6"]
+      : null,
+  };
+}
+
+function revenueBeforeVat(grossRevenue: number | null): number | null {
+  return grossRevenue === null ? null : grossRevenue / (1 + VAT_RATE);
 }
 
 function makeEditRow(): EditRow {
@@ -228,6 +351,7 @@ function getZoneNetArea(zone: Zone): number {
 
 function fmtCm(n: number) { return n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 function fmtBaht(n: number) { return "฿" + Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+function fmtSignedBaht(n: number) { return `${n < 0 ? "-" : ""}${fmtBaht(n)}`; }
 function fmtM2(cm2: number) { return (cm2 / 10000).toFixed(2) + " m²"; }
 function fmtDate(s: string | null) {
   if (!s) return "—";
@@ -271,13 +395,21 @@ function StageBadge({ stage }: { stage: number }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function WasteCostPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [salesByBillRef, setSalesByBillRef] = useState<Record<string, WasteSalesSummary>>({});
+  const [exclusionsByJobNo, setExclusionsByJobNo] = useState<Record<string, WasteAnalysisExclusion>>({});
+  const [showExcluded, setShowExcluded] = useState(false);
+  const [exclusionReason, setExclusionReason] = useState("");
+  const [savingExclusion, setSavingExclusion] = useState(false);
   const [mat140, setMat140] = useState<Material | null>(null);
   const [mat110, setMat110] = useState<Material | null>(null);
   const [search, setSearch] = useState("");
   const [loadingJobs, setLoadingJobs] = useState(true);
+  const [editingAppointment, setEditingAppointment] = useState(false);
+  const [appointmentDateDraft, setAppointmentDateDraft] = useState("");
+  const [savingAppointment, setSavingAppointment] = useState(false);
 
   const [overviewZonesMap, setOverviewZonesMap] = useState<Record<string, Zone[]>>({});
   const [loadingOverview, setLoadingOverview] = useState(false);
@@ -318,6 +450,11 @@ export default function WasteCostPage() {
 
   // ── Load materials ────────────────────────────────────────────────────────
   useEffect(() => {
+    if (IS_LOCAL_PREVIEW) {
+      setMat140({ id: "local-rs-140", sku: "RS-140", unit_cost: null });
+      setMat110({ id: "local-rs-110", sku: "RS-110", unit_cost: null });
+      return;
+    }
     supabase.from("materials").select("id,sku,unit_cost").in("sku", ["RS-140", "RS-110"]).then(({ data }) => {
       (data ?? []).forEach((m) => {
         if (m.sku === "RS-140") setMat140(m);
@@ -329,11 +466,60 @@ export default function WasteCostPage() {
   // ── Load all jobs ─────────────────────────────────────────────────────────
   const fetchJobs = useCallback(async () => {
     setLoadingJobs(true);
-    const { data } = await supabase
+    if (IS_LOCAL_PREVIEW) {
+      setJobs(LOCAL_PREVIEW_JOBS);
+      setSalesByBillRef(LOCAL_PREVIEW_SALES);
+      setExclusionsByJobNo(LOCAL_PREVIEW_EXCLUSIONS);
+      setLoadingJobs(false);
+      return;
+    }
+    const { data, error: jobsError } = await supabase
       .from("install_jobs")
       .select("job_no,bill_no,order_no,customer_name,customer_phone,address,product_name,appt_date,stage,handover_data")
       .order("created_at", { ascending: false });
-    setJobs((data ?? []) as Job[]);
+    if (jobsError) {
+      toast.error("โหลดใบงานไม่ได้: " + floorErrorMessage(jobsError));
+      setLoadingJobs(false);
+      return;
+    }
+
+    const loadedJobs = (data ?? []) as Job[];
+    setJobs(loadedJobs);
+
+    const [{ data: exclusionRows, error: exclusionsError }, salesResult] = await Promise.all([
+      supabase
+        .from("floor_waste_analysis_exclusions")
+        .select("job_no,reason,excluded_at"),
+      (() => {
+        const billRefs = Array.from(new Set(
+          loadedJobs.map((job) => normalizeBillReference(job.bill_no)).filter(Boolean)
+        ));
+        return billRefs.length > 0
+          ? supabase.rpc("get_floor_waste_sales_summaries", { p_bill_refs: billRefs })
+          : Promise.resolve({ data: [], error: null });
+      })(),
+    ]);
+
+    if (exclusionsError) {
+      toast.error("โหลดรายการที่ซ่อนไม่ได้: " + floorErrorMessage(exclusionsError));
+    } else {
+      const nextExclusions: Record<string, WasteAnalysisExclusion> = {};
+      ((exclusionRows ?? []) as WasteAnalysisExclusion[]).forEach((row) => {
+        nextExclusions[row.job_no] = row;
+      });
+      setExclusionsByJobNo(nextExclusions);
+    }
+
+    if (salesResult.error) {
+      toast.error("โหลดยอดขายไม่ได้: " + floorErrorMessage(salesResult.error));
+    } else {
+      const nextSales: Record<string, WasteSalesSummary> = {};
+      ((salesResult.data ?? []) as Record<string, unknown>[]).forEach((row) => {
+        const summary = parseWasteSalesSummary(row);
+        if (summary) nextSales[summary.billRef] = summary;
+      });
+      setSalesByBillRef(nextSales);
+    }
     setLoadingJobs(false);
   }, [supabase]);
 
@@ -342,6 +528,11 @@ export default function WasteCostPage() {
   // ── Load overview zones ───────────────────────────────────────────────────
   const loadOverview = useCallback(async () => {
     setLoadingOverview(true);
+    if (IS_LOCAL_PREVIEW) {
+      setOverviewZonesMap(LOCAL_PREVIEW_ZONES);
+      setLoadingOverview(false);
+      return;
+    }
     const { data: zonesData } = await supabase.from("install_job_zones").select("*");
     const zonesMap: Record<string, Zone[]> = {};
     (zonesData ?? []).forEach((z) => {
@@ -356,12 +547,20 @@ export default function WasteCostPage() {
 
   // ── Load per-job detail ───────────────────────────────────────────────────
   const fetchZones = useCallback(async (jobNo: string) => {
+    if (IS_LOCAL_PREVIEW) {
+      setZones(LOCAL_PREVIEW_ZONES[jobNo] ?? []);
+      return;
+    }
     const { data, error } = await supabase.from("install_job_zones").select("*").eq("job_no", jobNo).order("created_at");
     if (error) toast.error("โหลด zone ไม่ได้: " + error.message);
     setZones((data ?? []).map(z => ({ ...z, obstacles: (z.obstacles as Obstacle[]) ?? [] })));
   }, [supabase]);
 
   const fetchRemnants = useCallback(async () => {
+    if (IS_LOCAL_PREVIEW) {
+      setAvailableRemnants([]);
+      return;
+    }
     const { data } = await supabase.from("remnant_stock").select("*").eq("status", "available").order("width_bin").order("length_cm");
     setAvailableRemnants(data ?? []);
   }, [supabase]);
@@ -372,6 +571,7 @@ export default function WasteCostPage() {
       setStockSummary(handoverSummary);
       setStockSource("handover");
     }
+    if (IS_LOCAL_PREVIEW) return;
     if (!mat140 || !mat110) return;
     const { data } = await supabase
       .from("stock_movements")
@@ -624,6 +824,115 @@ export default function WasteCostPage() {
     toast.success("ลบรายการแล้ว");
   };
 
+  useEffect(() => {
+    if (!selectedJobNo) {
+      setExclusionReason("");
+      setEditingAppointment(false);
+      setAppointmentDateDraft("");
+      return;
+    }
+    setExclusionReason(exclusionsByJobNo[selectedJobNo]?.reason ?? "");
+    const job = jobs.find((row) => row.job_no === selectedJobNo);
+    setAppointmentDateDraft(job?.appt_date ?? "");
+    setEditingAppointment(false);
+  }, [selectedJobNo, exclusionsByJobNo, jobs]);
+
+  const saveAppointmentDate = async () => {
+    if (!selectedJobNo || savingAppointment) return;
+    if (!appointmentDateDraft) {
+      toast.error("กรุณาเลือกวันนัด");
+      return;
+    }
+
+    setSavingAppointment(true);
+    if (IS_LOCAL_PREVIEW) {
+      setJobs((previous) => previous.map((job) =>
+        job.job_no === selectedJobNo ? { ...job, appt_date: appointmentDateDraft } : job
+      ));
+      setSavingAppointment(false);
+      setEditingAppointment(false);
+      toast.success("บันทึกวันนัดแล้ว (ข้อมูลสาธิต Local)");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("install_jobs")
+      .update({ appt_date: appointmentDateDraft })
+      .eq("job_no", selectedJobNo);
+    setSavingAppointment(false);
+    if (error) {
+      toast.error("แก้ไขวันนัดไม่ได้: " + floorErrorMessage(error));
+      return;
+    }
+    setJobs((previous) => previous.map((job) =>
+      job.job_no === selectedJobNo ? { ...job, appt_date: appointmentDateDraft } : job
+    ));
+    setEditingAppointment(false);
+    toast.success("บันทึกวันนัดในใบงานแล้ว");
+  };
+
+  const excludeSelectedJob = async () => {
+    if (!selectedJobNo || savingExclusion || exclusionsByJobNo[selectedJobNo]) return;
+    const reason = exclusionReason.trim() || "ไม่ต้องการนำมาวิเคราะห์";
+    if (IS_LOCAL_PREVIEW) {
+      setExclusionsByJobNo((previous) => ({
+        ...previous,
+        [selectedJobNo]: { job_no: selectedJobNo, reason, excluded_at: new Date().toISOString() },
+      }));
+      setShowExcluded(true);
+      toast.success("ซ่อนบิลนี้จากการวิเคราะห์แล้ว (ข้อมูลสาธิต Local)");
+      return;
+    }
+    setSavingExclusion(true);
+    const { data, error } = await supabase
+      .from("floor_waste_analysis_exclusions")
+      .insert({ job_no: selectedJobNo, reason })
+      .select("job_no,reason,excluded_at")
+      .single();
+    setSavingExclusion(false);
+    if (error) {
+      toast.error("ซ่อนจากการวิเคราะห์ไม่ได้: " + floorErrorMessage(error));
+      return;
+    }
+    const row = data as WasteAnalysisExclusion;
+    setExclusionsByJobNo((previous) => ({ ...previous, [row.job_no]: row }));
+    setShowExcluded(true);
+    toast.success("ซ่อนบิลนี้จากการวิเคราะห์แล้ว");
+  };
+
+  const restoreSelectedJob = async () => {
+    if (!selectedJobNo || savingExclusion || !exclusionsByJobNo[selectedJobNo]) return;
+    if (IS_LOCAL_PREVIEW) {
+      setExclusionsByJobNo((previous) => {
+        const next = { ...previous };
+        delete next[selectedJobNo];
+        return next;
+      });
+      setExclusionReason("");
+      setShowExcluded(false);
+      toast.success("นำบิลกลับมาวิเคราะห์แล้ว (ข้อมูลสาธิต Local)");
+      return;
+    }
+    setSavingExclusion(true);
+    const { error } = await supabase
+      .from("floor_waste_analysis_exclusions")
+      .delete()
+      .eq("job_no", selectedJobNo);
+    setSavingExclusion(false);
+    if (error) {
+      toast.error("นำกลับมาวิเคราะห์ไม่ได้: " + floorErrorMessage(error));
+      return;
+    }
+    setExclusionsByJobNo((previous) => {
+      const next = { ...previous };
+      delete next[selectedJobNo];
+      return next;
+    });
+    setExclusionReason("");
+    setShowExcluded(false);
+    toast.success("นำบิลกลับมาวิเคราะห์แล้ว");
+  };
+
   // ── Computed ──────────────────────────────────────────────────────────────
   const expected = useMemo(() => sumZones(zones), [zones]);
 
@@ -657,21 +966,23 @@ export default function WasteCostPage() {
     ? (wasteAreaCm2 / totalZoneArea) * 100 : null;
 
   const filteredJobs = useMemo(() => {
-    if (!search.trim()) return jobs;
     const q = search.toLowerCase();
-    return jobs.filter((j) =>
-      j.job_no?.toLowerCase().includes(q) ||
-      (j.bill_no as string | null)?.toLowerCase().includes(q) ||
-      (j.order_no as string | null)?.toLowerCase().includes(q) ||
-      (j.customer_name as string | null)?.toLowerCase().includes(q) ||
-      (j.product_name as string | null)?.toLowerCase().includes(q)
-    );
-  }, [jobs, search]);
+    return jobs.filter((j) => {
+      const isExcluded = Boolean(exclusionsByJobNo[j.job_no]);
+      if (isExcluded !== showExcluded) return false;
+      if (!q.trim()) return true;
+      return j.job_no?.toLowerCase().includes(q) ||
+        (j.bill_no as string | null)?.toLowerCase().includes(q) ||
+        (j.order_no as string | null)?.toLowerCase().includes(q) ||
+        (j.customer_name as string | null)?.toLowerCase().includes(q) ||
+        (j.product_name as string | null)?.toLowerCase().includes(q);
+    });
+  }, [jobs, search, exclusionsByJobNo, showExcluded]);
 
   const overviewRows = useMemo(() => {
     const c140 = mat140?.unit_cost ?? 0;
     const c110 = mat110?.unit_cost ?? 0;
-    return filteredJobs.map((j) => {
+    return jobs.map((j) => {
       const jzones = overviewZonesMap[j.job_no] ?? [];
       const mov = parseHandoverSummary(j.handover_data);
       const exp = sumZones(jzones);
@@ -687,37 +998,104 @@ export default function WasteCostPage() {
       const actArea = mov ? actualAreaFromSummary(mov) : null;
       const wasteArea = actArea !== null && zoneArea > 0 ? actArea - zoneArea : null;
       const wasteAreaPct = wasteArea !== null && zoneArea > 0 ? (wasteArea / zoneArea) * 100 : null;
+      const billRef = normalizeBillReference(j.bill_no);
+      const sales = billRef ? salesByBillRef[billRef] ?? null : null;
+      const grossRevenue = sales?.matchedVia !== "not_found" ? sales?.salesAmount ?? null : null;
+      const netRevenueBeforeVat = revenueBeforeVat(grossRevenue);
+      const vatAmount = grossRevenue !== null && netRevenueBeforeVat !== null ? grossRevenue - netRevenueBeforeVat : null;
+      const sheetCost = calculateSheetCost(j.handover_data);
+      const grossProfit = netRevenueBeforeVat !== null && sheetCost.costExVat !== null
+        ? netRevenueBeforeVat - sheetCost.costExVat
+        : null;
+      const grossMarginPct = grossProfit !== null && netRevenueBeforeVat && netRevenueBeforeVat > 0
+        ? (grossProfit / netRevenueBeforeVat) * 100
+        : null;
+      const costToRevenuePct = sheetCost.costExVat !== null && netRevenueBeforeVat && netRevenueBeforeVat > 0
+        ? (sheetCost.costExVat / netRevenueBeforeVat) * 100
+        : null;
       return {
         ...j, zoneCount: jzones.length, exp140: exp.total140, exp110: exp.total110,
         actual140, actual110, waste140, waste110,
         expectedCost: expectedCost > 0 ? expectedCost : null,
         actualCost, wasteCost,
         zoneArea, actArea, wasteArea, wasteAreaPct,
+        sales, grossRevenue, netRevenueBeforeVat, vatAmount, sheetCost, grossProfit, grossMarginPct, costToRevenuePct,
+        wasteToSalesPct: wasteCostToSalesPercent(wasteCost, netRevenueBeforeVat),
         hasZones: jzones.length > 0,
         hasMov: mov !== null,
+        isExcluded: Boolean(exclusionsByJobNo[j.job_no]),
       };
     });
-  }, [filteredJobs, overviewZonesMap, mat140, mat110]);
+  }, [jobs, overviewZonesMap, mat140, mat110, salesByBillRef, exclusionsByJobNo]);
+
+  const displayedOverviewRows = useMemo(() => {
+    const visibleJobNos = new Set(filteredJobs.map((job) => job.job_no));
+    return overviewRows.filter((row) => visibleJobNos.has(row.job_no));
+  }, [filteredJobs, overviewRows]);
 
   const stats = useMemo(() => {
+    const analyzedRows = overviewRows.filter((row) => !row.isExcluded);
     const withCostSetup = !!(mat140?.unit_cost && mat110?.unit_cost);
-    const totalWasteCost = overviewRows.reduce((s, r) => s + (r.wasteCost ?? 0), 0);
+    const totalWasteCost = analyzedRows.reduce((s, r) => s + (r.wasteCost ?? 0), 0);
+    const analyzedBillRefs = new Set(analyzedRows.map((row) => normalizeBillReference(row.bill_no)).filter(Boolean));
+    const salesByDistinctBill = new Map<string, WasteSalesSummary>();
+    const profitabilityByBill = new Map<string, { revenue: number; cost: number }>();
+    analyzedRows.forEach((row) => {
+      const billRef = normalizeBillReference(row.bill_no);
+      if (billRef && row.sales && row.sales.matchedVia !== "not_found" && row.sales.salesAmount !== null) {
+        salesByDistinctBill.set(billRef, row.sales);
+        if (row.netRevenueBeforeVat !== null && row.sheetCost.costExVat !== null) {
+          const previous = profitabilityByBill.get(billRef);
+          profitabilityByBill.set(billRef, {
+            revenue: row.netRevenueBeforeVat,
+            cost: (previous?.cost ?? 0) + row.sheetCost.costExVat,
+          });
+        }
+      }
+    });
+    const totalRevenueBeforeVat = Array.from(profitabilityByBill.values()).reduce((sum, item) => sum + item.revenue, 0);
+    const totalProductCost = Array.from(profitabilityByBill.values()).reduce((sum, item) => sum + item.cost, 0);
+    const totalGrossProfit = totalRevenueBeforeVat - totalProductCost;
     return {
-      total: jobs.length,
-      withZones: overviewRows.filter((r) => r.hasZones).length,
-      withData: overviewRows.filter((r) => r.hasMov).length,
+      total: analyzedRows.length,
+      excluded: overviewRows.length - analyzedRows.length,
+      withZones: analyzedRows.filter((r) => r.hasZones).length,
+      withData: analyzedRows.filter((r) => r.hasMov).length,
       totalWasteCost, withCostSetup,
+      totalSales: Array.from(salesByDistinctBill.values()).reduce((sum, sales) => sum + (sales.salesAmount ?? 0), 0),
+      totalRevenueBeforeVat,
+      totalProductCost,
+      totalGrossProfit,
+      grossMarginPct: totalRevenueBeforeVat > 0 ? (totalGrossProfit / totalRevenueBeforeVat) * 100 : null,
+      profitabilityBills: profitabilityByBill.size,
+      salesFound: salesByDistinctBill.size,
+      billRefs: analyzedBillRefs.size,
     };
-  }, [overviewRows, jobs.length, mat140, mat110]);
+  }, [overviewRows, mat140, mat110]);
 
   const selectedJob = jobs.find((j) => j.job_no === selectedJobNo);
+  const selectedExclusion = selectedJobNo ? exclusionsByJobNo[selectedJobNo] ?? null : null;
+  const selectedBillRef = normalizeBillReference(selectedJob?.bill_no);
+  const selectedSales = selectedBillRef ? salesByBillRef[selectedBillRef] ?? null : null;
+  const selectedSheetCost = calculateSheetCost(selectedJob?.handover_data);
+  const selectedGrossRevenue = selectedSales?.matchedVia !== "not_found" ? selectedSales?.salesAmount ?? null : null;
+  const selectedRevenueBeforeVat = revenueBeforeVat(selectedGrossRevenue);
+  const selectedVatAmount = selectedGrossRevenue !== null && selectedRevenueBeforeVat !== null
+    ? selectedGrossRevenue - selectedRevenueBeforeVat
+    : null;
+  const selectedGrossProfit = selectedRevenueBeforeVat !== null && selectedSheetCost.costExVat !== null
+    ? selectedRevenueBeforeVat - selectedSheetCost.costExVat
+    : null;
+  const selectedGrossMarginPct = selectedGrossProfit !== null && selectedRevenueBeforeVat && selectedRevenueBeforeVat > 0
+    ? (selectedGrossProfit / selectedRevenueBeforeVat) * 100
+    : null;
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-full gap-4 min-h-0">
+    <div className="flex min-h-0 gap-4 md:h-[calc(100dvh-3rem)] md:overflow-hidden">
 
       {/* ── Left: Job list ── */}
-      <div className="w-64 flex-shrink-0 flex flex-col border border-slate-200 rounded-xl overflow-hidden bg-white">
+      <div className="flex w-64 flex-shrink-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white md:sticky md:top-6 md:h-full">
         <div className="p-3 border-b border-slate-100 bg-slate-50 space-y-2">
           <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">ต้นทุนเศษ</h2>
           <button
@@ -730,9 +1108,27 @@ export default function WasteCostPage() {
           </button>
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา บิล / ออเดอร์ / ลูกค้า…"
             className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1">
+            <button
+              onClick={() => setShowExcluded(false)}
+              className={`rounded-md px-2 py-1.5 text-[10px] font-semibold transition-colors ${
+                !showExcluded ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"
+              }`}
+            >
+              วิเคราะห์ {stats.total}
+            </button>
+            <button
+              onClick={() => setShowExcluded(true)}
+              className={`rounded-md px-2 py-1.5 text-[10px] font-semibold transition-colors ${
+                showExcluded ? "bg-white text-amber-700 shadow-sm" : "text-slate-500"
+              }`}
+            >
+              ซ่อนแล้ว {stats.excluded}
+            </button>
+          </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {loadingJobs ? (
             <p className="text-xs text-slate-400 text-center py-8">⏳ กำลังโหลด…</p>
           ) : filteredJobs.length === 0 ? (
@@ -751,6 +1147,9 @@ export default function WasteCostPage() {
                   <p className="text-xs font-semibold text-slate-800 truncate">
                     {(j.bill_no as string | null) || j.job_no}
                   </p>
+                  {exclusionsByJobNo[j.job_no] && (
+                    <span className="ml-auto rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700">ซ่อน</span>
+                  )}
                 </div>
                 <p className="text-[10px] font-mono text-blue-500 mb-0.5 pl-3">{j.job_no}</p>
                 <p className="text-[11px] text-slate-500 truncate pl-3">{(j.customer_name as string | null) || "—"}</p>
@@ -768,7 +1167,7 @@ export default function WasteCostPage() {
       </div>
 
       {/* ── Right panel ── */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
 
         {/* ===== OVERVIEW ===== */}
         {viewMode === "overview" && (
@@ -784,9 +1183,21 @@ export default function WasteCostPage() {
               </button>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {showExcluded && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+                รายการด้านล่างถูกเก็บไว้เพื่อตรวจย้อนหลัง แต่ไม่รวมในจำนวนงาน ยอดขาย หรือต้นทุนเศษของ Dashboard
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
               {[
-                { label: "งานทั้งหมด", val: stats.total.toString(), sub: "รายการ" },
+                { label: "งานที่วิเคราะห์", val: stats.total.toString(), sub: "รายการ" },
+                { label: "เชื่อมยอดขาย", val: stats.salesFound.toString(), sub: `จาก ${stats.billRefs} บิล` },
+                { label: "ยอดขายรวม VAT", val: fmtBaht(stats.totalSales), sub: "ยอดจาก transaction" },
+                { label: "รายได้ก่อน VAT", val: fmtBaht(stats.totalRevenueBeforeVat), sub: `คำนวณจาก ${stats.profitabilityBills} บิล` },
+                { label: "ต้นทุนสินค้า", val: fmtBaht(stats.totalProductCost), sub: "ก่อน VAT · หักแผ่นคืน" },
+                { label: "กำไรขั้นต้น", val: fmtSignedBaht(stats.totalGrossProfit), sub: "รายได้ก่อน VAT − ต้นทุน", red: stats.totalGrossProfit < 0 },
+                { label: "Gross margin", val: stats.grossMarginPct === null ? "—" : `${stats.grossMarginPct.toFixed(1)}%`, sub: "กำไรขั้นต้น ÷ รายได้ก่อน VAT", red: (stats.grossMarginPct ?? 0) < 0 },
                 { label: "มีข้อมูลโซน", val: stats.withZones.toString(), sub: "งาน" },
                 { label: "มีข้อมูลปิดงาน", val: stats.withData.toString(), sub: "งาน" },
                 {
@@ -804,9 +1215,16 @@ export default function WasteCostPage() {
               ))}
             </div>
 
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-800">
+              <strong>ฐานคำนวณเดียวกัน:</strong> รายได้จาก transaction เป็นยอดรวม VAT จึงหาร 1.07 ก่อนเทียบต้นทุน
+              · แผ่น 1.6 ซม. = {fmtBaht(SHEET_COST_EX_VAT["1.6"])} ก่อน VAT
+              · แผ่น 0.6 ซม. = {fmtBaht(SHEET_COST_EX_VAT["0.6"])} ก่อน VAT
+              · ต้นทุนสินค้า = (จำนวนเบิก − จำนวนคืน) × ราคาต่อแผ่น
+            </div>
+
             {!stats.withCostSetup && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-xs text-amber-700">
-                💡 ยังไม่ได้ตั้งราคาต้นทุน — ไปที่ <strong>คลังวัสดุ</strong> แล้วแก้ไข unit_cost ของ <strong>RS-140</strong> / <strong>RS-110</strong>
+                💡 ต้นทุนสินค้าใช้ราคาต่อแผ่นตามความหนาแล้ว ส่วน “ต้นทุนเศษตามความยาว” ยังต้องตั้ง unit_cost ของ <strong>RS-140</strong> / <strong>RS-110</strong> ในคลังวัสดุ
               </div>
             )}
 
@@ -823,17 +1241,23 @@ export default function WasteCostPage() {
                       <th className="text-center px-3 py-2.5 font-medium text-slate-500">%เศษพื้นที่</th>
                       <th className="text-center px-3 py-2.5 font-medium text-slate-500">%เศษ 140</th>
                       <th className="text-center px-3 py-2.5 font-medium text-slate-500">%เศษ 110</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-slate-500">ยอดขายรวม VAT</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-slate-500">รายได้ก่อน VAT</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-slate-500">ต้นทุนสินค้า</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-slate-500">กำไรขั้นต้น</th>
+                      <th className="text-center px-3 py-2.5 font-medium text-slate-500">Margin</th>
                       <th className="text-right px-3 py-2.5 font-medium text-slate-500">ต้นทุนเศษ</th>
+                      <th className="text-center px-3 py-2.5 font-medium text-slate-500">เศษ/ยอดขาย</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {loadingOverview ? (
-                      <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">⏳ กำลังโหลด…</td></tr>
-                    ) : overviewRows.length === 0 ? (
-                      <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">ไม่มีข้อมูล</td></tr>
-                    ) : overviewRows.map((r) => (
+                      <tr><td colSpan={15} className="px-3 py-8 text-center text-slate-400">⏳ กำลังโหลด…</td></tr>
+                    ) : displayedOverviewRows.length === 0 ? (
+                      <tr><td colSpan={15} className="px-3 py-8 text-center text-slate-400">ไม่มีข้อมูล</td></tr>
+                    ) : displayedOverviewRows.map((r) => (
                       <tr key={r.job_no}
-                        className={`cursor-pointer transition-colors ${r.hasZones ? "hover:bg-blue-50/40" : "opacity-40"}`}
+                        className={`cursor-pointer transition-colors ${r.hasZones ? "hover:bg-blue-50/40" : "opacity-60"} ${r.isExcluded ? "bg-amber-50/40" : ""}`}
                         onClick={() => { setSelectedJobNo(r.job_no); setViewMode("detail"); }}
                       >
                         <td className="px-3 py-2.5">
@@ -858,6 +1282,33 @@ export default function WasteCostPage() {
                         <td className="px-3 py-2.5 text-center"><WasteBadge pct={r.wasteAreaPct} /></td>
                         <td className="px-3 py-2.5 text-center"><WasteBadge pct={r.waste140} /></td>
                         <td className="px-3 py-2.5 text-center"><WasteBadge pct={r.waste110} /></td>
+                        <td className="px-3 py-2.5 text-right">
+                          {r.sales && r.sales.matchedVia !== "not_found" && r.sales.salesAmount !== null ? (
+                            <div>
+                              <p className="font-semibold font-mono text-slate-800">{fmtBaht(r.sales.salesAmount)}</p>
+                              <p className="text-[9px] text-slate-400">จาก {r.sales.matchedVia}</p>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-medium text-amber-600">ไม่พบข้อมูล</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-mono text-slate-700">
+                          {r.netRevenueBeforeVat !== null ? fmtBaht(r.netRevenueBeforeVat) : "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          {r.sheetCost.costExVat !== null ? (
+                            <div>
+                              <p className="font-semibold font-mono text-slate-800">{fmtBaht(r.sheetCost.costExVat)}</p>
+                              <p className="text-[9px] text-slate-400">1.6: {r.sheetCost.net16} · 0.6: {r.sheetCost.net06} แผ่น</p>
+                            </div>
+                          ) : "—"}
+                        </td>
+                        <td className={`px-3 py-2.5 text-right font-semibold font-mono ${r.grossProfit !== null && r.grossProfit < 0 ? "text-red-600" : "text-emerald-700"}`}>
+                          {r.grossProfit !== null ? fmtSignedBaht(r.grossProfit) : "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-center">
+                          {r.grossMarginPct !== null ? <span className="font-semibold text-slate-700">{r.grossMarginPct.toFixed(1)}%</span> : "—"}
+                        </td>
                         <td className="px-3 py-2.5 text-right font-semibold">
                           {r.wasteCost !== null ? (
                             <span className={r.wasteCost > 0 ? "text-red-600" : "text-green-600"}>
@@ -865,6 +1316,7 @@ export default function WasteCostPage() {
                             </span>
                           ) : "—"}
                         </td>
+                        <td className="px-3 py-2.5 text-center"><WasteBadge pct={r.wasteToSalesPct} /></td>
                       </tr>
                     ))}
                   </tbody>
@@ -913,8 +1365,52 @@ export default function WasteCostPage() {
                     <p className="font-mono text-blue-600">{(selectedJob?.order_no as string | null) || "—"}</p>
                   </div>
                   <div>
-                    <p className="text-slate-400 text-[10px] mb-0.5">วันนัด</p>
-                    <p className="text-slate-800">{fmtDate((selectedJob?.appt_date as string | null) ?? null)}</p>
+                    <div className="mb-0.5 flex items-center justify-between gap-2">
+                      <p className="text-[10px] text-slate-400">วันนัด · จากใบงาน</p>
+                      {!editingAppointment && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAppointmentDateDraft(selectedJob?.appt_date ?? "");
+                            setEditingAppointment(true);
+                          }}
+                          className="text-[10px] font-semibold text-blue-600 hover:underline"
+                        >
+                          ✎ แก้ไข
+                        </button>
+                      )}
+                    </div>
+                    {editingAppointment ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          type="date"
+                          value={appointmentDateDraft}
+                          onInput={(event) => setAppointmentDateDraft(event.currentTarget.value)}
+                          className="min-w-0 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                        />
+                        <button
+                          type="button"
+                          onClick={saveAppointmentDate}
+                          disabled={savingAppointment || !appointmentDateDraft}
+                          className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-[10px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {savingAppointment ? "กำลังบันทึก…" : "บันทึก"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAppointmentDateDraft(selectedJob?.appt_date ?? "");
+                            setEditingAppointment(false);
+                          }}
+                          disabled={savingAppointment}
+                          className="px-1 py-1.5 text-[10px] text-slate-500 hover:text-slate-800 disabled:opacity-50"
+                        >
+                          ยกเลิก
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="font-medium text-slate-800">{fmtDate(selectedJob?.appt_date ?? null)}</p>
+                    )}
                   </div>
                   <div className="col-span-2">
                     <p className="text-slate-400 text-[10px] mb-0.5">ที่อยู่</p>
@@ -923,6 +1419,120 @@ export default function WasteCostPage() {
                   <div className="col-span-2">
                     <p className="text-slate-400 text-[10px] mb-0.5">สินค้า</p>
                     <p className="text-slate-700">{(selectedJob?.product_name as string | null) || "—"}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 lg:grid-cols-2">
+                  <div className={`rounded-xl border p-3 ${
+                    selectedSales && selectedSales.matchedVia !== "not_found" && selectedSales.salesAmount !== null
+                      ? "border-emerald-200 bg-emerald-50"
+                      : "border-amber-200 bg-amber-50"
+                  }`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">ยอดขายจาก sales_transaction</p>
+                        {selectedSales && selectedSales.matchedVia !== "not_found" && selectedSales.salesAmount !== null ? (
+                          <>
+                            <p className="mt-1 text-2xl font-bold text-emerald-800">{fmtBaht(selectedSales.salesAmount)}</p>
+                            <p className="text-[10px] font-medium text-emerald-700">ยอดขายรวม VAT</p>
+                            <div className="mt-2 grid grid-cols-2 gap-2 rounded-lg bg-white/70 p-2 text-[10px]">
+                              <div><p className="text-slate-400">VAT 7%</p><p className="font-semibold text-slate-700">{selectedVatAmount !== null ? fmtBaht(selectedVatAmount) : "—"}</p></div>
+                              <div><p className="text-slate-400">รายได้ก่อน VAT</p><p className="font-semibold text-slate-700">{selectedRevenueBeforeVat !== null ? fmtBaht(selectedRevenueBeforeVat) : "—"}</p></div>
+                            </div>
+                            <p className="mt-2 text-[10px] text-emerald-700">
+                              ยอดสุทธิตามธุรกรรม {selectedSales.netAmount !== null ? fmtBaht(selectedSales.netAmount) : "—"}
+                              {selectedSales.shippingCost ? ` · ค่าจัดส่ง ${fmtBaht(selectedSales.shippingCost)}` : ""}
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="mt-1 text-sm font-semibold text-amber-800">ไม่พบข้อมูลยอดขาย</p>
+                            <p className="mt-1 text-[10px] text-amber-700">ตรวจทั้ง bill_no และ order_no แล้ว ไม่แสดงเป็น 0 บาท</p>
+                          </>
+                        )}
+                      </div>
+                      {selectedSales?.matchedVia && selectedSales.matchedVia !== "not_found" && (
+                        <span className="rounded-full bg-white px-2 py-1 text-[9px] font-semibold text-emerald-700 shadow-sm">
+                          พบจาก {selectedSales.matchedVia}
+                        </span>
+                      )}
+                    </div>
+                    {selectedSales?.matchedVia !== "not_found" && selectedSales?.transactionLines ? (
+                      <p className="mt-2 text-[10px] text-slate-500">
+                        {selectedSales.transactionLines} รายการสินค้า
+                        {selectedSales.orderStatuses.length ? ` · ${selectedSales.orderStatuses.join(", ")}` : ""}
+                        {selectedSales.latestTxnDate ? ` · ${fmtDate(selectedSales.latestTxnDate)}` : ""}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className={`rounded-xl border p-3 ${selectedExclusion ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50"}`}>
+                    <div className="flex items-start gap-2">
+                      <input
+                        id="exclude-from-waste-analysis"
+                        type="checkbox"
+                        checked={Boolean(selectedExclusion)}
+                        disabled={savingExclusion}
+                        onChange={(event) => {
+                          if (event.target.checked) void excludeSelectedJob();
+                          else void restoreSelectedJob();
+                        }}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                      />
+                      <label htmlFor="exclude-from-waste-analysis" className="cursor-pointer">
+                        <p className="text-xs font-semibold text-slate-800">ไม่นำบิลนี้มาวิเคราะห์</p>
+                        <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">
+                          ซ่อนจาก Dashboard และไม่นับยอดขาย/ต้นทุนเศษ แต่ใบงานและประวัติยังอยู่ครบ
+                        </p>
+                      </label>
+                    </div>
+                    {selectedExclusion ? (
+                      <div className="mt-3 rounded-lg bg-white/80 px-3 py-2 text-[10px] text-amber-800">
+                        <p className="font-semibold">เหตุผล: {selectedExclusion.reason}</p>
+                        <p className="mt-0.5 text-amber-600">ซ่อนเมื่อ {fmtDate(selectedExclusion.excluded_at)}</p>
+                      </div>
+                    ) : (
+                      <label className="mt-3 block text-[10px] text-slate-500">
+                        เหตุผล (ไม่บังคับ)
+                        <input
+                          value={exclusionReason}
+                          onChange={(event) => setExclusionReason(event.target.value)}
+                          maxLength={500}
+                          placeholder="เช่น บิลทดสอบ / ไม่ใช่งานที่ต้องวิเคราะห์"
+                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                        />
+                      </label>
+                    )}
+                    {savingExclusion && <p className="mt-2 text-[10px] text-slate-400">กำลังบันทึก…</p>}
+                  </div>
+
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 lg:col-span-2">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold text-blue-900">วิเคราะห์รายได้เทียบต้นทุนสินค้า (ก่อน VAT)</p>
+                        <p className="mt-1 text-[10px] text-blue-700">
+                          1.6 ซม. {fmtBaht(SHEET_COST_EX_VAT["1.6"])} / แผ่น · 0.6 ซม. {fmtBaht(SHEET_COST_EX_VAT["0.6"])} / แผ่น · หักจำนวนแผ่นคืนแล้ว
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-blue-700">ไม่รวม VAT ทั้งสองฝั่ง</span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                      {[
+                        { label: "รายได้ก่อน VAT", value: selectedRevenueBeforeVat !== null ? fmtBaht(selectedRevenueBeforeVat) : "—" },
+                        { label: "ต้นทุนสินค้า", value: selectedSheetCost.costExVat !== null ? fmtBaht(selectedSheetCost.costExVat) : "—" },
+                        { label: "กำไรขั้นต้น", value: selectedGrossProfit !== null ? fmtSignedBaht(selectedGrossProfit) : "—", negative: selectedGrossProfit !== null && selectedGrossProfit < 0 },
+                        { label: "Gross margin", value: selectedGrossMarginPct !== null ? `${selectedGrossMarginPct.toFixed(1)}%` : "—", negative: selectedGrossMarginPct !== null && selectedGrossMarginPct < 0 },
+                        { label: "แผ่นใช้สุทธิ", value: `1.6: ${selectedSheetCost.net16} · 0.6: ${selectedSheetCost.net06}` },
+                      ].map((item) => (
+                        <div key={item.label} className="rounded-lg bg-white px-3 py-2.5 shadow-sm">
+                          <p className="text-[9px] text-slate-400">{item.label}</p>
+                          <p className={`mt-0.5 text-sm font-bold ${item.negative ? "text-red-600" : "text-slate-800"}`}>{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {selectedSheetCost.costExVat === null && (
+                      <p className="mt-2 text-[10px] text-amber-700">ยังคำนวณต้นทุนไม่ได้ เพราะรายการเบิก-คืนยังไม่ได้ระบุความหนา 1.6 หรือ 0.6 ซม.</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -965,8 +1575,8 @@ export default function WasteCostPage() {
                           const dedArea = rawArea - netArea;
                           const isExpanded = expandedZones.has(z.id);
                           return (
-                            <>
-                            <tr key={z.id}>
+                            <Fragment key={z.id}>
+                            <tr>
                               <td className="py-2 pr-2">
                                 <input value={z.zone_name} onChange={(e) => patchZone(z.id, "zone_name", e.target.value)} onBlur={() => saveZone(z)}
                                   className="w-full px-2 py-1 text-xs border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400" />
@@ -1219,7 +1829,7 @@ export default function WasteCostPage() {
                                 </td>
                               </tr>
                             )}
-                            </>
+                            </Fragment>
                           );
                         })}
                       </tbody>
