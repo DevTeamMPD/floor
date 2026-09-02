@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canBypassBookingPolicy,
+  enableHolidayBooking,
   hasUnrestrictedHolidayBookingPrivilege,
   isHolidayBooking,
 } from "./booking-policy";
@@ -27,5 +28,11 @@ describe("booking policy", () => {
   it("identifies only the configured holiday account", () => {
     expect(hasUnrestrictedHolidayBookingPrivilege("pisittorn.p@mpdgroup.co")).toBe(true);
     expect(hasUnrestrictedHolidayBookingPrivilege("staff@mpdgroup.co")).toBe(false);
+  });
+
+  it("turns a restored customer draft into an unambiguous holiday booking", () => {
+    const result = enableHolidayBooking({ ...holiday, notes: "งานลูกค้า", bill_no: "B-001", customer_name: "ลูกค้า", extra: "keep" });
+    expect(result).toEqual({ notes: "วันหยุด", bill_no: "", customer_name: "", extra: "keep" });
+    expect(isHolidayBooking(result)).toBe(true);
   });
 });
