@@ -21,12 +21,14 @@ export default function ServicePage() {
   useEffect(() => {
     Promise.all([
       supabase.from("install_sku_watch").select("*").order("active", { ascending: false }).order("sku"),
-      supabase.from("install_jobs").select("sku"),
+      supabase.from("install_jobs").select("product_skus"),
     ]).then(([{ data: skuData }, { data: jobData }]) => {
       setSkus((skuData ?? []) as SkuRow[]);
       const counts: Record<string, number> = {};
-      for (const j of jobData ?? []) {
-        if (j.sku) counts[j.sku] = (counts[j.sku] ?? 0) + 1;
+      for (const j of (jobData ?? []) as { product_skus: string[] | null }[]) {
+        for (const sku of j.product_skus ?? []) {
+          counts[sku] = (counts[sku] ?? 0) + 1;
+        }
       }
       setJobCounts(counts);
       setLoading(false);
