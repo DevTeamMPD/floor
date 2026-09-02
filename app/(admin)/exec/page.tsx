@@ -232,6 +232,9 @@ export default function ExecPage() {
   const workOrderByStatus = new Map(workOrders.map((row) => [row.status, row]));
   const maxWorkOrderN = Math.max(1, ...workOrders.map((row) => row.n));
   const latestMonthly = monthlySummary[monthlySummary.length - 1];
+  const previousMonthly = monthlySummary[monthlySummary.length - 2];
+  const wasteCostChange = latestMonthly.wasteCost - previousMonthly.wasteCost;
+  const csatPointChange = latestMonthly.csat !== null && previousMonthly.csat !== null ? latestMonthly.csat - previousMonthly.csat : null;
 
   const insight = (() => {
     if (!j) return "";
@@ -319,7 +322,7 @@ export default function ExecPage() {
         </div>
 
         {/* detail — 3 columns */}
-        <div className="grid grid-cols-1 gap-3 mt-2.5 lg:grid-cols-3 flex-1 min-h-0">
+        <div className="order-2 grid grid-cols-1 gap-3 mt-2.5 lg:grid-cols-3 flex-1 min-h-0">
 
           {/* col 1 */}
           <div className="flex flex-col gap-3 min-h-0">
@@ -426,25 +429,25 @@ export default function ExecPage() {
         </div>
 
         {/* Monthly management summary: waste cost and customer satisfaction in one comparable view. */}
-        <section className="exec-card mt-3 rounded-2xl bg-white p-4" style={{ boxShadow: SHADOW }}>
+        <section className="exec-card order-1 mt-3 rounded-2xl bg-white p-4" style={{ boxShadow: SHADOW }}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex items-start gap-2">
               <span className="mt-0.5 h-4 w-1 rounded-full" style={{ background: ACCENT }} />
               <div>
-                <h2 className="text-sm font-bold" style={{ color: INK }}>ต้นทุนเศษและความพึงพอใจรายเดือน</h2>
-                <p className="text-[11px]" style={{ color: MUT }}>สรุป 6 เดือนล่าสุด · ต้นทุนเศษ = ต้นทุนใช้จริง − ต้นทุนตามพื้นที่</p>
+                <h2 className="text-sm font-bold" style={{ color: INK }}>รายงานต้นทุนเศษและเสียงลูกค้า</h2>
+                <p className="text-[11px]" style={{ color: MUT }}>เทียบย้อนหลัง 6 เดือน · ต้นทุนเศษยิ่งต่ำยิ่งดี · CSAT ยิ่งสูงยิ่งดี</p>
               </div>
             </div>
             <div className="flex gap-2 no-print">
-              <Link href="/waste-cost" className="rounded-lg border px-3 py-1.5 text-[11px] font-semibold" style={{ borderColor: HAIR, color: SUB }}>ดูต้นทุนเศษ</Link>
+              <Link href="/waste-cost" className="rounded-lg px-3 py-1.5 text-[11px] font-semibold text-white" style={{ background: ACCENT }}>เปิดหน้าต้นทุนเศษ</Link>
               <Link href="/dashboard" className="rounded-lg border px-3 py-1.5 text-[11px] font-semibold" style={{ borderColor: HAIR, color: SUB }}>ดู Dashboard</Link>
             </div>
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
             <div className="rounded-xl px-3 py-2.5" style={{ background: "#f8fafc" }}><div className="text-[9.5px]" style={{ color: MUT }}>เดือนล่าสุด</div><div className="mt-1 text-sm font-bold" style={{ color: INK }}>{monthLabel(latestMonthly.month)}</div></div>
-            <div className="rounded-xl px-3 py-2.5" style={{ background: tint(BAD) }}><div className="text-[9.5px]" style={{ color: MUT }}>ต้นทุนเศษ</div><div className="mt-1 text-sm font-extrabold" style={{ color: ex?.waste.costSetup ? (latestMonthly.wasteCost > 0 ? BAD : GOOD) : MUT, ...NUM }}>{ex?.waste.costSetup ? baht(latestMonthly.wasteCost) : "ยังไม่ตั้งราคา"}</div></div>
-            <div className="rounded-xl px-3 py-2.5" style={{ background: "rgba(79,70,229,0.06)" }}><div className="text-[9.5px]" style={{ color: MUT }}>CSAT เฉลี่ย</div><div className="mt-1 text-sm font-extrabold" style={{ color: latestMonthly.csat === null ? MUT : avgColor(latestMonthly.csat), ...NUM }}>{latestMonthly.csat === null ? "—" : `${latestMonthly.csat.toFixed(2)}/5`}</div></div>
+            <div className="rounded-xl px-3 py-2.5" style={{ background: tint(BAD) }}><div className="text-[9.5px]" style={{ color: MUT }}>ต้นทุนเศษ · ยิ่งต่ำยิ่งดี</div><div className="mt-1 text-sm font-extrabold" style={{ color: ex?.waste.costSetup ? (latestMonthly.wasteCost > 0 ? BAD : GOOD) : MUT, ...NUM }}>{ex?.waste.costSetup ? baht(latestMonthly.wasteCost) : "ยังไม่ตั้งราคา"}</div><div className="mt-1 text-[9px]" style={{ color: !ex?.waste.costSetup ? MUT : wasteCostChange <= 0 ? GOOD : BAD, ...NUM }}>{ex?.waste.costSetup ? `${wasteCostChange <= 0 ? "ลดลง" : "เพิ่มขึ้น"} ${baht(Math.abs(wasteCostChange))} จากเดือนก่อน` : "ตั้งราคาวัสดุ RS-110 และ RS-140 ก่อน"}</div></div>
+            <div className="rounded-xl px-3 py-2.5" style={{ background: "rgba(79,70,229,0.06)" }}><div className="text-[9.5px]" style={{ color: MUT }}>CSAT เฉลี่ย · ยิ่งสูงยิ่งดี</div><div className="mt-1 text-sm font-extrabold" style={{ color: latestMonthly.csat === null ? MUT : avgColor(latestMonthly.csat), ...NUM }}>{latestMonthly.csat === null ? "—" : `${latestMonthly.csat.toFixed(2)}/5`}</div><div className="mt-1 text-[9px]" style={{ color: csatPointChange === null ? MUT : csatPointChange >= 0 ? GOOD : BAD, ...NUM }}>{csatPointChange === null ? "ยังเทียบเดือนก่อนไม่ได้" : `${csatPointChange >= 0 ? "ดีขึ้น" : "ลดลง"} ${Math.abs(csatPointChange).toFixed(2)} คะแนนจากเดือนก่อน`}</div></div>
             <div className="rounded-xl px-3 py-2.5" style={{ background: "#f8fafc" }}><div className="text-[9.5px]" style={{ color: MUT }}>ข้อมูลเดือนนี้</div><div className="mt-1 text-sm font-bold" style={{ color: INK, ...NUM }}>{latestMonthly.wasteJobs} งาน · {latestMonthly.responses} แบบประเมิน</div></div>
           </div>
 
@@ -467,10 +470,11 @@ export default function ExecPage() {
               </tbody>
             </table>
           </div>
+          <p className="mt-2 text-[9.5px]" style={{ color: MUT }}>จัดเดือนตามวันปิดงาน; หากยังไม่ปิด ใช้วันที่บันทึกเบิก–คืน · จำนวนแบบประเมินนับเป็นรายลูกค้า ไม่ใช่จำนวนหัวข้อคำถาม</p>
         </section>
 
         {/* Full-width operational pipeline: one executive view, with direct entry to the team that owns each state. */}
-        <section className="exec-card mt-3 rounded-2xl bg-white p-4" style={{ boxShadow: SHADOW }}>
+        <section className="exec-card order-3 mt-3 rounded-2xl bg-white p-4" style={{ boxShadow: SHADOW }}>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <span className="h-4 w-1 rounded-full" style={{ background: ACCENT }} />
@@ -501,7 +505,7 @@ export default function ExecPage() {
         </section>
 
         {/* footer */}
-        <div className="text-[9.5px] mt-2.5 shrink-0 flex flex-wrap gap-x-4 px-1" style={{ color: MUT, ...NUM }}>
+        <div className="order-4 text-[9.5px] mt-2.5 shrink-0 flex flex-wrap gap-x-4 px-1" style={{ color: MUT, ...NUM }}>
           <span>ความครบข้อมูล — Lead time {ex?.leadTime?.n ?? 0}/{j?.total ?? 0}</span>
           <span>ปิดงาน {ex?.waste.withData ?? 0}/{j?.total ?? 0} ({closingPct}%)</span>
           <span>โซน {ex?.waste.withZones ?? 0}/{j?.total ?? 0}</span>
