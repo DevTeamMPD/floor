@@ -13,14 +13,14 @@ const STAGES: { id: number; name: string }[] = [
   { id: 6, name: "เสร็จสิ้น" },
 ];
 
-type Mov = { i140: number; r140: number; i110: number; r110: number };
+type Mov = { i140: number; r140: number; i110: number; r110: number; byWidth: Record<string, { issued: number; returned: number }>; savedAt: string | null };
 function parseHandover(raw: unknown): Mov | null {
   if (!raw) return null;
   let h: unknown;
   try { h = typeof raw === "string" ? JSON.parse(raw) : raw; } catch { return null; }
   if (!h || typeof h !== "object") return null;
-  const obj = h as { materials?: unknown; returnItems?: unknown };
-  const s: Mov = { i140: 0, r140: 0, i110: 0, r110: 0 };
+  const obj = h as { materials?: unknown; returnItems?: unknown; savedAt?: unknown };
+  const s: Mov = { i140: 0, r140: 0, i110: 0, r110: 0, byWidth: {}, savedAt: typeof obj.savedAt === "string" ? obj.savedAt : null };
   let has = false;
   const acc = (arr: unknown, issued: boolean) => {
     if (!Array.isArray(arr)) return;
@@ -29,10 +29,15 @@ function parseHandover(raw: unknown): Mov | null {
       const m = it as { qty?: unknown; lengthCm?: unknown; widthCm?: unknown };
       const q = Number(m.qty) || 1;
       const len = Number(m.lengthCm ?? 0);
-      if (len <= 0) continue;
-      const w = String(m.widthCm);
-      if (w === "140") { if (issued) s.i140 += q * len; else s.r140 += q * len; has = true; }
-      else if (w === "110") { if (issued) s.i110 += q * len; else s.r110 += q * len; has = true; }
+      const width = Number(m.widthCm ?? 0);
+      if (len <= 0 || width <= 0) continue;
+      const w = String(width);
+      s.byWidth[w] ??= { issued: 0, returned: 0 };
+      if (issued) s.byWidth[w].issued += q * len;
+      else s.byWidth[w].returned += q * len;
+      if (width === 140) { if (issued) s.i140 += q * len; else s.r140 += q * len; }
+      else if (width === 110) { if (issued) s.i110 += q * len; else s.r110 += q * len; }
+      has = true;
     }
   };
   acc(obj.materials, true);
@@ -44,8 +49,67 @@ interface JobRow {
   stage: number | null; order_source: string | null; order_date: string | null; due_date: string | null;
   customer_name: string | null; product_name: string | null; bill_no: string | null; handover_data: unknown; completed_date: string | null; eval_score: number | null; job_no: string; updated_at: string | null;
 }
-interface ZoneRow { job_no: string; width_cm: number | null; length_cm: number | null; }
+interface ZoneRow { job_no: string; width_cm: number | null; length_cm: number | null; obstacles: unknown; }
 interface WorkOrderRow { status: string | null; updated_at: string | null; }
+
+interface GridData {
+  type: "grid";
+  cell_cm: number;
+  rows: number;
+  cols: number;
+  blocked: number[];
+  cellData?: Record<string, { blocked?: boolean }>;
+}
+
+function obstacleReduction(zone: ZoneRow): { alongWidth: number; alongLength: number } {
+  if (!Array.isArray(zone.obstacles)) return { alongWidth: 0, alongLength: 0 };
+  const grid = zone.obstacles.find((item): item is GridData => !!item && typeof item === "object" && (item as GridData).type === "grid");
+  if (!grid) return { alongWidth: 0, alongLength: 0 };
+  const blocked = Array.isArray(grid.blocked) ? grid.blocked : [];
+  const isBlocked = (index: number) => grid.cellData?.[String(index)]?.blocked ?? blocked.includes(index);
+  let blockedCols = 0;
+  for (let col = 0; col < grid.cols; col++) {
+    let wholeColumn = true;
+    for (let row = 0; row < grid.rows; row++) if (!isBlocked(row * grid.cols + col)) { wholeColumn = false; break; }
+    if (wholeColumn) blockedCols++;
+  }
+  let blockedRows = 0;
+  for (let row = 0; row < grid.rows; row++) {
+    let wholeRow = true;
+    for (let col = 0; col < grid.cols; col++) if (!isBlocked(row * grid.cols + col)) { wholeRow = false; break; }
+    if (wholeRow) blockedRows++;
+  }
+  const cellCm = Number(grid.cell_cm) || 0;
+  return { alongWidth: blockedCols * cellCm, alongLength: blockedRows * cellCm };
+}
+
+function expectedStrips(zones: ZoneRow[]): { total140: number; total110: number } {
+  const calculate = (stripLength: number, cover: number, reduction: number) => {
+    const pairs = Math.floor(cover / 250);
+    const remainder = cover % 250;
+    let n140 = pairs, n110 = pairs;
+    if (remainder > 0 && remainder <= 110) n110++;
+    else if (remainder > 110) { n140++; n110++; }
+    const effectiveLength = Math.max(0, stripLength - reduction);
+    return { total140: n140 * effectiveLength, total110: n110 * effectiveLength };
+  };
+  return zones.reduce((sum, zone) => {
+    const width = Number(zone.width_cm) || 0;
+    const length = Number(zone.length_cm) || 0;
+    if (width <= 0 || length <= 0) return sum;
+    const reduction = obstacleReduction(zone);
+    const byWidth = calculate(width, length, reduction.alongWidth);
+    const byLength = calculate(length, width, reduction.alongLength);
+    const best = byWidth.total140 + byWidth.total110 <= byLength.total140 + byLength.total110 ? byWidth : byLength;
+    return { total140: sum.total140 + best.total140, total110: sum.total110 + best.total110 };
+  }, { total140: 0, total110: 0 });
+}
+
+function monthKey(value: string | null): string | null {
+  if (!value) return null;
+  const match = value.match(/^(\d{4})-(\d{2})/);
+  return match ? `${match[1]}-${match[2]}` : null;
+}
 
 const WORK_ORDER_STATUSES = [
   "head_review", "returned_sales", "warehouse_waiting", "warehouse_preparing",
@@ -169,11 +233,12 @@ export async function GET() {
   type WRow = { customer: string; bill: string | null; zoneM2: number; actM2: number | null; pct: number | null };
   let waste: {
     withZones: number; withData: number; costSetup: boolean; totalWasteCost: number; top: WRow[];
+    monthly: { month: string; jobs: number; cost: number; avgPct: number | null }[];
     stats: { count: number; avgPct: number | null; medianPct: number | null; normal: number; heavy: number; abnormal: number };
-  } = { withZones: 0, withData: 0, costSetup: false, totalWasteCost: 0, top: [], stats: { count: 0, avgPct: null, medianPct: null, normal: 0, heavy: 0, abnormal: 0 } };
+  } = { withZones: 0, withData: 0, costSetup: false, totalWasteCost: 0, top: [], monthly: [], stats: { count: 0, avgPct: null, medianPct: null, normal: 0, heavy: 0, abnormal: 0 } };
   try {
     const [{ data: zones }, { data: mats }] = await Promise.all([
-      supabase.from("install_job_zones").select("job_no,width_cm,length_cm"),
+      supabase.from("install_job_zones").select("job_no,width_cm,length_cm,obstacles"),
       supabase.from("materials").select("sku,unit_cost").in("sku", ["RS-140", "RS-110"]),
     ]);
     const c140 = Number((mats ?? []).find((m) => m.sku === "RS-140")?.unit_cost ?? 0);
@@ -183,6 +248,7 @@ export async function GET() {
     let withZones = 0, withData = 0, totalWasteCost = 0;
     const rows: WRow[] = [];
     const pcts: number[] = [];
+    const monthlyMap: Record<string, { jobs: number; cost: number; pctSum: number; pctCount: number }> = {};
     for (const jb of jobs) {
       const jz = zByJob[String(jb.job_no)] ?? [];
       if (jz.length > 0) withZones++;
@@ -191,9 +257,19 @@ export async function GET() {
       if (mov) withData++;
       const a140 = mov ? mov.i140 - mov.r140 : null;
       const a110 = mov ? mov.i110 - mov.r110 : null;
-      const actCm2 = a140 !== null && a110 !== null ? a140 * 140 + a110 * 110 : null;
-      if (a140 !== null && a110 !== null) totalWasteCost += a140 * c140 + a110 * c110;
+      const actCm2 = mov ? Object.entries(mov.byWidth).reduce((area, [width, totals]) => area + (totals.issued - totals.returned) * Number(width), 0) : null;
+      const expected = expectedStrips(jz);
+      const wasteCost = a140 !== null && a110 !== null ? (a140 - expected.total140) * c140 + (a110 - expected.total110) * c110 : null;
+      if (wasteCost !== null) totalWasteCost += wasteCost;
       const pct = actCm2 !== null && zoneCm2 > 0 ? ((actCm2 - zoneCm2) / zoneCm2) * 100 : null;
+      const month = monthKey(jb.completed_date) ?? monthKey(mov?.savedAt ?? null);
+      if (month && mov && jz.length > 0) {
+        const bucket = monthlyMap[month] ?? { jobs: 0, cost: 0, pctSum: 0, pctCount: 0 };
+        bucket.jobs++;
+        bucket.cost += wasteCost ?? 0;
+        if (pct !== null) { bucket.pctSum += pct; bucket.pctCount++; }
+        monthlyMap[month] = bucket;
+      }
       if (pct !== null) {
         pcts.push(pct);
         rows.push({ customer: jb.customer_name || jb.bill_no || jb.job_no, bill: jb.bill_no, zoneM2: Math.round((zoneCm2 / 10000) * 10) / 10, actM2: actCm2 === null ? null : Math.round((actCm2 / 10000) * 10) / 10, pct: Math.round(pct * 10) / 10 });
@@ -203,8 +279,14 @@ export async function GET() {
     const sorted = [...pcts].sort((a, b) => a - b);
     const avgPct = pcts.length ? Math.round((pcts.reduce((a, b) => a + b, 0) / pcts.length) * 10) / 10 : null;
     const medianPct = sorted.length ? Math.round(sorted[Math.floor((sorted.length - 1) / 2)] * 10) / 10 : null;
+    const monthly = Object.entries(monthlyMap).sort(([a], [b]) => a.localeCompare(b)).map(([month, bucket]) => ({
+      month,
+      jobs: bucket.jobs,
+      cost: Math.round(bucket.cost * 100) / 100,
+      avgPct: bucket.pctCount ? Math.round((bucket.pctSum / bucket.pctCount) * 10) / 10 : null,
+    }));
     waste = {
-      withZones, withData, costSetup: c140 > 0 && c110 > 0, totalWasteCost, top: rows.slice(0, 6),
+      withZones, withData, costSetup: c140 > 0 && c110 > 0, totalWasteCost, top: rows.slice(0, 6), monthly,
       stats: {
         count: pcts.length, avgPct, medianPct,
         normal: pcts.filter((p) => p <= 20).length,

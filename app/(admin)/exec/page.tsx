@@ -7,6 +7,7 @@ type StageN = { id: number; name: string; n: number };
 type NamedJob = { customer: string; product: string; due: string; stage: number };
 type WasteTop = { customer: string; bill: string | null; zoneM2: number; actM2: number | null; pct: number | null };
 type WasteStats = { count: number; avgPct: number | null; medianPct: number | null; normal: number; heavy: number; abnormal: number };
+type WasteMonthly = { month: string; jobs: number; cost: number; avgPct: number | null };
 type Exec = {
   jobs: { total: number; byStage: StageN[]; bySource: Record<string, number>; byMonth: { month: string; n: number }[]; completedByMonth: { month: string; n: number }[]; done: number; active: number; overdue: number; evaluated: number };
   workOrders: { status: string; n: number; avgDays: number; maxDays: number }[];
@@ -14,7 +15,7 @@ type Exec = {
   pipeline: { aging: { id: number; name: string; n: number; avgDays: number; maxDays: number }[]; stuck: { customer: string; product: string; stage: number; stageName: string; days: number }[] };
   upcoming: NamedJob[];
   overdueList: NamedJob[];
-  waste: { withZones: number; withData: number; costSetup: boolean; totalWasteCost: number; top: WasteTop[]; stats: WasteStats };
+  waste: { withZones: number; withData: number; costSetup: boolean; totalWasteCost: number; top: WasteTop[]; monthly: WasteMonthly[]; stats: WasteStats };
   updatedAt: string;
 };
 type SResp = { timestamp: string; scores: (number | null)[]; overall: number | null; customer: string; comment: string; bill: string };
@@ -170,10 +171,29 @@ export default function ExecPage() {
   const dimLow = useMemo(() => DIMS.map((_, i) => responses.filter((r) => { const s = r.scores[i]; return s !== null && s <= 3; }).length), [responses]);
   const lowList = useMemo(() => responses.filter((r) => r.scores.some((s) => s !== null && s <= 2) || (r.overall !== null && r.overall < 3)), [responses]);
   const csatMonthly = useMemo(() => {
-    const agg: Record<string, { sum: number; n: number }> = {};
-    responses.forEach((r) => { const m = isoMonth(r.timestamp); if (!m) return; r.scores.forEach((s) => { if (s !== null) { agg[m] = agg[m] ?? { sum: 0, n: 0 }; agg[m].sum += s; agg[m].n++; } }); });
-    return Object.keys(agg).sort().map((m) => ({ month: m, avg: agg[m].sum / agg[m].n, n: agg[m].n }));
+    const agg: Record<string, { sum: number; n: number; responses: number }> = {};
+    responses.forEach((r) => {
+      const m = isoMonth(r.timestamp);
+      const scores = r.scores.filter((score): score is number => score !== null);
+      if (!m || !scores.length) return;
+      agg[m] = agg[m] ?? { sum: 0, n: 0, responses: 0 };
+      agg[m].responses++;
+      scores.forEach((score) => { agg[m].sum += score; agg[m].n++; });
+    });
+    return Object.keys(agg).sort().map((m) => ({ month: m, avg: agg[m].sum / agg[m].n, n: agg[m].n, responses: agg[m].responses }));
   }, [responses]);
+  const monthlySummary = useMemo(() => {
+    const wasteByMonth = new Map((ex?.waste.monthly ?? []).map((row) => [row.month, row]));
+    const csatByMonth = new Map(csatMonthly.map((row) => [row.month, row]));
+    const now = new Date();
+    return Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
+      const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+      const waste = wasteByMonth.get(month);
+      const csat = csatByMonth.get(month);
+      return { month, wasteJobs: waste?.jobs ?? 0, wasteCost: waste?.cost ?? 0, wastePct: waste?.avgPct ?? null, csat: csat?.avg ?? null, responses: csat?.responses ?? 0 };
+    });
+  }, [ex, csatMonthly]);
   const themeDetail = useMemo(() => {
     const real = responses.filter((r) => r.comment && r.comment !== "-" && r.comment !== "ไม่มี" && r.comment.length > 2);
     const out: { key: string; n: number }[] = [];
@@ -211,6 +231,7 @@ export default function ExecPage() {
   const workOrders = ex?.workOrders ?? [];
   const workOrderByStatus = new Map(workOrders.map((row) => [row.status, row]));
   const maxWorkOrderN = Math.max(1, ...workOrders.map((row) => row.n));
+  const latestMonthly = monthlySummary[monthlySummary.length - 1];
 
   const insight = (() => {
     if (!j) return "";
@@ -403,6 +424,50 @@ export default function ExecPage() {
             </Panel>
           </div>
         </div>
+
+        {/* Monthly management summary: waste cost and customer satisfaction in one comparable view. */}
+        <section className="exec-card mt-3 rounded-2xl bg-white p-4" style={{ boxShadow: SHADOW }}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-2">
+              <span className="mt-0.5 h-4 w-1 rounded-full" style={{ background: ACCENT }} />
+              <div>
+                <h2 className="text-sm font-bold" style={{ color: INK }}>ต้นทุนเศษและความพึงพอใจรายเดือน</h2>
+                <p className="text-[11px]" style={{ color: MUT }}>สรุป 6 เดือนล่าสุด · ต้นทุนเศษ = ต้นทุนใช้จริง − ต้นทุนตามพื้นที่</p>
+              </div>
+            </div>
+            <div className="flex gap-2 no-print">
+              <Link href="/waste-cost" className="rounded-lg border px-3 py-1.5 text-[11px] font-semibold" style={{ borderColor: HAIR, color: SUB }}>ดูต้นทุนเศษ</Link>
+              <Link href="/dashboard" className="rounded-lg border px-3 py-1.5 text-[11px] font-semibold" style={{ borderColor: HAIR, color: SUB }}>ดู Dashboard</Link>
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="rounded-xl px-3 py-2.5" style={{ background: "#f8fafc" }}><div className="text-[9.5px]" style={{ color: MUT }}>เดือนล่าสุด</div><div className="mt-1 text-sm font-bold" style={{ color: INK }}>{monthLabel(latestMonthly.month)}</div></div>
+            <div className="rounded-xl px-3 py-2.5" style={{ background: tint(BAD) }}><div className="text-[9.5px]" style={{ color: MUT }}>ต้นทุนเศษ</div><div className="mt-1 text-sm font-extrabold" style={{ color: ex?.waste.costSetup ? (latestMonthly.wasteCost > 0 ? BAD : GOOD) : MUT, ...NUM }}>{ex?.waste.costSetup ? baht(latestMonthly.wasteCost) : "ยังไม่ตั้งราคา"}</div></div>
+            <div className="rounded-xl px-3 py-2.5" style={{ background: "rgba(79,70,229,0.06)" }}><div className="text-[9.5px]" style={{ color: MUT }}>CSAT เฉลี่ย</div><div className="mt-1 text-sm font-extrabold" style={{ color: latestMonthly.csat === null ? MUT : avgColor(latestMonthly.csat), ...NUM }}>{latestMonthly.csat === null ? "—" : `${latestMonthly.csat.toFixed(2)}/5`}</div></div>
+            <div className="rounded-xl px-3 py-2.5" style={{ background: "#f8fafc" }}><div className="text-[9.5px]" style={{ color: MUT }}>ข้อมูลเดือนนี้</div><div className="mt-1 text-sm font-bold" style={{ color: INK, ...NUM }}>{latestMonthly.wasteJobs} งาน · {latestMonthly.responses} แบบประเมิน</div></div>
+          </div>
+
+          <div className="mt-3 overflow-x-auto rounded-xl border" style={{ borderColor: HAIR }}>
+            <table className="w-full min-w-[680px] border-collapse text-left text-[11px]">
+              <thead style={{ background: "#f8fafc", color: MUT }}>
+                <tr><th className="px-3 py-2 font-semibold">เดือน</th><th className="px-3 py-2 text-right font-semibold">งานมีข้อมูลเศษ</th><th className="px-3 py-2 text-right font-semibold">ต้นทุนเศษ</th><th className="px-3 py-2 text-right font-semibold">เศษเฉลี่ย</th><th className="px-3 py-2 text-right font-semibold">CSAT เฉลี่ย</th><th className="px-3 py-2 text-right font-semibold">แบบประเมิน</th></tr>
+              </thead>
+              <tbody>
+                {monthlySummary.map((row) => (
+                  <tr key={row.month} style={{ borderTop: `1px solid ${HAIR}` }}>
+                    <td className="px-3 py-2.5 font-semibold" style={{ color: INK }}>{monthLabel(row.month)}</td>
+                    <td className="px-3 py-2.5 text-right" style={{ color: SUB, ...NUM }}>{row.wasteJobs}</td>
+                    <td className="px-3 py-2.5 text-right font-semibold" style={{ color: !ex?.waste.costSetup ? MUT : row.wasteCost > 0 ? BAD : GOOD, ...NUM }}>{ex?.waste.costSetup ? baht(row.wasteCost) : "รอตั้งราคา"}</td>
+                    <td className="px-3 py-2.5 text-right" style={{ color: row.wastePct === null ? MUT : wasteColor(row.wastePct), ...NUM }}>{row.wastePct === null ? "—" : `${row.wastePct.toFixed(1)}%`}</td>
+                    <td className="px-3 py-2.5 text-right font-bold" style={{ color: row.csat === null ? MUT : avgColor(row.csat), ...NUM }}>{row.csat === null ? "—" : row.csat.toFixed(2)}</td>
+                    <td className="px-3 py-2.5 text-right" style={{ color: SUB, ...NUM }}>{row.responses}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
 
         {/* Full-width operational pipeline: one executive view, with direct entry to the team that owns each state. */}
         <section className="exec-card mt-3 rounded-2xl bg-white p-4" style={{ boxShadow: SHADOW }}>
