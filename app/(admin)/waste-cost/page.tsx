@@ -3,6 +3,12 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { floorErrorMessage } from "@/lib/floor-error-message";
+import {
+  normalizeBillReference,
+  parseWasteSalesSummary,
+  wasteCostToSalesPercent,
+  type WasteSalesSummary,
+} from "@/lib/waste-sales";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Obstacle { id: string; name: string; width_cm: number; length_cm: number; deduct: boolean; }
@@ -51,6 +57,12 @@ interface Job {
   appt_date: string | null;
   stage: number;
   handover_data: unknown;
+}
+
+interface WasteAnalysisExclusion {
+  job_no: string;
+  reason: string;
+  excluded_at: string;
 }
 
 interface Material { id: string; sku: string; unit_cost: number | null; }
@@ -274,6 +286,11 @@ export default function WasteCostPage() {
   const supabase = createClient();
 
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [salesByBillRef, setSalesByBillRef] = useState<Record<string, WasteSalesSummary>>({});
+  const [exclusionsByJobNo, setExclusionsByJobNo] = useState<Record<string, WasteAnalysisExclusion>>({});
+  const [showExcluded, setShowExcluded] = useState(false);
+  const [exclusionReason, setExclusionReason] = useState("");
+  const [savingExclusion, setSavingExclusion] = useState(false);
   const [mat140, setMat140] = useState<Material | null>(null);
   const [mat110, setMat110] = useState<Material | null>(null);
   const [search, setSearch] = useState("");
@@ -329,11 +346,53 @@ export default function WasteCostPage() {
   // ── Load all jobs ─────────────────────────────────────────────────────────
   const fetchJobs = useCallback(async () => {
     setLoadingJobs(true);
-    const { data } = await supabase
+    const { data, error: jobsError } = await supabase
       .from("install_jobs")
       .select("job_no,bill_no,order_no,customer_name,customer_phone,address,product_name,appt_date,stage,handover_data")
       .order("created_at", { ascending: false });
-    setJobs((data ?? []) as Job[]);
+    if (jobsError) {
+      toast.error("โหลดใบงานไม่ได้: " + floorErrorMessage(jobsError));
+      setLoadingJobs(false);
+      return;
+    }
+
+    const loadedJobs = (data ?? []) as Job[];
+    setJobs(loadedJobs);
+
+    const [{ data: exclusionRows, error: exclusionsError }, salesResult] = await Promise.all([
+      supabase
+        .from("floor_waste_analysis_exclusions")
+        .select("job_no,reason,excluded_at"),
+      (() => {
+        const billRefs = Array.from(new Set(
+          loadedJobs.map((job) => normalizeBillReference(job.bill_no)).filter(Boolean)
+        ));
+        return billRefs.length > 0
+          ? supabase.rpc("get_floor_waste_sales_summaries", { p_bill_refs: billRefs })
+          : Promise.resolve({ data: [], error: null });
+      })(),
+    ]);
+
+    if (exclusionsError) {
+      toast.error("โหลดรายการที่ซ่อนไม่ได้: " + floorErrorMessage(exclusionsError));
+    } else {
+      const nextExclusions: Record<string, WasteAnalysisExclusion> = {};
+      ((exclusionRows ?? []) as WasteAnalysisExclusion[]).forEach((row) => {
+        nextExclusions[row.job_no] = row;
+      });
+      setExclusionsByJobNo(nextExclusions);
+    }
+
+    if (salesResult.error) {
+      toast.error("โหลดยอดขายไม่ได้: " + floorErrorMessage(salesResult.error));
+    } else {
+      const nextSales: Record<string, WasteSalesSummary> = {};
+      ((salesResult.data ?? []) as Record<string, unknown>[]).forEach((row) => {
+        const summary = parseWasteSalesSummary(row);
+        if (summary) nextSales[summary.billRef] = summary;
+      });
+      setSalesByBillRef(nextSales);
+    }
     setLoadingJobs(false);
   }, [supabase]);
 
@@ -624,6 +683,56 @@ export default function WasteCostPage() {
     toast.success("ลบรายการแล้ว");
   };
 
+  useEffect(() => {
+    if (!selectedJobNo) {
+      setExclusionReason("");
+      return;
+    }
+    setExclusionReason(exclusionsByJobNo[selectedJobNo]?.reason ?? "");
+  }, [selectedJobNo, exclusionsByJobNo]);
+
+  const excludeSelectedJob = async () => {
+    if (!selectedJobNo || savingExclusion || exclusionsByJobNo[selectedJobNo]) return;
+    const reason = exclusionReason.trim() || "ไม่ต้องการนำมาวิเคราะห์";
+    setSavingExclusion(true);
+    const { data, error } = await supabase
+      .from("floor_waste_analysis_exclusions")
+      .insert({ job_no: selectedJobNo, reason })
+      .select("job_no,reason,excluded_at")
+      .single();
+    setSavingExclusion(false);
+    if (error) {
+      toast.error("ซ่อนจากการวิเคราะห์ไม่ได้: " + floorErrorMessage(error));
+      return;
+    }
+    const row = data as WasteAnalysisExclusion;
+    setExclusionsByJobNo((previous) => ({ ...previous, [row.job_no]: row }));
+    setShowExcluded(true);
+    toast.success("ซ่อนบิลนี้จากการวิเคราะห์แล้ว");
+  };
+
+  const restoreSelectedJob = async () => {
+    if (!selectedJobNo || savingExclusion || !exclusionsByJobNo[selectedJobNo]) return;
+    setSavingExclusion(true);
+    const { error } = await supabase
+      .from("floor_waste_analysis_exclusions")
+      .delete()
+      .eq("job_no", selectedJobNo);
+    setSavingExclusion(false);
+    if (error) {
+      toast.error("นำกลับมาวิเคราะห์ไม่ได้: " + floorErrorMessage(error));
+      return;
+    }
+    setExclusionsByJobNo((previous) => {
+      const next = { ...previous };
+      delete next[selectedJobNo];
+      return next;
+    });
+    setExclusionReason("");
+    setShowExcluded(false);
+    toast.success("นำบิลกลับมาวิเคราะห์แล้ว");
+  };
+
   // ── Computed ──────────────────────────────────────────────────────────────
   const expected = useMemo(() => sumZones(zones), [zones]);
 
@@ -657,21 +766,23 @@ export default function WasteCostPage() {
     ? (wasteAreaCm2 / totalZoneArea) * 100 : null;
 
   const filteredJobs = useMemo(() => {
-    if (!search.trim()) return jobs;
     const q = search.toLowerCase();
-    return jobs.filter((j) =>
-      j.job_no?.toLowerCase().includes(q) ||
-      (j.bill_no as string | null)?.toLowerCase().includes(q) ||
-      (j.order_no as string | null)?.toLowerCase().includes(q) ||
-      (j.customer_name as string | null)?.toLowerCase().includes(q) ||
-      (j.product_name as string | null)?.toLowerCase().includes(q)
-    );
-  }, [jobs, search]);
+    return jobs.filter((j) => {
+      const isExcluded = Boolean(exclusionsByJobNo[j.job_no]);
+      if (isExcluded !== showExcluded) return false;
+      if (!q.trim()) return true;
+      return j.job_no?.toLowerCase().includes(q) ||
+        (j.bill_no as string | null)?.toLowerCase().includes(q) ||
+        (j.order_no as string | null)?.toLowerCase().includes(q) ||
+        (j.customer_name as string | null)?.toLowerCase().includes(q) ||
+        (j.product_name as string | null)?.toLowerCase().includes(q);
+    });
+  }, [jobs, search, exclusionsByJobNo, showExcluded]);
 
   const overviewRows = useMemo(() => {
     const c140 = mat140?.unit_cost ?? 0;
     const c110 = mat110?.unit_cost ?? 0;
-    return filteredJobs.map((j) => {
+    return jobs.map((j) => {
       const jzones = overviewZonesMap[j.job_no] ?? [];
       const mov = parseHandoverSummary(j.handover_data);
       const exp = sumZones(jzones);
@@ -687,30 +798,56 @@ export default function WasteCostPage() {
       const actArea = mov ? actualAreaFromSummary(mov) : null;
       const wasteArea = actArea !== null && zoneArea > 0 ? actArea - zoneArea : null;
       const wasteAreaPct = wasteArea !== null && zoneArea > 0 ? (wasteArea / zoneArea) * 100 : null;
+      const billRef = normalizeBillReference(j.bill_no);
+      const sales = billRef ? salesByBillRef[billRef] ?? null : null;
       return {
         ...j, zoneCount: jzones.length, exp140: exp.total140, exp110: exp.total110,
         actual140, actual110, waste140, waste110,
         expectedCost: expectedCost > 0 ? expectedCost : null,
         actualCost, wasteCost,
         zoneArea, actArea, wasteArea, wasteAreaPct,
+        sales,
+        wasteToSalesPct: wasteCostToSalesPercent(wasteCost, sales?.salesAmount ?? null),
         hasZones: jzones.length > 0,
         hasMov: mov !== null,
+        isExcluded: Boolean(exclusionsByJobNo[j.job_no]),
       };
     });
-  }, [filteredJobs, overviewZonesMap, mat140, mat110]);
+  }, [jobs, overviewZonesMap, mat140, mat110, salesByBillRef, exclusionsByJobNo]);
+
+  const displayedOverviewRows = useMemo(() => {
+    const visibleJobNos = new Set(filteredJobs.map((job) => job.job_no));
+    return overviewRows.filter((row) => visibleJobNos.has(row.job_no));
+  }, [filteredJobs, overviewRows]);
 
   const stats = useMemo(() => {
+    const analyzedRows = overviewRows.filter((row) => !row.isExcluded);
     const withCostSetup = !!(mat140?.unit_cost && mat110?.unit_cost);
-    const totalWasteCost = overviewRows.reduce((s, r) => s + (r.wasteCost ?? 0), 0);
+    const totalWasteCost = analyzedRows.reduce((s, r) => s + (r.wasteCost ?? 0), 0);
+    const analyzedBillRefs = new Set(analyzedRows.map((row) => normalizeBillReference(row.bill_no)).filter(Boolean));
+    const salesByDistinctBill = new Map<string, WasteSalesSummary>();
+    analyzedRows.forEach((row) => {
+      const billRef = normalizeBillReference(row.bill_no);
+      if (billRef && row.sales && row.sales.matchedVia !== "not_found" && row.sales.salesAmount !== null) {
+        salesByDistinctBill.set(billRef, row.sales);
+      }
+    });
     return {
-      total: jobs.length,
-      withZones: overviewRows.filter((r) => r.hasZones).length,
-      withData: overviewRows.filter((r) => r.hasMov).length,
+      total: analyzedRows.length,
+      excluded: overviewRows.length - analyzedRows.length,
+      withZones: analyzedRows.filter((r) => r.hasZones).length,
+      withData: analyzedRows.filter((r) => r.hasMov).length,
       totalWasteCost, withCostSetup,
+      totalSales: Array.from(salesByDistinctBill.values()).reduce((sum, sales) => sum + (sales.salesAmount ?? 0), 0),
+      salesFound: salesByDistinctBill.size,
+      billRefs: analyzedBillRefs.size,
     };
-  }, [overviewRows, jobs.length, mat140, mat110]);
+  }, [overviewRows, mat140, mat110]);
 
   const selectedJob = jobs.find((j) => j.job_no === selectedJobNo);
+  const selectedExclusion = selectedJobNo ? exclusionsByJobNo[selectedJobNo] ?? null : null;
+  const selectedBillRef = normalizeBillReference(selectedJob?.bill_no);
+  const selectedSales = selectedBillRef ? salesByBillRef[selectedBillRef] ?? null : null;
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
@@ -730,6 +867,24 @@ export default function WasteCostPage() {
           </button>
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา บิล / ออเดอร์ / ลูกค้า…"
             className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1">
+            <button
+              onClick={() => setShowExcluded(false)}
+              className={`rounded-md px-2 py-1.5 text-[10px] font-semibold transition-colors ${
+                !showExcluded ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"
+              }`}
+            >
+              วิเคราะห์ {stats.total}
+            </button>
+            <button
+              onClick={() => setShowExcluded(true)}
+              className={`rounded-md px-2 py-1.5 text-[10px] font-semibold transition-colors ${
+                showExcluded ? "bg-white text-amber-700 shadow-sm" : "text-slate-500"
+              }`}
+            >
+              ซ่อนแล้ว {stats.excluded}
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -751,6 +906,9 @@ export default function WasteCostPage() {
                   <p className="text-xs font-semibold text-slate-800 truncate">
                     {(j.bill_no as string | null) || j.job_no}
                   </p>
+                  {exclusionsByJobNo[j.job_no] && (
+                    <span className="ml-auto rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700">ซ่อน</span>
+                  )}
                 </div>
                 <p className="text-[10px] font-mono text-blue-500 mb-0.5 pl-3">{j.job_no}</p>
                 <p className="text-[11px] text-slate-500 truncate pl-3">{(j.customer_name as string | null) || "—"}</p>
@@ -784,11 +942,19 @@ export default function WasteCostPage() {
               </button>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {showExcluded && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+                รายการด้านล่างถูกเก็บไว้เพื่อตรวจย้อนหลัง แต่ไม่รวมในจำนวนงาน ยอดขาย หรือต้นทุนเศษของ Dashboard
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
               {[
-                { label: "งานทั้งหมด", val: stats.total.toString(), sub: "รายการ" },
+                { label: "งานที่วิเคราะห์", val: stats.total.toString(), sub: "รายการ" },
                 { label: "มีข้อมูลโซน", val: stats.withZones.toString(), sub: "งาน" },
                 { label: "มีข้อมูลปิดงาน", val: stats.withData.toString(), sub: "งาน" },
+                { label: "เชื่อมยอดขาย", val: stats.salesFound.toString(), sub: `จาก ${stats.billRefs} บิล` },
+                { label: "ยอดขายรวม", val: fmtBaht(stats.totalSales), sub: "เฉพาะบิลที่เชื่อมได้" },
                 {
                   label: "รวมต้นทุนเศษ",
                   val: stats.withCostSetup ? (stats.totalWasteCost >= 0 ? "+" : "") + fmtBaht(stats.totalWasteCost) : "—",
@@ -823,17 +989,19 @@ export default function WasteCostPage() {
                       <th className="text-center px-3 py-2.5 font-medium text-slate-500">%เศษพื้นที่</th>
                       <th className="text-center px-3 py-2.5 font-medium text-slate-500">%เศษ 140</th>
                       <th className="text-center px-3 py-2.5 font-medium text-slate-500">%เศษ 110</th>
+                      <th className="text-right px-3 py-2.5 font-medium text-slate-500">ยอดขาย</th>
                       <th className="text-right px-3 py-2.5 font-medium text-slate-500">ต้นทุนเศษ</th>
+                      <th className="text-center px-3 py-2.5 font-medium text-slate-500">เศษ/ยอดขาย</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {loadingOverview ? (
-                      <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">⏳ กำลังโหลด…</td></tr>
-                    ) : overviewRows.length === 0 ? (
-                      <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">ไม่มีข้อมูล</td></tr>
-                    ) : overviewRows.map((r) => (
+                      <tr><td colSpan={11} className="px-3 py-8 text-center text-slate-400">⏳ กำลังโหลด…</td></tr>
+                    ) : displayedOverviewRows.length === 0 ? (
+                      <tr><td colSpan={11} className="px-3 py-8 text-center text-slate-400">ไม่มีข้อมูล</td></tr>
+                    ) : displayedOverviewRows.map((r) => (
                       <tr key={r.job_no}
-                        className={`cursor-pointer transition-colors ${r.hasZones ? "hover:bg-blue-50/40" : "opacity-40"}`}
+                        className={`cursor-pointer transition-colors ${r.hasZones ? "hover:bg-blue-50/40" : "opacity-60"} ${r.isExcluded ? "bg-amber-50/40" : ""}`}
                         onClick={() => { setSelectedJobNo(r.job_no); setViewMode("detail"); }}
                       >
                         <td className="px-3 py-2.5">
@@ -858,6 +1026,16 @@ export default function WasteCostPage() {
                         <td className="px-3 py-2.5 text-center"><WasteBadge pct={r.wasteAreaPct} /></td>
                         <td className="px-3 py-2.5 text-center"><WasteBadge pct={r.waste140} /></td>
                         <td className="px-3 py-2.5 text-center"><WasteBadge pct={r.waste110} /></td>
+                        <td className="px-3 py-2.5 text-right">
+                          {r.sales && r.sales.matchedVia !== "not_found" && r.sales.salesAmount !== null ? (
+                            <div>
+                              <p className="font-semibold font-mono text-slate-800">{fmtBaht(r.sales.salesAmount)}</p>
+                              <p className="text-[9px] text-slate-400">จาก {r.sales.matchedVia}</p>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-medium text-amber-600">ไม่พบข้อมูล</span>
+                          )}
+                        </td>
                         <td className="px-3 py-2.5 text-right font-semibold">
                           {r.wasteCost !== null ? (
                             <span className={r.wasteCost > 0 ? "text-red-600" : "text-green-600"}>
@@ -865,6 +1043,7 @@ export default function WasteCostPage() {
                             </span>
                           ) : "—"}
                         </td>
+                        <td className="px-3 py-2.5 text-center"><WasteBadge pct={r.wasteToSalesPct} /></td>
                       </tr>
                     ))}
                   </tbody>
@@ -923,6 +1102,86 @@ export default function WasteCostPage() {
                   <div className="col-span-2">
                     <p className="text-slate-400 text-[10px] mb-0.5">สินค้า</p>
                     <p className="text-slate-700">{(selectedJob?.product_name as string | null) || "—"}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 lg:grid-cols-2">
+                  <div className={`rounded-xl border p-3 ${
+                    selectedSales && selectedSales.matchedVia !== "not_found" && selectedSales.salesAmount !== null
+                      ? "border-emerald-200 bg-emerald-50"
+                      : "border-amber-200 bg-amber-50"
+                  }`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">ยอดขายจาก sales_transaction</p>
+                        {selectedSales && selectedSales.matchedVia !== "not_found" && selectedSales.salesAmount !== null ? (
+                          <>
+                            <p className="mt-1 text-2xl font-bold text-emerald-800">{fmtBaht(selectedSales.salesAmount)}</p>
+                            <p className="mt-1 text-[10px] text-emerald-700">
+                              ยอดสุทธิตามธุรกรรม {selectedSales.netAmount !== null ? fmtBaht(selectedSales.netAmount) : "—"}
+                              {selectedSales.shippingCost ? ` · ค่าจัดส่ง ${fmtBaht(selectedSales.shippingCost)}` : ""}
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="mt-1 text-sm font-semibold text-amber-800">ไม่พบข้อมูลยอดขาย</p>
+                            <p className="mt-1 text-[10px] text-amber-700">ตรวจทั้ง bill_no และ order_no แล้ว ไม่แสดงเป็น 0 บาท</p>
+                          </>
+                        )}
+                      </div>
+                      {selectedSales?.matchedVia && selectedSales.matchedVia !== "not_found" && (
+                        <span className="rounded-full bg-white px-2 py-1 text-[9px] font-semibold text-emerald-700 shadow-sm">
+                          พบจาก {selectedSales.matchedVia}
+                        </span>
+                      )}
+                    </div>
+                    {selectedSales?.matchedVia !== "not_found" && selectedSales?.transactionLines ? (
+                      <p className="mt-2 text-[10px] text-slate-500">
+                        {selectedSales.transactionLines} รายการสินค้า
+                        {selectedSales.orderStatuses.length ? ` · ${selectedSales.orderStatuses.join(", ")}` : ""}
+                        {selectedSales.latestTxnDate ? ` · ${fmtDate(selectedSales.latestTxnDate)}` : ""}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className={`rounded-xl border p-3 ${selectedExclusion ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50"}`}>
+                    <div className="flex items-start gap-2">
+                      <input
+                        id="exclude-from-waste-analysis"
+                        type="checkbox"
+                        checked={Boolean(selectedExclusion)}
+                        disabled={savingExclusion}
+                        onChange={(event) => {
+                          if (event.target.checked) void excludeSelectedJob();
+                          else void restoreSelectedJob();
+                        }}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                      />
+                      <label htmlFor="exclude-from-waste-analysis" className="cursor-pointer">
+                        <p className="text-xs font-semibold text-slate-800">ไม่นำบิลนี้มาวิเคราะห์</p>
+                        <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">
+                          ซ่อนจาก Dashboard และไม่นับยอดขาย/ต้นทุนเศษ แต่ใบงานและประวัติยังอยู่ครบ
+                        </p>
+                      </label>
+                    </div>
+                    {selectedExclusion ? (
+                      <div className="mt-3 rounded-lg bg-white/80 px-3 py-2 text-[10px] text-amber-800">
+                        <p className="font-semibold">เหตุผล: {selectedExclusion.reason}</p>
+                        <p className="mt-0.5 text-amber-600">ซ่อนเมื่อ {fmtDate(selectedExclusion.excluded_at)}</p>
+                      </div>
+                    ) : (
+                      <label className="mt-3 block text-[10px] text-slate-500">
+                        เหตุผล (ไม่บังคับ)
+                        <input
+                          value={exclusionReason}
+                          onChange={(event) => setExclusionReason(event.target.value)}
+                          maxLength={500}
+                          placeholder="เช่น บิลทดสอบ / ไม่ใช่งานที่ต้องวิเคราะห์"
+                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                        />
+                      </label>
+                    )}
+                    {savingExclusion && <p className="mt-2 text-[10px] text-slate-400">กำลังบันทึก…</p>}
                   </div>
                 </div>
               </div>
