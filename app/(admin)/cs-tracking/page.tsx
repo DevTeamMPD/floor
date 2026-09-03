@@ -41,10 +41,19 @@ interface SheetQuestion {
   label: string;
 }
 
+interface WorkOrderItem {
+  item_name: string;
+  specification: string | null;
+  actual_qty: number | null;
+  planned_qty: number | null;
+  unit: string | null;
+}
+
 interface JobRow extends Job {
   evaluation: Evaluation | null;
   work_order_id: string | null;
   work_order_status: string | null;
+  items: WorkOrderItem[];
 }
 
 function bangkokToday() {
@@ -146,6 +155,22 @@ function EvalModal({ row, questions, readOnly = false, onClose, onSaved }: {
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl ml-4">×</button>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+          {row.items.length > 0 && (
+            <div>
+              <p className="text-sm font-medium text-gray-700 mb-2">🧱 สินค้าที่ติดตั้ง</p>
+              <div className="space-y-1.5 rounded-xl border border-gray-200 p-3">
+                {row.items.map((item, index) => (
+                  <div key={`${item.item_name}-${index}`} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm">
+                    <span className="font-medium text-gray-800">{item.item_name}</span>
+                    <span className="text-gray-500">
+                      {item.specification ? `${item.specification} · ` : ""}
+                      {(item.actual_qty ?? item.planned_qty) ?? "—"} {item.unit ?? ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {row.completion_photos && row.completion_photos.length > 0 && (
             <div>
               <p className="text-sm font-medium text-gray-700 mb-2">📷 ภาพระหว่างงานติดตั้ง</p>
@@ -245,11 +270,13 @@ function localDemoRows(): JobRow[] {
       job_no: "DEMO-CS-001", customer_name: "ลูกค้าตัวอย่าง A", product_name: "พื้น SPC พร้อมติดตั้ง",
       external_id: "DEMO-001", product_skus: ["SPC-DEMO"], closed_at: at(4), appt_date: at(4),
       customer_phone: "08x-xxx-1201", stage: 6, evaluation: null, work_order_id: null, work_order_status: "waiting_cs",
+      items: [{ item_name: "พื้น SPC ลายไม้สัก", specification: "หน้ากว้าง 18 ซม. × ยาว 122 ซม.", actual_qty: 24, planned_qty: 24, unit: "แผ่น" }],
     },
     {
       job_no: "DEMO-CS-002", customer_name: "ลูกค้าตัวอย่าง B", product_name: "พื้นกระเบื้องยาง",
       external_id: "DEMO-002", product_skus: ["LVT-DEMO"], closed_at: at(2), appt_date: at(2),
       customer_phone: "09x-xxx-3342", stage: 6, evaluation: null, work_order_id: null, work_order_status: "waiting_cs",
+      items: [{ item_name: "กระเบื้องยาง LVT ลายหินอ่อน", specification: "หน้ากว้าง 30 ซม. × ยาว 60 ซม.", actual_qty: 40, planned_qty: 40, unit: "แผ่น" }],
     },
     {
       job_no: "DEMO-CS-003", customer_name: "ลูกค้าตัวอย่าง C", product_name: "งานติดตั้งพื้นสำนักงาน",
@@ -261,6 +288,10 @@ function localDemoRows(): JobRow[] {
         answers: { service: "4", installation_quality: "3", tidiness: "4", punctuality: "3", manner_guidance: "4" },
       },
       work_order_id: null, work_order_status: "closed",
+      items: [
+        { item_name: "พื้นไวนิลสำนักงาน SPC", specification: "หน้ากว้าง 20 ซม. × ยาว 130 ซม.", actual_qty: 60, planned_qty: 58, unit: "แผ่น" },
+        { item_name: "บัวเชิงผนัง", specification: "สูง 8 ซม.", actual_qty: 45, planned_qty: 45, unit: "เมตร" },
+      ],
     },
   ];
 }
@@ -290,7 +321,7 @@ function CsTrackingInner() {
     }
     const { data: orderRows, error: orderError } = await supabase.from("floor_work_orders").select("id,job_no,status,waiting_cs_at,closed_at").in("status", ["waiting_cs", "closed"]);
     const workOrders = (orderRows ?? []) as { id: string; job_no: string; status: string; waiting_cs_at: string | null; closed_at: string | null }[];
-    const [stageJobsResult, flowJobsResult, evalResult, questionResult, sheetResult] = await Promise.all([
+    const [stageJobsResult, flowJobsResult, evalResult, questionResult, sheetResult, itemsResult] = await Promise.all([
       supabase
         .from("install_jobs")
         .select("job_no, customer_name, product_name, external_id, product_skus, closed_at, appt_date, customer_phone, completion_photos, stage")
@@ -300,6 +331,9 @@ function CsTrackingInner() {
       supabase.from("job_evaluations").select("*, score:satisfaction_score"),
       supabase.from("evaluation_questions").select("id, question_text, order_index").eq("is_active", true).order("order_index"),
       fetch("/api/satisfaction-survey", { cache: "no-store" }).then((response) => response.json()).catch(() => ({ questions: [] })),
+      workOrders.length
+        ? supabase.from("floor_work_order_items").select("work_order_id, item_name, specification, actual_qty, planned_qty, unit").eq("category", "floor_material").in("work_order_id", workOrders.map((row) => row.id)).order("sort_order")
+        : Promise.resolve({ data: [], error: null }),
     ]);
     const jobErr = stageJobsResult.error ?? flowJobsResult.error ?? orderError; if (jobErr) toast.error(jobErr.message);
     const jobs = Array.from(new Map([...(stageJobsResult.data ?? []), ...(flowJobsResult.data ?? [])].map((row) => [row.job_no, row])).values()) as Job[];
@@ -308,7 +342,13 @@ function CsTrackingInner() {
       const evalMap = new Map<string, Evaluation>();
       (evals ?? []).forEach((e: Evaluation) => evalMap.set(e.job_no, e));
       const orderMap = new Map(workOrders.map((row) => [row.job_no, row]));
-      setRows(jobs.map((j: Job) => { const order = orderMap.get(j.job_no); return { ...j, closed_at: j.closed_at ?? order?.waiting_cs_at ?? null, evaluation: evalMap.get(j.job_no) ?? null, work_order_id: order?.id ?? null, work_order_status: order?.status ?? null }; }));
+      const itemsByOrder = new Map<string, WorkOrderItem[]>();
+      ((itemsResult.data ?? []) as (WorkOrderItem & { work_order_id: string })[]).forEach((item) => {
+        const list = itemsByOrder.get(item.work_order_id) ?? [];
+        list.push(item);
+        itemsByOrder.set(item.work_order_id, list);
+      });
+      setRows(jobs.map((j: Job) => { const order = orderMap.get(j.job_no); return { ...j, closed_at: j.closed_at ?? order?.waiting_cs_at ?? null, evaluation: evalMap.get(j.job_no) ?? null, work_order_id: order?.id ?? null, work_order_status: order?.status ?? null, items: order ? (itemsByOrder.get(order.id) ?? []) : [] }; }));
     } else setRows([]);
     const sheetQuestions = Array.isArray(sheetResult?.questions) ? sheetResult.questions as SheetQuestion[] : [];
     if (sheetQuestions.length) {
