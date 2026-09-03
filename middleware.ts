@@ -12,6 +12,8 @@ const PUBLIC_PREFIXES = [
   "/api",
   "/manifest.webmanifest",
   "/floor-sw.js",
+  "/lendi-engineering-logo.png",
+  "/lendi-space-logo.png",
 ];
 // Active FloorNow staff share visibility of operational data.  Access to state
 // transitions and administration remains enforced by RLS/RPC capability checks.
