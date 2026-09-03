@@ -132,7 +132,7 @@ function EvalModal({ row, questions, readOnly = false, onClose, onSaved }: {
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[95vh] flex flex-col">
         <div className="flex items-start justify-between px-6 py-4 border-b">
           <div>
             <h2 className="font-bold text-gray-900">📞 บันทึกการประเมิน</h2>
@@ -149,7 +149,7 @@ function EvalModal({ row, questions, readOnly = false, onClose, onSaved }: {
           {row.completion_photos && row.completion_photos.length > 0 && (
             <div>
               <p className="text-sm font-medium text-gray-700 mb-2">📷 ภาพระหว่างงานติดตั้ง</p>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-6 gap-2">
                 {row.completion_photos.map((path) => {
                   const url = path.startsWith("http") ? path : supabase.storage.from(JOB_PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
                   return (
@@ -189,17 +189,19 @@ function EvalModal({ row, questions, readOnly = false, onClose, onSaved }: {
                 <p className="text-sm font-semibold text-blue-900">ชุดคำถามโทรติดตามจาก Google Form</p>
                 <p className="mt-1 text-xs leading-relaxed text-blue-700">ให้ CS อ่านคำถามตามลำดับและเลือกคะแนน 1–5 จากคำตอบลูกค้า เพื่อให้ข้อมูลหน้ารายงานตรงกับแบบฟอร์มเดิม</p>
               </div>
-              {questions.map((q) => (
-                <div key={q.id} className="rounded-xl border border-gray-200 p-3">
-                  <label className="text-sm font-medium leading-relaxed text-gray-700">{q.question_text}</label>
-                  <select value={answers[q.id] ?? ""} onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
-                    className="mt-2 w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
-                    <option value="">เลือกคะแนนจากคำตอบลูกค้า</option>
-                    <option value="5">5 · ดีมาก</option><option value="4">4 · ดี</option><option value="3">3 · ปานกลาง</option>
-                    <option value="2">2 · พอใช้</option><option value="1">1 · ควรปรับปรุง</option>
-                  </select>
-                </div>
-              ))}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {questions.map((q) => (
+                  <div key={q.id} className="rounded-xl border border-gray-200 p-3">
+                    <label className="text-sm font-medium leading-relaxed text-gray-700">{q.question_text}</label>
+                    <select value={answers[q.id] ?? ""} onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
+                      className="mt-2 w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                      <option value="">เลือกคะแนนจากคำตอบลูกค้า</option>
+                      <option value="5">5 · ดีมาก</option><option value="4">4 · ดี</option><option value="3">3 · ปานกลาง</option>
+                      <option value="2">2 · พอใช้</option><option value="1">1 · ควรปรับปรุง</option>
+                    </select>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           <div>
