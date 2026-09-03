@@ -20,9 +20,9 @@ export default function WarehouseWorkspacePage() {
   const [jobs, setJobs] = useState<Record<string, Job>>({}); const [appointments, setAppointments] = useState<Record<string, Appointment>>({});
   const [staff, setStaff] = useState<Record<string, Staff>>({}); const [items, setItems] = useState<WorkOrderItem[]>([]); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState<string | null>(null); const [canAct, setCanAct] = useState(false); const [planOrderId, setPlanOrderId] = useState<string | null>(null);
   const [actualQty, setActualQty] = useState<Record<string, string>>({}); const [warehouseNote, setWarehouseNote] = useState(""); const [warehouseFiles, setWarehouseFiles] = useState<WarehouseFilePreview[]>([]); const warehouseFilesRef = useRef<WarehouseFilePreview[]>([]);
-  const isLocalDemo = typeof window !== "undefined" && window.location.hostname === "localhost" && new URLSearchParams(window.location.search).get("demo") === "1";
+  const isLocalDemo = typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname) && new URLSearchParams(window.location.search).get("demo") === "1";
   const load = useCallback(async () => {
-    const isLocalDemo = typeof window !== "undefined" && window.location.hostname === "localhost" && new URLSearchParams(window.location.search).get("demo") === "1";
+    const isLocalDemo = typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname) && new URLSearchParams(window.location.search).get("demo") === "1";
     if (isLocalDemo) {
       const now = new Date().toISOString(); const start = new Date(); start.setDate(start.getDate() + 1); start.setHours(9, 0, 0, 0);
       const orderId = "00000000-0000-4000-8000-000000000010"; const appointmentId = "00000000-0000-4000-8000-000000000011";

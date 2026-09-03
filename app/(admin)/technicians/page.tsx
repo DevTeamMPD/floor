@@ -4,6 +4,8 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import Link from "next/link";
+import WarehousePinManager from "@/components/staff/warehouse-pin-manager";
 
 interface Technician {
   id: string;
@@ -29,6 +31,7 @@ export default function TechniciansPage() {
   const [resetTarget, setResetTarget] = useState<Technician | null>(null);
   const [newPin, setNewPin] = useState("");
   const [resetResult, setResetResult] = useState<{ name: string; pin: string; url: string } | null>(null);
+  const [tab, setTab] = useState<"technicians" | "warehouse">("technicians");
 
   async function load() {
     setLoading(true);
@@ -96,6 +99,14 @@ export default function TechniciansPage() {
         </button>
       </div>
 
+      <div className="mb-6 flex flex-wrap gap-2">
+        <button onClick={() => setTab("technicians")} className={`rounded-lg border px-3 py-1.5 text-sm ${tab === "technicians" ? "border-violet-200 bg-violet-50 font-medium text-violet-700" : "border-slate-200 bg-white text-slate-600"}`}>👤 ช่าง / PIN</button>
+        <Link href="/appointments?manage=teams" className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50">👷 ทีมช่าง</Link>
+        <button onClick={() => setTab("warehouse")} className={`rounded-lg border px-3 py-1.5 text-sm ${tab === "warehouse" ? "border-emerald-200 bg-emerald-50 font-medium text-emerald-700" : "border-slate-200 bg-white text-slate-600"}`}>🔐 คลัง / PIN</button>
+      </div>
+
+      {tab === "warehouse" ? <WarehousePinManager /> : <>
+
       {loading ? (
         <div className="text-slate-500 text-center py-16">กำลังโหลด…</div>
       ) : techs.length === 0 ? (
@@ -147,6 +158,8 @@ export default function TechniciansPage() {
           ))}
         </div>
       )}
+
+      </>}
 
       {resetTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" onClick={() => !resetting && setResetTarget(null)}>

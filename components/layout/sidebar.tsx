@@ -60,7 +60,10 @@ export default function Sidebar({ staff }: { staff: StaffProfile }) {
   const [toolsOpen, setToolsOpen] = useState(false);
   // ทุกฝ่ายเห็นข้อมูลและหน้าปฏิบัติงานชุดเดียวกัน; ยกเว้นการจัดการบัญชีพนักงาน
   // ซึ่งเป็นการตั้งค่าระบบและยังต้องเป็น Admin-only.
-  const canSee = useMemo(() => (item: NavItem) => item.href !== "/staff" || staff.role === "admin", [staff.role]);
+  const canSee = useMemo(() => (item: NavItem) => {
+    if (staff.access_scope === "warehouse_prep_only") return item.href === "/warehouse";
+    return item.href !== "/staff" || staff.role === "admin";
+  }, [staff.access_scope, staff.role]);
   const core = useMemo(() => CORE_NAV.filter(canSee), [canSee]);
   const experimental = useMemo(() => EXPERIMENTAL_NAV.filter(canSee), [canSee]);
   const mobile = useMemo(() => {
@@ -70,6 +73,7 @@ export default function Sidebar({ staff }: { staff: StaffProfile }) {
 
   function active(item: NavItem) { return path === item.href || path.startsWith(item.href + "/"); }
   async function signOut() {
+    document.cookie = "floor_local_warehouse_pin=; Max-Age=0; path=/; SameSite=Lax";
     await createClient().auth.signOut();
     router.replace("/login");
     router.refresh();

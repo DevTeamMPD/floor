@@ -9,7 +9,7 @@ export const getCurrentStaff = cache(async (): Promise<StaffProfile | null> => {
   if (!user) return null;
   const { data } = await supabase
     .from("floor_staff_profiles")
-    .select("id,email,full_name,role,is_active")
+    .select("id,email,full_name,role,is_active,access_scope,pin_username")
     .eq("id", user.id)
     .maybeSingle();
   if (!data?.is_active) return null;

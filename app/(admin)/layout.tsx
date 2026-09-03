@@ -7,9 +7,12 @@ import NotificationCenter from "@/components/notifications/notification-center";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const isLocalDemo = (await cookies()).get("floor_local_demo")?.value === "1";
+  const isLocalWarehousePin = (await cookies()).get("floor_local_warehouse_pin")?.value === "1";
   const staff = await getCurrentStaff();
   if (!staff && !isLocalDemo) redirect("/login");
-  const visibleStaff = staff ?? { id: "local-demo", email: "demo@local", full_name: "โหมดทดสอบ Local", role: "admin" as const, is_active: true };
+  const visibleStaff = staff ?? (isLocalWarehousePin
+    ? { id: "local-warehouse-demo", email: "warehouse-demo@pin.floor.local", full_name: "คลังสินค้า Demo", role: "warehouse" as const, is_active: true, access_scope: "warehouse_prep_only" as const }
+    : { id: "local-demo", email: "demo@local", full_name: "โหมดทดสอบ Local", role: "admin" as const, is_active: true });
   return (
     <div className="flex min-h-screen">
       <Sidebar staff={visibleStaff} />

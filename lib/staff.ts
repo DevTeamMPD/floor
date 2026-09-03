@@ -10,6 +10,8 @@ export interface StaffProfile {
   master_employee_id?: string | null;
   role_source?: "manual" | "master";
   master_synced_at?: string | null;
+  access_scope?: "full" | "warehouse_prep_only";
+  pin_username?: string | null;
 }
 
 export const ROLE_LABELS: Record<StaffRole, string> = {

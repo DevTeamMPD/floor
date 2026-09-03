@@ -101,6 +101,94 @@ const TEAM_COLORS = [
   "bg-lime-100 text-lime-800 border-lime-300",
 ];
 const HOLIDAY_COLOR = "bg-slate-200 text-slate-500 border-slate-300";
+const LOCAL_TEAM_B_ID = "eb37a557-3c82-4051-b056-a5f6075f6c9e";
+const LOCAL_PREVIEW_TEAMS: Team[] = [
+  { id: "local-team-a", name: "ทีม A" },
+  { id: LOCAL_TEAM_B_ID, name: "ทีม B" },
+];
+const LOCAL_PREVIEW_JOBS: Record<string, string> = {
+  "LOCAL-A-0901": "งานติดตั้งทีม A",
+  "LOCAL-A-0902": "งานสำรวจทีม A",
+  "LOCAL-A-0903": "งานติดตั้งทีม A",
+  "LOCAL-A-0904": "งานติดตั้งทีม A",
+  "LOCAL-A-0905": "งานติดตั้งทีม A",
+  "LOCAL-A-0907": "งานติดตั้งทีม A",
+  "LOCAL-A-0908": "งานติดตั้งทีม A",
+  "LOCAL-A-0909": "งานติดตั้งทีม A",
+  "LOCAL-A-0912": "งานติดตั้งทีม A",
+  "LOCAL-A-0914": "งานติดตั้งทีม A",
+  "LOCAL-A-0915": "งานติดตั้งทีม A",
+  "LOCAL-A-0916": "งานติดตั้งทีม A",
+  "LOCAL-A-0917": "งานติดตั้งทีม A",
+  "LOCAL-A-0918": "งานติดตั้งทีม A",
+  "LOCAL-A-0922": "งานติดตั้งทีม A",
+  "LOCAL-A-0926": "งานติดตั้งทีม A",
+  "LOCAL-BBPS-0909": "BBPS · งานติดตั้ง 9 ก.ย.",
+  "LOCAL-BBPS-0915": "BBPS · งานติดตั้ง 15–17 ก.ย.",
+  "LOCAL-BBPS-0918": "BBPS · งานติดตั้ง 18–19 ก.ย.",
+};
+const localPreviewAppointment = (date: string, jobId: string): Appt => ({
+  id: `local-${jobId}-${date}`,
+  job_id: jobId,
+  tech_id: LOCAL_TEAM_B_ID,
+  slot_start: `${date}T09:00:00+07:00`,
+  slot_end: `${date}T17:00:00+07:00`,
+  status: "proposed",
+  notes: "🔒 BBPS · คิวติดตั้งมาก่อนวันหยุด",
+  requirement: null,
+  ext_ref: `local:bbps:${jobId}:${date}`,
+});
+const localTeamAAppointment = (date: string, start = "09:00", end = "17:00"): Appt => {
+  const jobId = `LOCAL-A-${date.slice(5).replace("-", "")}`;
+  return {
+    id: `local-${jobId}`,
+    job_id: jobId,
+    tech_id: "local-team-a",
+    slot_start: `${date}T${start}:00+07:00`,
+    slot_end: `${date}T${end}:00+07:00`,
+    status: "proposed",
+    notes: "Local Preview · ทีม A",
+    requirement: null,
+    ext_ref: `local:team-a:${date}`,
+  };
+};
+const localHolidayAppointment = (date: string, teamId: string): Appt => ({
+  id: `local-holiday-${teamId}-${date}`,
+  job_id: null,
+  tech_id: teamId,
+  slot_start: `${date}T00:00:00+07:00`,
+  slot_end: `${date}T23:59:59+07:00`,
+  status: "proposed",
+  notes: "วันหยุด",
+  requirement: null,
+  ext_ref: `local:holiday:${teamId}:${date}`,
+});
+const LOCAL_PREVIEW_APPOINTMENTS: Appt[] = [
+  localTeamAAppointment("2026-09-01"),
+  localTeamAAppointment("2026-09-02", "13:00", "17:00"),
+  localTeamAAppointment("2026-09-03"),
+  localTeamAAppointment("2026-09-04", "14:00", "17:00"),
+  localTeamAAppointment("2026-09-05"),
+  localTeamAAppointment("2026-09-07"),
+  localTeamAAppointment("2026-09-08"),
+  localTeamAAppointment("2026-09-09"),
+  localTeamAAppointment("2026-09-12"),
+  localTeamAAppointment("2026-09-14", "13:00", "17:00"),
+  localTeamAAppointment("2026-09-15"),
+  localTeamAAppointment("2026-09-16"),
+  localTeamAAppointment("2026-09-17"),
+  localTeamAAppointment("2026-09-18"),
+  localTeamAAppointment("2026-09-22", "13:00", "17:00"),
+  localTeamAAppointment("2026-09-26"),
+  localPreviewAppointment("2026-09-09", "LOCAL-BBPS-0909"),
+  ...["2026-09-15", "2026-09-16", "2026-09-17"].map((date) => localPreviewAppointment(date, "LOCAL-BBPS-0915")),
+  ...["2026-09-18", "2026-09-19"].map((date) => localPreviewAppointment(date, "LOCAL-BBPS-0918")),
+  ...["2026-09-05", "2026-09-13", "2026-09-26", "2026-10-03"].map((date) => localHolidayAppointment(date, LOCAL_TEAM_B_ID)),
+  ...["2026-09-06", "2026-09-11", "2026-09-20", "2026-09-27", "2026-10-04"].map((date) => localHolidayAppointment(date, "local-team-a")),
+];
+function isLocalPreviewHost() {
+  return typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname);
+}
 function isHoliday(a: { job_id: string | null; notes: string | null }) {
   return !a.job_id && /วันหยุด|หยุด|ลาพัก|ไม่รับงาน/.test(a.notes || "");
 }
@@ -328,6 +416,12 @@ export default function ShareQueuePage() {
   }, []);
 
   useEffect(() => {
+    if (isLocalPreviewHost()) {
+      setStaffEmail("demo@local");
+      setStaffRole("admin");
+      setPermissionError(null);
+      return;
+    }
     let active = true;
     Promise.all([supabase.rpc("get_my_floor_staff_profile"), supabase.auth.getUser()]).then(([{ data, error }, { data: authData }]) => {
       if (!active) return;
@@ -344,6 +438,14 @@ export default function ShareQueuePage() {
   }, [supabase]);
 
   const loadSalesInfoRequests = useCallback(async () => {
+    // Local preview intentionally has no Supabase session. Never let the
+    // login-free demo read or surface production inbox/customer data.
+    if (isLocalPreviewHost()) {
+      setSalesInfoRequests([]);
+      setSalesInboxOpen(false);
+      salesInboxInitialized.current = true;
+      return;
+    }
     // RLS limits floor_notifications to the logged-in recipient.  The event
     // itself is created only for the direct-sales ticket owner, not every sale.
     const { data: { user } } = await supabase.auth.getUser();
@@ -491,6 +593,19 @@ export default function ShareQueuePage() {
     else setRefreshing(true);
     const start = new Date(days[0]); start.setHours(0, 0, 0, 0);
     const end = new Date(days[days.length - 1]); end.setHours(23, 59, 59, 999);
+    if (isLocalPreviewHost()) {
+      setTeams(LOCAL_PREVIEW_TEAMS);
+      setAppts(LOCAL_PREVIEW_APPOINTMENTS.filter((appointment) => {
+        const slot = new Date(appointment.slot_start);
+        return slot >= start && slot <= end;
+      }));
+      setJobs(LOCAL_PREVIEW_JOBS);
+      setJobBookers({});
+      hasLoadedQueue.current = true;
+      if (isInitialLoad) setLoading(false);
+      else setRefreshing(false);
+      return;
+    }
     try {
       const [{ data: tt }, { data: ap }] = await Promise.all([
         supabase.from("tech_teams").select("id, name").eq("is_active", true).order("name"),
@@ -1074,8 +1189,8 @@ export default function ShareQueuePage() {
                 const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
                 // Show the planning warning to everyone; the Supakrit override
                 // only bypasses booking validation and must not hide the signal.
-                const teamBHasBbpsJob = dayAppts.some((appointment) => Boolean(appointment.ext_ref?.startsWith("bbps:")) && isTeamB(teams.find((team) => team.id === appointment.tech_id)));
-                const teamBUnavailable = isTeamBBookingUnavailable(d) && !teamBHasBbpsJob;
+                const teamBHasWork = dayAppts.some((appointment) => Boolean(appointment.job_id) && isTeamB(teams.find((team) => team.id === appointment.tech_id)));
+                const teamBUnavailable = isTeamBBookingUnavailable(d) && !teamBHasWork;
                 const meetingMark = dcMeetingMark(d);
                 return (
                   <div key={d.toISOString()} onClick={() => canSell && openAdd(d)} title={canSell ? "จิ้มเพื่อลงคิว" : "ดูคิวงาน"} className={`group min-h-[96px] border-b border-r border-slate-100 p-1 flex flex-col ${canSell ? "cursor-pointer hover:bg-blue-50/40" : ""} ${inMonth ? "" : "bg-slate-50/60"}`}>
@@ -1103,8 +1218,8 @@ export default function ShareQueuePage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
             {week.map((d) => {
               const dayAppts = appts.filter((a) => sameDay(d, a.slot_start));
-              const teamBHasBbpsJob = dayAppts.some((appointment) => Boolean(appointment.ext_ref?.startsWith("bbps:")) && isTeamB(teams.find((team) => team.id === appointment.tech_id)));
-              const teamBUnavailable = isTeamBBookingUnavailable(d) && !teamBHasBbpsJob;
+              const teamBHasWork = dayAppts.some((appointment) => Boolean(appointment.job_id) && isTeamB(teams.find((team) => team.id === appointment.tech_id)));
+              const teamBUnavailable = isTeamBBookingUnavailable(d) && !teamBHasWork;
               const meetingMark = dcMeetingMark(d);
               return (
                 <div key={d.toISOString()} className={`bg-white rounded-xl border ${isToday(d) ? "border-blue-400 ring-1 ring-blue-300" : "border-slate-200"} overflow-hidden flex flex-col min-h-[140px]`}>

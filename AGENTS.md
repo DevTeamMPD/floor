@@ -19,6 +19,9 @@ webhook ที่ยิงหากันจึงออกจาก Vercel แ�
 
 ## 1. ⚠️ ก่อนแตะ production — อ่านก่อน
 
+กฎควบคุมจำนวน Build และการใช้โควตา Vercel อยู่ที่ `BUILD_DEPLOYMENT_POLICY.md`
+ถือเป็นข้อบังคับร่วมกับหัวข้อนี้ โดยหลักสำคัญคือ **Build เท่าที่จำเป็นและห้ามใช้ Vercel เป็นที่ลองผิดลองถูก**
+
 ### production ต้องมาจาก Git `main` ทางเดียว
 
 `floor-delta.vercel.app` ต้องชี้ไป deployment ที่มี `source: git` และ branch `main` เท่านั้น

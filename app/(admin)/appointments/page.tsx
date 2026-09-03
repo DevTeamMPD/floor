@@ -203,6 +203,9 @@ export default function AppointmentsPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("manage") === "teams") setShowTechs(true);
+  }, []);
+  useEffect(() => {
     let active = true;
     supabase.rpc('get_my_floor_staff_profile').then(({ data }) => {
       if (active) setStaffRole((data as { role?: string } | null)?.role ?? null);
