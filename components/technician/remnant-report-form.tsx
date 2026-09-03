@@ -98,7 +98,7 @@ export default function RemnantReportForm({
     if (!noRemnant) {
       if (!pieces.length) { setError("กรุณาเพิ่มรายการเศษ หรือเลือก “ไม่มีเศษเหลือ”"); return; }
       for (const piece of pieces) {
-        if (!piece.lengthCm || Number(piece.lengthCm) <= 0 || !piece.qty || Number(piece.qty) <= 0) { setError("กรุณากรอกความยาวและจำนวนของเศษทุกรายการ"); return; }
+        if (!piece.widthCm || Number(piece.widthCm) <= 0 || !piece.lengthCm || Number(piece.lengthCm) <= 0 || !piece.qty || Number(piece.qty) <= 0) { setError("กรุณากรอกความกว้าง ความยาว และจำนวนของเศษทุกรายการ"); return; }
         if (!piece.photoPaths.length && !piece.localPhotos.length) { setError("เศษแต่ละรายการต้องมีรูปอย่างน้อย 1 รูป"); return; }
       }
     }
@@ -144,6 +144,7 @@ export default function RemnantReportForm({
   }
 
   return <div className="space-y-4">
+    <datalist id="remnant-width-options"><option value="110" /><option value="140" /></datalist>
     {initial?.status === "pending_review" ? <div className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">ส่งให้คลังตรวจรับแล้ว · แก้ไขและส่งใหม่ได้จนกว่าคลังจะรับ</div> : null}
     {initial?.status === "accepted" ? <div className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-700">✓ คลังตรวจรับแล้ว เศษถูกเพิ่มเข้าสต็อกพร้อมใช้</div> : null}
     {initial?.status === "rejected" ? <div className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">คลังส่งกลับให้แก้ไข: {initial.reviewNote || "ไม่ระบุเหตุผล"}</div> : null}
@@ -155,7 +156,7 @@ export default function RemnantReportForm({
       <div className="mt-2 space-y-2">{materials.map((item, index) => <div key={index} className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-6">
         <select disabled={locked} value={item.thickness} onChange={(e) => updateMaterial(index,{thickness:e.target.value})} className="rounded-lg border px-2 py-2 text-xs"><option value="16">หนา 16 มม.</option><option value="6">หนา 6 มม.</option></select>
         <select disabled={locked} value={item.color} onChange={(e) => updateMaterial(index,{color:e.target.value})} className="rounded-lg border px-2 py-2 text-xs"><option value="B">สี B</option><option value="W">สี W</option></select>
-        <select disabled={locked} value={item.widthCm} onChange={(e) => updateMaterial(index,{widthCm:e.target.value})} className="rounded-lg border px-2 py-2 text-xs"><option value="110">กว้าง 110 ซม.</option><option value="140">กว้าง 140 ซม.</option></select>
+        <input disabled={locked} type="number" min="0.1" step="0.1" list="remnant-width-options" value={item.widthCm} onChange={(e) => updateMaterial(index,{widthCm:e.target.value})} placeholder="กว้าง (ซม.)" aria-label="ความกว้างวัสดุที่ใช้ หน่วยเซนติเมตร" className="rounded-lg border px-2 py-2 text-xs" />
         <input disabled={locked} type="number" min="0" step="0.1" value={item.lengthCm} onChange={(e) => updateMaterial(index,{lengthCm:e.target.value})} placeholder="ยาว (ซม.)" className="rounded-lg border px-2 py-2 text-xs" />
         <input disabled={locked} type="number" min="1" step="1" value={item.qty} onChange={(e) => updateMaterial(index,{qty:e.target.value})} placeholder="จำนวน" className="rounded-lg border px-2 py-2 text-xs" />
         {!locked ? <button type="button" onClick={() => setMaterials((rows) => rows.filter((_,i)=>i!==index))} className="rounded-lg bg-red-50 px-2 text-xs text-red-600">ลบ</button> : <span />}
@@ -170,7 +171,7 @@ export default function RemnantReportForm({
         <div className="mb-2 flex items-center justify-between"><span className="text-sm font-semibold text-amber-950">เศษชิ้นที่ {index+1}</span>{!locked && pieces.length>1?<button type="button" onClick={()=>setPieces((rows)=>rows.filter((_,i)=>i!==index))} className="text-xs text-red-600">ลบรายการ</button>:null}</div>
         <div className="grid grid-cols-2 gap-2">
           <label className="text-[11px] font-medium text-amber-900">ชนิดเศษ<select disabled={locked} value={`${piece.thickness}${piece.color}`} onChange={(e)=>updatePiece(index,{thickness:e.target.value.slice(0,-1),color:e.target.value.slice(-1)})} className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm"><option value="16B">หนา 16 มม. · สี B</option><option value="16W">หนา 16 มม. · สี W</option><option value="6B">หนา 6 มม. · สี B</option><option value="6W">หนา 6 มม. · สี W</option></select></label>
-          <label className="text-[11px] font-medium text-amber-900">ความกว้าง<select disabled={locked} value={piece.widthCm} onChange={(e)=>updatePiece(index,{widthCm:e.target.value})} className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm"><option value="110">RS-110</option><option value="140">RS-140</option></select></label>
+          <label className="text-[11px] font-medium text-amber-900">ความกว้าง (ซม.)<input disabled={locked} type="number" min="0.1" step="0.1" list="remnant-width-options" value={piece.widthCm} onChange={(e)=>updatePiece(index,{widthCm:e.target.value})} placeholder="เช่น 110" className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm" /></label>
           <label className="text-[11px] font-medium text-amber-900">ความยาว (ซม.)<input disabled={locked} type="number" min="0.1" step="0.1" value={piece.lengthCm} onChange={(e)=>updatePiece(index,{lengthCm:e.target.value})} placeholder="เช่น 80" className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm" /></label>
           <label className="text-[11px] font-medium text-amber-900">จำนวนชิ้น<input disabled={locked} type="number" min="1" step="1" value={piece.qty} onChange={(e)=>updatePiece(index,{qty:e.target.value})} placeholder="เช่น 1" className="mt-1 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm" /></label>
         </div>
