@@ -260,6 +260,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   const statusFilesRef = useRef<StatusFilePreview[]>([]);
   const [statusNote, setStatusNote] = useState("");
   const [pickedSheetCount, setPickedSheetCount] = useState("");
+  const [actualSite, setActualSite] = useState({ areaSqm: "", floorCondition: "", differences: "", confirmed: false });
   const [progressError, setProgressError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [requestedJob, setRequestedJob] = useState<string | null>(null);
@@ -356,6 +357,13 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     clearStatusFiles();
     setStatusNote("");
     setPickedSheetCount("");
+    const priorSurvey = parseJsonObject(a.surveyData);
+    setActualSite({
+      areaSqm: textOf(priorSurvey?.areaSqm),
+      floorCondition: textOf(priorSurvey?.floorCondition),
+      differences: "",
+      confirmed: false,
+    });
     setProgressError(null);
     if (demoMode) {
       setWorkspace((current) => current ? {
@@ -476,13 +484,19 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     if (!next) return;
     if (!statusFiles.length) { setProgressError("กรุณาถ่ายหรือเลือกรูปสถานะอย่างน้อย 1 รูป"); return; }
     if (next.status === "travelling" && (!pickedSheetCount.trim() || Number(pickedSheetCount) < 0)) { setProgressError("กรุณาระบุจำนวนแผ่นที่หยิบจริง"); return; }
+    if (next.status === "installing" && (!actualSite.areaSqm.trim() || !actualSite.floorCondition.trim() || !actualSite.confirmed)) {
+      setProgressError("กรุณาตรวจและยืนยันข้อมูลหน้างานจริงก่อนเริ่มติดตั้ง"); return;
+    }
+    const actualSiteNote = next.status === "installing"
+      ? ["ข้อมูลหน้างานจริง", `พื้นที่จริง: ${actualSite.areaSqm.trim()} ตร.ม.`, `สภาพพื้นจริง: ${actualSite.floorCondition.trim()}`, actualSite.differences.trim() ? `ความต่างจากข้อมูลเดิม: ${actualSite.differences.trim()}` : "ข้อมูลตรงกับการสำรวจเดิม", statusNote.trim()].filter(Boolean).join("\n")
+      : statusNote.trim();
     if (demoMode) {
       const occurredAt = new Date().toISOString();
       const photoPaths = statusFiles.map((item) => item.url);
       setWorkProgress((currentProgress) => ({
         plannedSheetCount: currentProgress?.plannedSheetCount ?? 10,
         pickedSheetCount: next.status === "travelling" ? Number(pickedSheetCount) : currentProgress?.pickedSheetCount ?? null,
-        events: [...(currentProgress?.events ?? []), { id: Date.now(), status: next.status, note: statusNote.trim() || null, photoPaths, pickedSheetCount: next.status === "travelling" ? Number(pickedSheetCount) : null, customerSignedName: null, customerSignaturePath: null, occurredAt }],
+        events: [...(currentProgress?.events ?? []), { id: Date.now(), status: next.status, note: actualSiteNote || null, photoPaths, pickedSheetCount: next.status === "travelling" ? Number(pickedSheetCount) : null, customerSignedName: null, customerSignaturePath: null, occurredAt }],
       }));
       retainStatusFilesAsEvidence();
       setStatusNote("");
@@ -509,7 +523,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
         p_token: token, p_pin: pin.trim(), p_assignment_id: selected.assignmentId,
         p_status: next.status, p_photo_paths: paths,
         p_picked_sheet_count: next.status === "travelling" ? Number(pickedSheetCount) : null,
-        p_note: statusNote.trim() || null,
+        p_note: actualSiteNote || null,
       });
       if (error) throw error;
       clearStatusFiles(); setStatusNote("");
@@ -785,7 +799,17 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
                   {next && selected.acknowledgedAt && workReady && canStart ? <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
                     <div className="text-sm font-semibold text-blue-950">ขั้นต่อไป: {next.status === "travelling" && centralWorkOrder ? "รับงานติดตั้งและเริ่มเดินทาง" : next.label}</div>
                     {next.status === "travelling" ? <div className="mt-3"><label className="text-xs font-medium text-blue-800">จำนวนแผ่นที่หยิบจริง *</label><div className="mt-2 grid grid-cols-3 gap-2 text-center"><div className="rounded-lg border border-violet-200 bg-violet-50 px-2 py-2"><div className="text-[10px] text-violet-700">หัวหน้าช่างแจ้ง</div><div className="mt-0.5 text-sm font-semibold text-violet-950">{headPlannedSheetCount ?? "—"} <span className="text-[10px] font-normal">แผ่น</span></div></div><div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-2"><div className="text-[10px] text-emerald-700">คลังเตรียม/จ่าย</div><div className="mt-0.5 text-sm font-semibold text-emerald-950">{warehousePreparedSheetCount ?? "—"} <span className="text-[10px] font-normal">แผ่น</span></div></div><div className={`rounded-lg border px-2 py-2 ${technicianPickedSheetCount == null ? "border-slate-200 bg-white" : "border-blue-200 bg-blue-50"}`}><div className="text-[10px] text-blue-700">ช่างหยิบจริง</div><div className="mt-0.5 text-sm font-semibold text-blue-950">{technicianPickedSheetCount ?? "—"} <span className="text-[10px] font-normal">แผ่น</span></div></div></div><div className="mt-2 flex items-center gap-2"><input type="number" min={0} step={1} value={pickedSheetCount} onChange={(event) => setPickedSheetCount(event.target.value)} placeholder="กรอกจำนวนที่หยิบจริง" className="min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm" /><span className="text-xs text-blue-700">แผ่น</span></div><div className={`mt-2 text-xs ${technicianPickedSheetCount != null && warehousePreparedSheetCount != null && technicianPickedSheetCount !== warehousePreparedSheetCount ? "text-amber-700" : "text-slate-500"}`}>{technicianPickedSheetCount != null && warehousePreparedSheetCount != null && technicianPickedSheetCount !== warehousePreparedSheetCount ? `จำนวนต่างจากที่คลังจ่าย ${Math.abs(technicianPickedSheetCount - warehousePreparedSheetCount)} แผ่น — กรุณาระบุเหตุผล` : "ใช้ตรวจสอบก่อนเริ่มเดินทาง หากจำนวนต่างกัน ให้บันทึกเหตุผลในหมายเหตุ"}</div></div> : null}
-                    <textarea value={statusNote} onChange={(event) => setStatusNote(event.target.value)} rows={2} placeholder="หมายเหตุ (ถ้ามี)" className="mt-3 w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm" />
+                    {next.status === "installing" ? <div className="mt-3 rounded-xl border border-cyan-200 bg-cyan-50 p-3">
+                      <div className="text-sm font-semibold text-cyan-950">ข้อมูลหน้างานจริงก่อนเริ่มติดตั้ง</div>
+                      <p className="mt-1 text-xs text-cyan-700">ระบบเติมจากข้อมูลสำรวจเดิมแล้ว กรุณาตรวจเฉพาะสิ่งที่เปลี่ยน</p>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <label className="text-xs font-medium text-cyan-900">พื้นที่จริง (ตร.ม.) *<input type="number" min="0" step="0.1" value={actualSite.areaSqm} onChange={(event) => setActualSite((current) => ({ ...current, areaSqm: event.target.value, confirmed: false }))} className="mt-1 w-full rounded-lg border border-cyan-200 bg-white px-3 py-2 text-sm" /></label>
+                        <label className="text-xs font-medium text-cyan-900">สภาพพื้นจริง *<input value={actualSite.floorCondition} onChange={(event) => setActualSite((current) => ({ ...current, floorCondition: event.target.value, confirmed: false }))} placeholder="เช่น แห้ง สะอาด พร้อมติดตั้ง" className="mt-1 w-full rounded-lg border border-cyan-200 bg-white px-3 py-2 text-sm" /></label>
+                      </div>
+                      <textarea value={actualSite.differences} onChange={(event) => setActualSite((current) => ({ ...current, differences: event.target.value, confirmed: false }))} rows={2} placeholder="สิ่งที่ต่างจากข้อมูลสำรวจเดิม (ถ้าไม่มี เว้นว่างได้)" className="mt-2 w-full rounded-lg border border-cyan-200 bg-white px-3 py-2 text-sm" />
+                      <label className="mt-2 flex items-start gap-2 rounded-lg bg-white px-3 py-2 text-xs font-medium text-cyan-900"><input type="checkbox" checked={actualSite.confirmed} onChange={(event) => setActualSite((current) => ({ ...current, confirmed: event.target.checked }))} className="mt-0.5" />ตรวจข้อมูลและสภาพหน้างานจริงแล้ว พร้อมเริ่มติดตั้ง</label>
+                    </div> : null}
+                    <textarea value={statusNote} onChange={(event) => setStatusNote(event.target.value)} rows={2} placeholder="หมายเหตุเพิ่มเติม (ถ้ามี)" className="mt-3 w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm" />
                     <label className="mt-3 block cursor-pointer rounded-xl border border-dashed border-blue-300 bg-white px-3 py-3 text-center text-sm font-medium text-blue-700">📷 ถ่ายรูป / เพิ่มรูป<input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(event) => { addStatusFiles(event.target.files); event.currentTarget.value = ""; }} /></label>
                     {statusFiles.length ? <div className="mt-3"><div className="mb-2 flex items-center justify-between"><div className="text-xs font-semibold text-blue-800">ภาพที่เลือก ({statusFiles.length})</div><button type="button" onClick={clearStatusFiles} className="text-xs font-medium text-red-500">ล้างทั้งหมด</button></div><div className="grid grid-cols-3 gap-2">{statusFiles.map((item, index) => <div key={item.id} className="relative aspect-square overflow-hidden rounded-xl border border-blue-200 bg-white"><img src={item.url} alt={`ภาพสถานะ ${index + 1}`} className="h-full w-full object-cover" /><button type="button" onClick={() => removeStatusFile(item.id)} aria-label={`ลบภาพ ${index + 1}`} className="absolute right-1.5 top-1.5 rounded-full bg-black/70 px-2 py-1 text-[10px] font-semibold text-white">ลบ</button><span className="absolute bottom-1.5 left-1.5 rounded-full bg-black/65 px-2 py-1 text-[10px] text-white">{index + 1}</span></div>)}</div></div> : <div className="mt-2 text-xs text-blue-600">ยังไม่ได้เลือกรูป</div>}
                     <button onClick={() => void updateWorkStatus()} disabled={saving} className="mt-3 w-full rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving ? "กำลังบันทึก…" : next.status === "travelling" && centralWorkOrder ? "รับงานติดตั้ง" : next.button}</button>

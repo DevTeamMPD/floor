@@ -67,9 +67,10 @@ export default function RemnantReportForm({
 
   useEffect(() => {
     const loadedPieces = (initial?.pieces ?? []).map((piece) => ({ ...piece, note: piece.note ?? "", localPhotos: [] }));
+    const firstSuggested = suggestedMaterials[0];
     setNoRemnant(Boolean(initial?.noRemnant));
     setMaterials(initial?.materials?.length ? initial.materials : suggestedMaterials);
-    setPieces(loadedPieces.length ? loadedPieces : [{ ...EMPTY_PIECE }]);
+    setPieces(loadedPieces.length ? loadedPieces : [{ ...EMPTY_PIECE, ...(firstSuggested ? { widthCm: firstSuggested.widthCm, thickness: firstSuggested.thickness, color: firstSuggested.color } : {}) }]);
     setNotes(initial?.notes ?? "");
   }, [initial, suggestedMaterials]);
 
@@ -150,6 +151,7 @@ export default function RemnantReportForm({
     <div>
       <div className="text-sm font-semibold text-slate-900">1. วัสดุที่นำไปใช้หน้างาน</div>
       <p className="mt-0.5 text-xs text-slate-500">ระบบเติมจากใบสั่งงานให้เท่าที่พบ ตรวจความยาวและจำนวนก่อนบันทึก</p>
+      {suggestedMaterials.length ? <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-800">✓ เติมข้อมูลจากรายการที่คลังเตรียมให้แล้ว {suggestedMaterials.length} รายการ — แก้เฉพาะจำนวนที่ใช้จริง</div> : null}
       <div className="mt-2 space-y-2">{materials.map((item, index) => <div key={index} className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-6">
         <select disabled={locked} value={item.thickness} onChange={(e) => updateMaterial(index,{thickness:e.target.value})} className="rounded-lg border px-2 py-2 text-xs"><option value="16">หนา 16 มม.</option><option value="6">หนา 6 มม.</option></select>
         <select disabled={locked} value={item.color} onChange={(e) => updateMaterial(index,{color:e.target.value})} className="rounded-lg border px-2 py-2 text-xs"><option value="B">สี B</option><option value="W">สี W</option></select>
