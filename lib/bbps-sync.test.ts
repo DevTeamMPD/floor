@@ -8,9 +8,49 @@ import {
   buildClashNotice,
   contactPhoneFor,
   CLASH_FLAG_PREFIX,
+  isHolidayBlock,
+  planBbpsClashHandling,
   type BbpsJob,
   type ClashRow,
 } from "./bbps-sync";
+
+describe("isHolidayBlock", () => {
+  it("มอง marker วันหยุดที่ไม่มี job เป็นบล็อกซึ่ง BBPS แทนที่ได้", () => {
+    expect(isHolidayBlock({ job_id: null, notes: "วันหยุด" })).toBe(true);
+    expect(isHolidayBlock({ job_id: null, notes: "ทีม B ไม่รับงาน" })).toBe(true);
+  });
+
+  it("ไม่ยกเลิกงานจริง แม้ notes จะมีคำว่าหยุด", () => {
+    expect(isHolidayBlock({ job_id: "JOB-001", notes: "ลูกค้าขอหยุดพักเที่ยง" })).toBe(false);
+    expect(isHolidayBlock({ job_id: null, notes: "งานซ่อม" })).toBe(false);
+  });
+});
+
+describe("planBbpsClashHandling", () => {
+  const row = (id: string, notes: string, jobId: string | null = null): ClashRow => ({
+    id,
+    job_id: jobId,
+    notes,
+    slot_start: "2026-09-10T09:00:00+07:00",
+    slot_end: "2026-09-10T17:00:00+07:00",
+  });
+
+  it("ให้ BBPS แทนวันหยุด แต่ยังกันงานติดตั้งจริง", () => {
+    const plan = planBbpsClashHandling(["2026-09-10"], [
+      row("holiday-1", "วันหยุด"),
+      row("job-1", "งานลูกค้าเดิม", "JOB-001"),
+    ]);
+    expect(plan.holidayIds).toEqual(["holiday-1"]);
+    expect(plan.clashes).toEqual([{ date: "2026-09-10", withLabel: "งานลูกค้าเดิม" }]);
+  });
+
+  it("วันหยุดคนละวันไม่ถูกยกเลิก", () => {
+    const holiday = row("holiday-2", "ลาพัก");
+    holiday.slot_start = "2026-09-11T09:00:00+07:00";
+    holiday.slot_end = "2026-09-11T17:00:00+07:00";
+    expect(planBbpsClashHandling(["2026-09-10"], [holiday])).toEqual({ holidayIds: [], clashes: [] });
+  });
+});
 
 describe("contactPhoneFor", () => {
   it("ใช้ customerPhone ระดับบนเป็น contract หลัก", () => {
@@ -101,7 +141,7 @@ describe("findClashes", () => {
     expect(findClashes(["2026-09-10"], [])).toEqual([]);
   });
 
-  it("มีคิวเต็มวันอยู่แล้ว -> ชน และบอกว่าชนกับอะไร", () => {
+  it("ตัวตรวจพื้นฐานยังรายงานคิวเต็มวันที่ซ้อนกัน", () => {
     expect(findClashes(["2026-09-10"], [day("2026-09-10", "09", "17", "วันหยุด")]))
       .toEqual([{ date: "2026-09-10", withLabel: "วันหยุด" }]);
   });

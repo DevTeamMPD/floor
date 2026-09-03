@@ -88,18 +88,38 @@ export function collectBlockDates(j: BbpsJob): string[] {
 // มาจาก BBPS ไม่เคยผ่าน  ผลคือเมื่อ 2026-08-20 มีงาน BBPS ถูกจองทับบล็อก
 // "วันหยุด" ของทีม B ไปแล้วจริง
 //
-// นโยบายเมื่อชน: ไม่จองทับ และไม่เงียบ — ข้ามวันนั้น แล้วติดธงไว้ที่ ticket
+// นโยบายเมื่อชน: คิวติดตั้ง BBPS มาก่อนบล็อกวันหยุดของทีม B จึงยกเลิกบล็อก
+// วันหยุดเดิมแล้วลงคิว BBPS แทน ส่วนคิวงานจริงยังไม่จองทับและติดธงไว้ที่ ticket
 // ให้คนตัดสินใจ (เลื่อนวัน / ย้ายทีม / ยกเลิกงานเดิม)
 // ---------------------------------------------------------------------------
 
 export const CLASH_FLAG_PREFIX = "คิวชนกับงานอื่น:";
 
 export interface ClashRow {
+  id?: string;
   ext_ref?: string | null;
   slot_start: string;
   slot_end: string;
   notes?: string | null;
   job_id?: string | null;
+}
+
+/** บล็อกวันหยุดเป็น availability marker ไม่ใช่งานติดตั้ง จึงให้คิว BBPS แทนที่ได้ */
+export function isHolidayBlock(row: Pick<ClashRow, "job_id" | "notes">): boolean {
+  return !row.job_id && /วันหยุด|หยุด|ลาพัก|ไม่รับงาน/.test(row.notes ?? "");
+}
+
+export function planBbpsClashHandling(dates: string[], others: ClashRow[]): {
+  holidayIds: string[];
+  clashes: ClashInfo[];
+} {
+  const holidayIds = others
+    .filter((row) => row.id && isHolidayBlock(row) && findClashes(dates, [row]).length > 0)
+    .map((row) => row.id as string);
+  return {
+    holidayIds,
+    clashes: findClashes(dates, others.filter((row) => !isHolidayBlock(row))),
+  };
 }
 
 export interface ClashInfo {
@@ -411,7 +431,15 @@ export async function applyBbpsJob(supabase: SupabaseClient, j: BbpsJob) {
   if (othersError) throw othersError;
   const others = ((otherRows ?? []) as ClashRow[]).filter((r) => !(r.ext_ref ?? "").startsWith(refPrefix));
 
-  const clashes = findClashes(dates, others);
+  // วันหยุดทีม B เป็น marker ว่าทีมไม่รับงาน ไม่ใช่งานลูกค้า เมื่อ BBPS ระบุวันติดตั้ง
+  // ชัดเจนให้ยกเลิก marker ที่ซ้อนกับช่วงทำงานก่อน เพื่อให้ exclusion constraint รับคิว BBPS ได้
+  const { holidayIds, clashes } = planBbpsClashHandling(dates, others);
+  if (holidayIds.length) {
+    const { error: holidayError } = await supabase.from("appointments")
+      .update({ status: "cancelled" }).in("id", holidayIds);
+    if (holidayError) throw holidayError;
+  }
+
   const clashDates = new Set(clashes.map((c) => c.date));
 
   const toInsert: Record<string, unknown>[] = [];
@@ -482,5 +510,5 @@ export async function applyBbpsJob(supabase: SupabaseClient, j: BbpsJob) {
     if (clashes.length) await notifyBbpsClash(supabase, jobNo, j, clashes);
   }
 
-  return { jobNo, added, updated, removed: staleIds.length, blocks: dates.length, skipped: false, clashes };
+  return { jobNo, added, updated, removed: staleIds.length + holidayIds.length, blocks: dates.length, skipped: false, clashes };
 }
