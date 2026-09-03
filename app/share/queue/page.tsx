@@ -1305,7 +1305,10 @@ export default function ShareQueuePage() {
               </header>
 
               <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-6">
-                {detail.job_id && <div className="mb-4"><TicketChat jobNo={detail.job_id} viewer="sales" viewerName={detailCreatorName || "ฝ่ายขาย"} /></div>}
+                {detail.job_id && <details className="mb-4 overflow-hidden rounded-2xl border border-cyan-200 bg-cyan-50/40">
+                  <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-cyan-900 marker:hidden">💬 เปิดแชตของงาน</summary>
+                  <div className="border-t border-cyan-100 p-3"><TicketChat jobNo={detail.job_id} viewer="sales" viewerName={detailCreatorName || "ฝ่ายขาย"} /></div>
+                </details>}
                 <div className="grid gap-4 md:grid-cols-2">
                   <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
                     <h3 className="mb-4 text-sm font-semibold text-slate-900">📅 วัน เวลา และทีมรับผิดชอบ</h3>

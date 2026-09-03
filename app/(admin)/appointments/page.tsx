@@ -476,12 +476,12 @@ export default function AppointmentsPage() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center gap-4 mb-6">
-        <div>
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold">จัดคิวและโหลดงานช่าง</h1>
           <p className="text-slate-500 text-sm mt-0.5">ดูงานรายบุคคล คิวชน และเวลางานรวมก่อนยืนยันคิว</p>
         </div>
-        {canManage ? <div className="ml-auto flex items-center gap-2">
+        {canManage ? <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex sm:flex-wrap sm:justify-end">
           {pendingAppts.length ? <button onClick={() => setShowPendingAlerts(true)} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-800 hover:bg-amber-100">
             🔔 รอยืนยัน ({pendingAppts.length})
           </button> : null}
@@ -494,21 +494,24 @@ export default function AppointmentsPage() {
             👷 ทีมช่าง
           </button>
           <button onClick={() => setShowCreate(true)}
-            className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+            className="col-span-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 sm:col-span-1">
             + นัดหมายใหม่
           </button>
         </div> : <span className="ml-auto rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-500">โหมดดูข้อมูล</span>}
-        <button type="button" onClick={loadData} disabled={loading} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60">{loading ? 'กำลังโหลด…' : '↻ รีเฟรช'}</button>
+        <button type="button" onClick={loadData} disabled={loading} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60 sm:shrink-0">{loading ? 'กำลังโหลด…' : '↻ รีเฟรช'}</button>
       </div>
 
       {loadError ? <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900"><div><strong>ข้อมูลอาจไม่ครบ</strong><p className="mt-0.5 text-xs text-red-700">{loadError}</p></div><button type="button" onClick={loadData} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700">ลองโหลดใหม่</button></div> : null}
 
       {/* Stats */}
       <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-        <div className="font-semibold">ลำดับทำงานที่ชัดเจน</div>
-        <p className="mt-1 text-blue-700">1) ดูเดือนเพื่อหาวันที่ช่างว่าง 2) กดวันที่เพื่อตรวจโหลดรายวัน 3) จ่ายช่างจากรายการรอยืนยัน 4) รีเฟรชเพื่อตรวจข้อมูลล่าสุดก่อนเปิดใบสั่งงาน</p>
-        <p className="mt-2 text-xs text-blue-600">สถานะข้อมูล: {lastUpdatedAt ? `อัปเดตล่าสุด ${lastUpdatedAt.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.` : 'กำลังเชื่อมต่อข้อมูล…'}</p>
-        <Link href="/operations" className="mt-3 inline-flex rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">ไปหน้าต้องตัดสินใจ →</Link>
+        <div className="font-semibold">ทำงานตามลำดับนี้</div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          <div className="rounded-lg bg-white px-3 py-2"><strong className="text-blue-700">1. เลือกวัน</strong><p className="mt-0.5 text-xs text-slate-600">ดูวันที่ทีมยังรับงานได้</p></div>
+          <div className="rounded-lg bg-white px-3 py-2"><strong className="text-blue-700">2. ตรวจโหลด</strong><p className="mt-0.5 text-xs text-slate-600">ดูช่างและงานของวันนั้น</p></div>
+          <div className="rounded-lg bg-white px-3 py-2"><strong className="text-blue-700">3. จัดช่าง</strong><p className="mt-0.5 text-xs text-slate-600">เปิดรายการรอยืนยันเพื่อมอบหมาย</p></div>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-blue-600">{lastUpdatedAt ? `อัปเดตล่าสุด ${lastUpdatedAt.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.` : 'กำลังเชื่อมต่อข้อมูล…'}</p><Link href="/operations" className="inline-flex rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">ดูงานที่ต้องตัดสินใจ →</Link></div>
       </div>
       <div className="grid grid-cols-2 gap-3 mb-6 lg:grid-cols-4">
         {[
@@ -553,7 +556,15 @@ export default function AppointmentsPage() {
 
       {loadView === 'month' ? <section className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4"><div><h2 className="text-base font-bold text-slate-900">ปฏิทินกำลังคน</h2><p className="mt-0.5 text-xs text-slate-500">ใช้หาวันรับงานเพิ่ม — กดวันที่เพื่อดูรายชื่อช่างและคิวละเอียด</p></div><span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700">{selectedMonthAppointments.length} งานในเดือนนี้</span></div>
-        <div className="overflow-x-auto"><div className="min-w-[700px]"><div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">{DAY_TH.map((day, index) => <div key={`${day}-${index}`} className={`px-3 py-2 text-center text-xs font-semibold ${index === 0 ? 'text-red-500' : index === 6 ? 'text-blue-600' : 'text-slate-600'}`}>{day}</div>)}</div><div className="grid grid-cols-7">{monthCalendarDays.map((date) => {
+        <div className="space-y-2 p-3 sm:hidden">{monthCalendarDays.filter((date) => date.getMonth() === selectedLoadDate.getMonth() && !isPastDay(date)).map((date) => {
+          const jobsForDate = selectedMonthAppointments.filter((appointment) => sameDay(date, appointment.slot_start));
+          const unassigned = jobsForDate.filter((appointment) => appointment.job_id && !assignedAppointmentIds.has(appointment.id)).length;
+          const availability = monthAvailability.find((day) => dayKey(day.date) === dayKey(date));
+          const tone = unassigned ? 'border-amber-200 bg-amber-50' : availability?.fullDay ? 'border-emerald-200 bg-emerald-50' : availability?.partial ? 'border-cyan-200 bg-cyan-50' : 'border-slate-200 bg-white';
+          const status = unassigned ? `รอจัดช่าง ${unassigned} งาน` : availability?.fullDay ? `ว่างเต็มวัน ${availability.fullDay} คน` : availability?.partial ? `มีช่วงว่าง ${availability.partial} คน` : 'ทีมเต็มแล้ว';
+          return <button type="button" key={`mobile-${date.toISOString()}`} onClick={() => setSelectedCalendarDay(date)} className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-3 text-left ${tone} ${isToday(date) ? 'ring-2 ring-blue-500' : ''}`}><div><div className="font-semibold text-slate-900">{date.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short' })}</div><div className="mt-0.5 text-xs text-slate-500">มีคิว {jobsForDate.length} งาน</div></div><span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">{status}</span></button>;
+        })}</div>
+        <div className="hidden overflow-x-auto sm:block"><div className="min-w-[700px]"><div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">{DAY_TH.map((day, index) => <div key={`${day}-${index}`} className={`px-3 py-2 text-center text-xs font-semibold ${index === 0 ? 'text-red-500' : index === 6 ? 'text-blue-600' : 'text-slate-600'}`}>{day}</div>)}</div><div className="grid grid-cols-7">{monthCalendarDays.map((date) => {
           const jobsForDate = selectedMonthAppointments.filter((appointment) => sameDay(date, appointment.slot_start));
           const outsideMonth = date.getMonth() !== selectedLoadDate.getMonth();
           const unassigned = jobsForDate.filter((appointment) => appointment.job_id && !assignedAppointmentIds.has(appointment.id)).length;
