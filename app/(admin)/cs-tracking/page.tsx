@@ -14,6 +14,7 @@ interface Job {
   closed_at: string | null;
   appt_date: string | null;
   customer_phone: string | null;
+  completion_photos?: string[] | null;
   stage: number;
 }
 
@@ -136,10 +137,30 @@ function EvalModal({ row, questions, readOnly = false, onClose, onSaved }: {
           <div>
             <h2 className="font-bold text-gray-900">📞 บันทึกการประเมิน</h2>
             <p className="text-sm text-gray-500 mt-0.5">{row.job_no}{row.customer_name ? ` — ${row.customer_name}` : ""}</p>
+            {row.customer_phone && (
+              <a href={`tel:${row.customer_phone}`} className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:underline">
+                📱 {row.customer_phone}
+              </a>
+            )}
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl ml-4">×</button>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+          {row.completion_photos && row.completion_photos.length > 0 && (
+            <div>
+              <p className="text-sm font-medium text-gray-700 mb-2">📷 ภาพระหว่างงานติดตั้ง</p>
+              <div className="grid grid-cols-4 gap-2">
+                {row.completion_photos.map((path) => {
+                  const url = path.startsWith("http") ? path : supabase.storage.from(JOB_PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
+                  return (
+                    <a key={path} href={url} target="_blank" rel="noreferrer" className="aspect-square overflow-hidden rounded-lg border bg-gray-100">
+                      <img src={url} alt="ภาพหน้างาน" className="h-full w-full object-cover" />
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div>
             <p className="text-sm font-medium text-gray-700 mb-2">คะแนนความพึงพอใจ <span className="text-red-500">*</span></p>
             <div className="flex gap-2 items-center">
@@ -203,6 +224,8 @@ function EvalModal({ row, questions, readOnly = false, onClose, onSaved }: {
     </div>
   );
 }
+
+const JOB_PHOTO_BUCKET = "job-photos";
 
 const FILTER_TABS = [
   { key: "all",      label: "ทั้งหมด" },
@@ -268,10 +291,10 @@ function CsTrackingInner() {
     const [stageJobsResult, flowJobsResult, evalResult, questionResult, sheetResult] = await Promise.all([
       supabase
         .from("install_jobs")
-        .select("job_no, customer_name, product_name, external_id, product_skus, closed_at, appt_date, customer_phone, stage")
+        .select("job_no, customer_name, product_name, external_id, product_skus, closed_at, appt_date, customer_phone, completion_photos, stage")
         .eq("stage", 6)
         .order("closed_at", { ascending: false, nullsFirst: false }),
-      workOrders.length ? supabase.from("install_jobs").select("job_no, customer_name, product_name, external_id, product_skus, closed_at, appt_date, customer_phone, stage").in("job_no", workOrders.map((row) => row.job_no)) : Promise.resolve({ data: [], error: null }),
+      workOrders.length ? supabase.from("install_jobs").select("job_no, customer_name, product_name, external_id, product_skus, closed_at, appt_date, customer_phone, completion_photos, stage").in("job_no", workOrders.map((row) => row.job_no)) : Promise.resolve({ data: [], error: null }),
       supabase.from("job_evaluations").select("*, score:satisfaction_score"),
       supabase.from("evaluation_questions").select("id, question_text, order_index").eq("is_active", true).order("order_index"),
       fetch("/api/satisfaction-survey", { cache: "no-store" }).then((response) => response.json()).catch(() => ({ questions: [] })),
