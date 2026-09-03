@@ -187,7 +187,6 @@ const QUEUE_DRAFT_KEY = "floornow:share-queue:draft:v1";
 const BOOKING_MIN_LEAD_DAYS = 3;
 const TEAM_B_MAX_LEAD_DAYS = 10;
 const DC_MEETING_MARKS: Record<string, string> = {
-  "2026-09-10": "09:00–12:00 Meeting พี่พั๊นกับทีม DC · รับคิวบ่ายไม่เกิน 15 ตร.ม.",
   "2026-10-15": "09:00–12:00 Meeting พี่พั๊นกับทีม DC · รับคิวบ่ายไม่เกิน 15 ตร.ม.",
   "2026-11-19": "09:00–12:00 Meeting พี่พั๊นกับทีม DC · รับคิวบ่ายไม่เกิน 15 ตร.ม.",
   "2026-12-17": "09:00–12:00 Meeting พี่พั๊นกับทีม DC · รับคิวบ่ายไม่เกิน 15 ตร.ม.",
