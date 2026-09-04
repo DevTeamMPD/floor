@@ -73,16 +73,26 @@ export default function OperationsPage() {
       void load();
     }
   }
-  async function closeWork(workOrder: WorkOrder, reason: string) {
+  async function closeWork(workOrder: WorkOrder, reason: string, acknowledgeAcceptance = false) {
     if (!canCloseWork) return;
     if (!reason?.trim()) return;
     setClosingWork(true);
-    const { error } = await supabase.rpc("close_floor_work_order_special", {
+    // v2 บังคับเกณฑ์ตรวจรับ (job_acceptance_gate) ก่อนสิ้นสุดงาน — ถ้ายังไม่ครบจะปฏิเสธ
+    // จนกดรับทราบรายการที่ขาด แล้วระบบบันทึกการรับทราบไว้ในประวัติงาน
+    const { error } = await supabase.rpc("close_floor_work_order_special_v2", {
       p_work_order_id: workOrder.id,
       p_reason: reason.trim(),
+      p_acknowledge_incomplete_acceptance: acknowledgeAcceptance,
     });
     if (error) {
-      toast.error(`สิ้นสุดงานไม่สำเร็จ: ${floorErrorMessage(error)}`);
+      const message = floorErrorMessage(error);
+      if (!acknowledgeAcceptance && message.includes("เกณฑ์ตรวจรับยังไม่ครบ")) {
+        setClosingWork(false);
+        const confirmed = window.confirm(`${message}\n\nยืนยันสิ้นสุดงานทั้งที่เกณฑ์ตรวจรับยังไม่ครบหรือไม่? การรับทราบจะถูกบันทึกไว้ในประวัติงาน`);
+        if (confirmed) await closeWork(workOrder, reason, true);
+        return;
+      }
+      toast.error(`สิ้นสุดงานไม่สำเร็จ: ${message}`);
       setClosingWork(false);
       return;
     }

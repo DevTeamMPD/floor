@@ -515,7 +515,7 @@ function CsTrackingInner() {
       )}
 
       {selected && (
-        <EvalModal row={selected} questions={questions} readOnly={localPreview} onClose={() => setSelected(null)} onSaved={() => { void (async () => { if (selected.work_order_id && selected.work_order_status === "waiting_cs") { const { error } = await supabase.rpc("close_floor_work_order_cs_v3", { p_work_order_id: selected.work_order_id }); if (error) toast.error(`บันทึกผลแล้ว แต่ปิดงานไม่สำเร็จ: ${error.message}`); else toast.success("ประเมินและปิดงานเรียบร้อย"); } await load(); })(); }} />
+        <EvalModal row={selected} questions={questions} readOnly={localPreview} onClose={() => setSelected(null)} onSaved={() => { void (async () => { if (selected.work_order_id && selected.work_order_status === "waiting_cs") { const { error } = await supabase.rpc("close_floor_work_order_cs_v4", { p_work_order_id: selected.work_order_id }); if (error) toast.error(`บันทึกผลแล้ว แต่ปิดงานไม่สำเร็จ: ${error.message}`); else toast.success("ประเมินและปิดงานเรียบร้อย"); } await load(); })(); }} />
       )}
     </div>
   );
