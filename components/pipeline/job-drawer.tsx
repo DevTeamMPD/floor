@@ -4,9 +4,10 @@ import { createClient } from "@/lib/supabase/client";
 import { IP_STAGES } from "@/lib/types";
 import type { InstallJob } from "@/lib/types";
 import { formatDate, ipGenToken } from "@/lib/utils";
-import { floorActionError, floorErrorMessage } from "@/lib/floor-error-message";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 import { toast } from "sonner";
 import TechQueueView from "@/components/tech-queue/tech-queue-view";
+import { notifyError } from "@/lib/notify-error";
 
 interface Props {
   job: InstallJob;
@@ -272,7 +273,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       needs_survey: f.needs_survey, has_defect: f.has_defect,
       needs_redesign: f.needs_redesign, is_claim: f.is_claim,
     }).eq("job_no", job.jobNo);
-    if (error) { toast.error(floorActionError("บันทึกสถานะรอ", error)); return; }
+    if (error) { notifyError(error, "บันทึกสถานะรอ"); return; }
     setWaitingOn(w); setWaitingSince(since); setFlags(f);
     toast.success("อัปเดตแล้ว"); onRefresh();
   }
@@ -299,7 +300,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       setSurvey({ ...survey, savedAt: surveyPayload.savedAt });
       toast.success("บันทึกข้อมูลสำรวจแล้ว");
     } catch (e: unknown) {
-      toast.error(floorActionError("บันทึกข้อมูลสำรวจ", e));
+      notifyError(e, "บันทึกข้อมูลสำรวจ");
     }
     setSaving(false);
   }
@@ -324,7 +325,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       setSurvey((s) => ({ ...s, photos: [...(s.photos ?? []), ...added] }));
       toast.success(`อัปโหลด ${added.length} รูปแล้ว — อย่าลืมกดบันทึก`);
     } catch (e: unknown) {
-      toast.error(floorActionError("อัปโหลดรูปหน้างาน", e));
+      notifyError(e, "อัปโหลดรูปหน้างาน");
     }
     setUploading(false);
   }
@@ -348,7 +349,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       if (error) throw error;
       toast.success("บันทึก QC แล้ว");
     } catch (e: unknown) {
-      toast.error(floorActionError("บันทึกผลตรวจ QC", e));
+      notifyError(e, "บันทึกผลตรวจ QC");
     }
     setSaving(false);
   }
@@ -370,14 +371,14 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       toast.success("บันทึกการโทรครั้งที่ " + newCount + " แล้ว");
       onRefresh();
     } catch (e: unknown) {
-      toast.error(floorActionError("บันทึกการโทร", e));
+      notifyError(e, "บันทึกการโทร");
     }
     setSaving(false);
   }
 
   // S3: save new appointment date without changing stage
   async function saveApptDate() {
-    if (!newApptDate) { toast.error("กรุณาเลือกวันนัดใหม่"); return; }
+    if (!newApptDate) { notifyError("กรุณาเลือกวันนัดใหม่"); return; }
     setSaving(true);
     try {
       const { error } = await supabase
@@ -388,15 +389,15 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       toast.success("บันทึกวันนัดใหม่แล้ว (ไม่เปลี่ยน Stage)");
       onRefresh();
     } catch (e: unknown) {
-      toast.error(floorActionError("บันทึกวันนัดใหม่", e));
+      notifyError(e, "บันทึกวันนัดใหม่");
     }
     setSaving(false);
   }
 
   // นัดช่าง + เข้าคิว: สร้างเรคอร์ดใน appointments (คิวช่าง) + เซ็ต appt_date บนงาน
   async function bookTech() {
-    if (!newApptDate) { toast.error("กรุณาเลือกวันนัด"); return; }
-    if (!apptTechId) { toast.error("กรุณาเลือกทีมช่าง"); return; }
+    if (!newApptDate) { notifyError("กรุณาเลือกวันนัด"); return; }
+    if (!apptTechId) { notifyError("กรุณาเลือกทีมช่าง"); return; }
     setSaving(true);
     try {
       const slotStart = new Date(`${newApptDate}T${apptStart || "09:00"}:00`).toISOString();
@@ -407,14 +408,14 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       if (aerr) throw aerr;
       const { error: jobError } = await supabase.from("install_jobs").update({ appt_date: newApptDate }).eq("job_no", job.jobNo);
       if (jobError) {
-        toast.error(`นัดช่างเข้าคิวแล้ว แต่บันทึกวันนัดในใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`);
+        notifyError(`นัดช่างเข้าคิวแล้ว แต่บันทึกวันนัดในใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`);
         onRefresh();
         return;
       }
       toast.success("นัดช่างเข้าคิวแล้ว — ดูได้ที่หน้า นัดหมาย/คิวงาน");
       onRefresh();
     } catch (e: unknown) {
-      toast.error(floorActionError("นัดช่างเข้าคิว", e));
+      notifyError(e, "นัดช่างเข้าคิว");
     }
     setSaving(false);
   }
@@ -435,7 +436,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
   }
   async function saveMaterialUsage() {
     if (!matUsage.noRemnant && matUsage.pieces.length === 0) {
-      toast.error("กรอกเศษที่เหลือ หรือติ๊ก 'ไม่มีเศษเหลือ'");
+      notifyError("กรอกเศษที่เหลือ หรือติ๊ก 'ไม่มีเศษเหลือ'");
       return;
     }
     setSaving(true);
@@ -465,7 +466,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       toast.success("บันทึกเศษคงเหลือแล้ว — เข้าคลังเศษเรียบร้อย");
       onRefresh();
     } catch (e: unknown) {
-      toast.error(floorActionError("บันทึกเศษคงเหลือ", e));
+      notifyError(e, "บันทึกเศษคงเหลือ");
     }
     setSaving(false);
   }
@@ -489,7 +490,7 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       toast.success("บันทึกใบสั่งงานแล้ว — จะแสดงในใบส่งงาน");
       onRefresh();
     } catch (e: unknown) {
-      toast.error(floorActionError("บันทึกใบสั่งงาน", e));
+      notifyError(e, "บันทึกใบสั่งงาน");
     }
     setSaving(false);
   }
@@ -499,20 +500,20 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
     if (job.stage >= 6) return;
     // Gate: ต้องสำรวจหน้างานก่อนขึ้น S2 (ยืนยันนัด + ใบส่งงาน)
     if (job.stage === 1 && !surveyDone) {
-      toast.error("ต้องสำรวจหน้างาน (แท็บ สำรวจ) ก่อนส่งให้หัวหน้าช่าง");
+      notifyError("ต้องสำรวจหน้างาน (แท็บ สำรวจ) ก่อนส่งให้หัวหน้าช่าง");
       setTab("survey");
       return;
     }
     // Gate: ต้องกรอกเศษคงเหลือก่อนขึ้น S5 (รอประเมิน)
     if (job.stage === 4 && !matDone) {
-      toast.error("ต้องกรอกเศษคงเหลือก่อน แล้วจึงเข้าสู่รอประเมิน");
+      notifyError("ต้องกรอกเศษคงเหลือก่อน แล้วจึงเข้าสู่รอประเมิน");
       return;
     }
     const { error } = await supabase
       .from("install_jobs")
       .update({ stage: job.stage + 1 })
       .eq("job_no", job.jobNo);
-    if (error) { toast.error(floorActionError("ย้ายสถานะงาน", error)); return; }
+    if (error) { notifyError(error, "ย้ายสถานะงาน"); return; }
     toast.success(`ย้ายไป ${IP_STAGES[job.stage]?.name}`);
     onRefresh();
   }
@@ -524,10 +525,10 @@ export default function JobDrawer({ job, onClose, onRefresh }: Props) {
       .from("install_jobs")
       .update({ stage: 6, closed_at: new Date().toISOString(), eval_token: token })
       .eq("job_no", job.jobNo);
-    if (error) { toast.error(floorActionError("ปิดงาน", error)); return; }
+    if (error) { notifyError(error, "ปิดงาน"); return; }
     const { error: evaluationError } = await supabase.from("job_evals").insert({ install_job_id: job.id, token });
     if (evaluationError) {
-      toast.error(`ปิดงานแล้ว แต่สร้างลิงก์ประเมินลูกค้าไม่สำเร็จ: ${floorErrorMessage(evaluationError)}`);
+      notifyError(`ปิดงานแล้ว แต่สร้างลิงก์ประเมินลูกค้าไม่สำเร็จ: ${floorErrorMessage(evaluationError)}`);
       onRefresh();
       return;
     }

@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-import { floorActionError } from "@/lib/floor-error-message";
+import { notifyError } from "@/lib/notify-error";
 
 type Severity = "critical" | "high" | "medium" | "low";
 type IsoStage = "containment" | "root_cause" | "capa_plan" | "implementation" | "effectiveness" | "closed";
@@ -186,7 +186,7 @@ function NcrPageInner() {
         ]);
         setJobs((jobData ?? []) as JobOption[]);
       } catch (error) {
-        toast.error(floorActionError("โหลด NCR", error));
+        notifyError(error, "โหลด NCR");
       } finally { setLoading(false); }
     }
     void init();
@@ -213,7 +213,7 @@ function NcrPageInner() {
 
   async function createNcr() {
     if (localPreview) return;
-    if (!form.title.trim() || !form.job_no) { toast.error("กรุณาเลือกใบงานและระบุปัญหา"); return; }
+    if (!form.title.trim() || !form.job_no) { notifyError("กรุณาเลือกใบงานและระบุปัญหา"); return; }
     setSaving(true);
     try {
       const { error } = await supabase.rpc("create_floor_ncr", {
@@ -222,7 +222,7 @@ function NcrPageInner() {
       });
       if (error) throw error;
       toast.success("สร้าง NCR แล้ว"); setShowForm(false); setForm(EMPTY_FORM); await loadNcrs();
-    } catch (error) { toast.error(floorActionError("สร้าง NCR", error)); }
+    } catch (error) { notifyError(error, "สร้าง NCR"); }
     finally { setSaving(false); }
   }
 
@@ -231,7 +231,7 @@ function NcrPageInner() {
     const next = NEXT_LEGACY_STAGE[selected.status];
     if (!next) return;
     const { error } = await supabase.rpc("advance_floor_ncr", { p_ncr_id: selected.id, p_next_status: next });
-    if (error) { toast.error(floorActionError("เลื่อนสถานะ", error)); return; }
+    if (error) { notifyError(error, "เลื่อนสถานะ"); return; }
     toast.success(NEXT_LEGACY_LABEL[selected.status]); setSelected(null); await loadNcrs();
   }
 

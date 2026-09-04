@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
-import { floorErrorMessage } from "@/lib/floor-error-message";
+import { notifyError } from "@/lib/notify-error";
 
 interface EvalQuestion {
   id: string;
@@ -46,7 +46,7 @@ export default function EvaluationConfigPage() {
       is_active: true,
     });
     if (error) {
-      toast.error(floorErrorMessage(error));
+      notifyError(error);
     } else {
       toast.success("เพิ่มคำถามแล้ว");
       setNewQ("");
@@ -61,7 +61,7 @@ export default function EvaluationConfigPage() {
       .update({ is_active: !q.is_active })
       .eq("id", q.id);
     if (error) {
-      toast.error(floorErrorMessage(error));
+      notifyError(error);
       return;
     }
     setQuestions((prev) =>
@@ -78,7 +78,7 @@ export default function EvaluationConfigPage() {
       .delete()
       .eq("id", id);
     if (error) {
-      toast.error(floorErrorMessage(error));
+      notifyError(error);
       return;
     }
     toast.success("ลบแล้ว");
@@ -91,7 +91,7 @@ export default function EvaluationConfigPage() {
       .from("evaluation_questions")
       .update({ question_text: text })
       .eq("id", q.id);
-    if (error) toast.error(floorErrorMessage(error));
+    if (error) notifyError(error);
     else toast.success("บันทึกแล้ว");
   }
 

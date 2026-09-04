@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
-import { floorErrorMessage } from "@/lib/floor-error-message";
+import { notifyError } from "@/lib/notify-error";
 
 interface Material {
   id: string;
@@ -114,7 +114,7 @@ export default function BomPage() {
 
   // --- Add BOM ---
   async function saveBom() {
-    if (!bomForm.product_sku.trim()) { toast.error('กรุณาระบุ SKU สินค้า'); return; }
+    if (!bomForm.product_sku.trim()) { notifyError('กรุณาระบุ SKU สินค้า'); return; }
     setSaving(true);
     const { error } = await supabase.from('boms').insert({
       product_sku: bomForm.product_sku.trim(),
@@ -123,7 +123,7 @@ export default function BomPage() {
       notes: bomForm.notes.trim() || null,
     });
     setSaving(false);
-    if (error) { toast.error(floorErrorMessage(error)); return; }
+    if (error) { notifyError(error); return; }
     toast.success('สร้าง BOM เรียบร้อย');
     setShowAddBom(false);
     setBomForm({ product_sku: '', name: '', bom_type: 'area', notes: '' });
@@ -146,7 +146,7 @@ export default function BomPage() {
       version: maxVer + 1,
       is_active: true,
     }).select().single();
-    if (error || !newBom) { setSaving(false); toast.error(error?.message ?? 'เกิดข้อผิดพลาด'); return; }
+    if (error || !newBom) { setSaving(false); notifyError(error?.message ?? 'เกิดข้อผิดพลาด'); return; }
     // Copy items from old version
     const items = bom.bom_items ?? [];
     if (items.length > 0) {
@@ -172,7 +172,7 @@ export default function BomPage() {
   // --- Toggle Active ---
   async function toggleBomActive(bom: Bom) {
     const { error } = await supabase.from('boms').update({ is_active: !bom.is_active }).eq('id', bom.id);
-    if (error) { toast.error(floorErrorMessage(error)); return; }
+    if (error) { notifyError(error); return; }
     toast.success(bom.is_active ? 'ปิดใช้งาน BOM แล้ว' : 'เปิดใช้งาน BOM แล้ว');
     loadData();
   }
@@ -235,7 +235,7 @@ export default function BomPage() {
           note: item.note || null,
         }))
       );
-      if (error) { setSaving(false); toast.error(floorErrorMessage(error)); return; }
+      if (error) { setSaving(false); notifyError(error); return; }
     }
     setSaving(false);
     toast.success('บันทึก BOM items เรียบร้อย');

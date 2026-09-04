@@ -4,7 +4,6 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "r
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { floorErrorMessage } from "@/lib/floor-error-message";
 import { createClient } from "@/lib/supabase/client";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import TechnicianAssignmentButton from "@/components/appointments/technician-assignment";
@@ -14,6 +13,7 @@ import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
 import { InlineWorkOrderJobContext } from "@/components/work-orders/inline-work-order-context";
 import { ImageLightbox } from "@/components/ui/image-lightbox";
 import JobDocumentPanel from "@/components/documents/job-document-panel";
+import { notifyError } from "@/lib/notify-error";
 
 interface Job {
   job_no: string; source: string | null; bill_no: string | null; customer_name: string | null; customer_phone: string | null;
@@ -146,7 +146,7 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
   function removeItem(index: number) { setItems((current) => current.filter((_, i) => i !== index)); }
   function addWarehouseFiles(files: FileList | null) {
     const added = Array.from(files ?? []).filter((file) => file.type.startsWith("image/")).map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) }));
-    if (!added.length) { toast.error("เลือกได้เฉพาะไฟล์รูปภาพ"); return; }
+    if (!added.length) { notifyError("เลือกได้เฉพาะไฟล์รูปภาพ"); return; }
     setWarehouseFiles((current) => [...current, ...added]);
   }
   function removeWarehouseFile(id: string) {
@@ -162,7 +162,7 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
   }
   function rpcItems(unknownSkus: Set<string>) { return items.map((item) => { const isException = item.category === "floor_material" && unknownSkus.has(item.sku.trim()); return { id: item.id ?? null, category: item.category, itemName: item.itemName.trim(), sku: item.sku.trim(), specification: item.specification.trim(), plannedQty: Number(item.plannedQty), unit: item.unit.trim(), sourceType: isException ? "other" : item.sourceType, note: isException ? `[อนุมัติ SKU นอกคลัง]${item.note.trim() ? ` ${item.note.trim()}` : ""}` : item.note.trim() }; }); }
   function validateItemsOrToast() {
-    if (!items.length || items.some((item) => isFreeformNote(item) ? !item.note.trim() : !item.itemName.trim() || !item.unit.trim() || item.plannedQty === "" || Number(item.plannedQty) < 0 || (item.category === "floor_material" && !item.sku.trim()))) { toast.error("กรอก SKU ชื่อรายการ จำนวน และหน่วยให้ครบทุกบรรทัด หรือพิมพ์ข้อความในโน้ต Freeform"); return null; }
+    if (!items.length || items.some((item) => isFreeformNote(item) ? !item.note.trim() : !item.itemName.trim() || !item.unit.trim() || item.plannedQty === "" || Number(item.plannedQty) < 0 || (item.category === "floor_material" && !item.sku.trim()))) { notifyError("กรอก SKU ชื่อรายการ จำนวน และหน่วยให้ครบทุกบรรทัด หรือพิมพ์ข้อความในโน้ต Freeform"); return null; }
     const unknownSkus = new Set(items.filter((item) => item.category === "floor_material" && item.sku.trim() && !materials.some((material) => material.sku === item.sku.trim())).map((item) => item.sku.trim()));
     if (unknownSkus.size && !window.confirm(`พบ SKU ที่ไม่มีในคลัง:\n• ${Array.from(unknownSkus).join("\n• ")}\n\nยืนยันใช้เป็นข้อยกเว้นหรือไม่? ระบบจะบันทึกว่าเป็น SKU นอกคลัง`)) return null;
     return unknownSkus;
@@ -171,18 +171,18 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
     if (!order) return;
     const unknownSkus = validateItemsOrToast(); if (!unknownSkus) return;
     const reason = window.prompt("ระบุเหตุผลที่แก้ไขรายการวัสดุ (จะบันทึกในประวัติใบสั่งงาน)");
-    if (!reason?.trim()) { toast.error("ต้องระบุเหตุผลก่อนบันทึก"); return; }
+    if (!reason?.trim()) { notifyError("ต้องระบุเหตุผลก่อนบันทึก"); return; }
     setSaving(true); const { error } = await supabase.rpc("admin_update_floor_work_order_items", { p_work_order_id: order.id, p_items: rpcItems(unknownSkus), p_note: reason.trim() }); setSaving(false);
-    if (error) toast.error(floorErrorMessage(error)); else { toast.success("บันทึกรายการวัสดุแล้ว"); setAdminEditingItems(false); void refreshAfterChange(); }
+    if (error) notifyError(error); else { toast.success("บันทึกรายการวัสดุแล้ว"); setAdminEditingItems(false); void refreshAfterChange(); }
   }
   function cancelAdminEditItems() { setAdminEditingItems(false); void load(); }
 
   async function confirmOrder() {
-    if (!order) return; if (!items.length || items.some((item) => isFreeformNote(item) ? !item.note.trim() : !item.itemName.trim() || !item.unit.trim() || item.plannedQty === "" || Number(item.plannedQty) < 0 || (item.category === "floor_material" && !item.sku.trim()))) { toast.error("กรอก SKU ชื่อรายการ จำนวน และหน่วยให้ครบทุกบรรทัด หรือพิมพ์ข้อความในโน้ต Freeform"); return; }
+    if (!order) return; if (!items.length || items.some((item) => isFreeformNote(item) ? !item.note.trim() : !item.itemName.trim() || !item.unit.trim() || item.plannedQty === "" || Number(item.plannedQty) < 0 || (item.category === "floor_material" && !item.sku.trim()))) { notifyError("กรอก SKU ชื่อรายการ จำนวน และหน่วยให้ครบทุกบรรทัด หรือพิมพ์ข้อความในโน้ต Freeform"); return; }
     const unknownSkus = new Set(items.filter((item) => item.category === "floor_material" && item.sku.trim() && !materials.some((material) => material.sku === item.sku.trim())).map((item) => item.sku.trim()));
     if (unknownSkus.size && !window.confirm(`พบ SKU ที่ไม่มีในคลัง:\n• ${Array.from(unknownSkus).join("\n• ")}\n\nยืนยันใช้เป็นข้อยกเว้นหรือไม่? ระบบจะบันทึกว่าเป็น SKU นอกคลัง`)) return;
     const exceptionNote = unknownSkus.size ? `อนุมัติข้อยกเว้น SKU นอกคลัง: ${Array.from(unknownSkus).join(", ")}` : null;
-    if (noMaterial && !noMaterialReason.trim()) { toast.error("ระบุเหตุผลที่งานนี้ไม่ใช้วัสดุปูพื้นก่อน"); return; }
+    if (noMaterial && !noMaterialReason.trim()) { notifyError("ระบุเหตุผลที่งานนี้ไม่ใช้วัสดุปูพื้นก่อน"); return; }
     setSaving(true);
     // บันทึกเจตนา "งานนี้ไม่ใช้วัสดุปูพื้น" ก่อนยืนยัน — ประตูฝั่ง DB ใช้ค่านี้ตัดสินว่าจะปล่อยใบที่ไม่มีวัสดุผ่านไหม
     const flagResult = await supabase.rpc("set_floor_work_order_no_material_required", {
@@ -190,32 +190,32 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
       p_no_material_required: noMaterial,
       p_reason: noMaterial ? noMaterialReason.trim() : null,
     });
-    if (flagResult.error) { toast.error(floorErrorMessage(flagResult.error)); setSaving(false); return; }
+    if (flagResult.error) { notifyError(flagResult.error); setSaving(false); return; }
     // v3 (ไม่ใช่ v2): บังคับ role admin/head_technician, แก้บรรทัดเดิมทับที่เดิมจึงไม่ล้าง picked_qty/actual_qty ของคลัง
     const { error } = await supabase.rpc("confirm_floor_work_order_v3", { p_work_order_id: order.id, p_items: rpcItems(unknownSkus), p_note: [note.trim(), exceptionNote].filter(Boolean).join("\n") || null }); setSaving(false);
-    if (error) toast.error(floorErrorMessage(error)); else { toast.success("ยืนยันใบสั่งงานและส่งให้คลังแล้ว"); void refreshAfterChange(); }
+    if (error) notifyError(error); else { toast.success("ยืนยันใบสั่งงานและส่งให้คลังแล้ว"); void refreshAfterChange(); }
   }
   async function returnOrder() {
     if (!order) return; const reason = window.prompt(job?.source === "bbps" ? "ระบุข้อมูลที่ต้องให้ BBPS แก้ไข" : "ระบุข้อมูลที่ต้องให้ฝ่ายขายแก้ไข");
     if (!reason?.trim()) return; setSaving(true); const { error } = await supabase.rpc("return_floor_work_order_v3", { p_work_order_id: order.id, p_reason: reason.trim() }); setSaving(false);
-    if (error) toast.error(floorErrorMessage(error)); else { toast.success(job?.source === "bbps" ? "ส่งกลับ BBPS แล้ว" : "ส่งกลับฝ่ายขายแล้ว"); void refreshAfterChange(); }
+    if (error) notifyError(error); else { toast.success(job?.source === "bbps" ? "ส่งกลับ BBPS แล้ว" : "ส่งกลับฝ่ายขายแล้ว"); void refreshAfterChange(); }
   }
   async function acceptWarehouse() {
     if (!order) return; setSaving(true); const { error } = await supabase.rpc("accept_floor_warehouse_order_v2", { p_work_order_id: order.id }); setSaving(false);
-    if (error) toast.error(floorErrorMessage(error)); else { toast.success("รับงานเตรียมสินค้าแล้ว"); void refreshAfterChange(); }
+    if (error) notifyError(error); else { toast.success("รับงานเตรียมสินค้าแล้ว"); void refreshAfterChange(); }
   }
   async function completeWarehouse() {
-    if (!order) return; if (items.some((item) => !isFreeformNote(item) && (item.actualQty === "" || Number(item.actualQty) < 0))) { toast.error("กรอกจำนวนหยิบจริงให้ครบทุกบรรทัด"); return; } if (!warehouseFiles.length) { toast.error("ต้องแนบรูปสินค้าที่เตรียมเสร็จอย่างน้อย 1 รูป"); return; }
+    if (!order) return; if (items.some((item) => !isFreeformNote(item) && (item.actualQty === "" || Number(item.actualQty) < 0))) { notifyError("กรอกจำนวนหยิบจริงให้ครบทุกบรรทัด"); return; } if (!warehouseFiles.length) { notifyError("ต้องแนบรูปสินค้าที่เตรียมเสร็จอย่างน้อย 1 รูป"); return; }
     setSaving(true); const paths: string[] = [];
-    for (let index = 0; index < warehouseFiles.length; index++) { const file = warehouseFiles[index].file; const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-"); const path = `work-orders/${order.id}/warehouse/${Date.now()}-${index}-${safe}`; const { error } = await supabase.storage.from("job-photos").upload(path, file); if (error) { toast.error(floorErrorMessage(error)); setSaving(false); return; } paths.push(path); }
+    for (let index = 0; index < warehouseFiles.length; index++) { const file = warehouseFiles[index].file; const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-"); const path = `work-orders/${order.id}/warehouse/${Date.now()}-${index}-${safe}`; const { error } = await supabase.storage.from("job-photos").upload(path, file); if (error) { notifyError(error); setSaving(false); return; } paths.push(path); }
     const actual = items.map((item) => ({ id: item.id, actualQty: isFreeformNote(item) ? 0 : Number(item.actualQty) }));
     const { error } = await supabase.rpc("complete_floor_warehouse_order_v2", { p_work_order_id: order.id, p_actual_items: actual, p_photo_paths: paths, p_note: note.trim() || null }); setSaving(false);
-    if (error) toast.error(floorErrorMessage(error)); else { toast.success("เตรียมสินค้าเสร็จและย้ายไปรอติดตั้งแล้ว"); clearWarehouseFiles(); void refreshAfterChange(); }
+    if (error) notifyError(error); else { toast.success("เตรียมสินค้าเสร็จและย้ายไปรอติดตั้งแล้ว"); clearWarehouseFiles(); void refreshAfterChange(); }
   }
   async function copyLink(token: string) { await navigator.clipboard.writeText(`${window.location.origin}/work/${token}`); toast.success("คัดลอกลิงก์ช่างแล้ว"); }
   async function copyExternalLink() { if (!order?.external_share_token) return; await navigator.clipboard.writeText(`${window.location.origin}/status/${order.external_share_token}`); toast.success("คัดลอกลิงก์ภายนอกแล้ว"); }
-  async function rotateExternalLink() { if (!order || !window.confirm("ลิงก์เดิมจะเปิดไม่ได้ทันที ต้องการสร้างลิงก์ใหม่หรือไม่?")) return; setSaving(true); const { error } = await supabase.rpc("rotate_floor_external_share_v3", { p_work_order_id: order.id }); setSaving(false); if (error) toast.error(floorErrorMessage(error)); else { toast.success("สร้างลิงก์ใหม่แล้ว"); void refreshAfterChange(); } }
-  async function toggleExternalLink() { if (!order) return; setSaving(true); const { error } = await supabase.rpc("set_floor_external_share_enabled_v3", { p_work_order_id: order.id, p_enabled: !order.external_share_enabled }); setSaving(false); if (error) toast.error(floorErrorMessage(error)); else { toast.success(order.external_share_enabled ? "ปิดลิงก์ภายนอกแล้ว" : "เปิดลิงก์ภายนอกแล้ว"); void refreshAfterChange(); } }
+  async function rotateExternalLink() { if (!order || !window.confirm("ลิงก์เดิมจะเปิดไม่ได้ทันที ต้องการสร้างลิงก์ใหม่หรือไม่?")) return; setSaving(true); const { error } = await supabase.rpc("rotate_floor_external_share_v3", { p_work_order_id: order.id }); setSaving(false); if (error) notifyError(error); else { toast.success("สร้างลิงก์ใหม่แล้ว"); void refreshAfterChange(); } }
+  async function toggleExternalLink() { if (!order) return; setSaving(true); const { error } = await supabase.rpc("set_floor_external_share_enabled_v3", { p_work_order_id: order.id, p_enabled: !order.external_share_enabled }); setSaving(false); if (error) notifyError(error); else { toast.success(order.external_share_enabled ? "ปิดลิงก์ภายนอกแล้ว" : "เปิดลิงก์ภายนอกแล้ว"); void refreshAfterChange(); } }
 
   if (loading) return <div className="py-20 text-center text-slate-400">กำลังโหลดใบสั่งงาน…</div>;
   if (!job || !appointment || !order) return <div className="rounded-2xl border bg-white p-10 text-center text-slate-500">ไม่พบใบสั่งงานสำหรับงานนี้</div>;

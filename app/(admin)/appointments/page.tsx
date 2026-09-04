@@ -8,6 +8,7 @@ import { floorErrorMessage } from "@/lib/floor-error-message";
 import TechnicianManager from "@/components/appointments/technician-manager";
 import TechnicianAssignmentButton from "@/components/appointments/technician-assignment";
 import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
+import { notifyError } from "@/lib/notify-error";
 
 interface TechTeam {
   id: string;
@@ -195,7 +196,7 @@ export default function AppointmentsPage() {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'ไม่สามารถเชื่อมต่อข้อมูลได้';
       setLoadError(message);
-      toast.error(`โหลดข้อมูลนัดหมายไม่สำเร็จ: ${message}`);
+      notifyError(`โหลดข้อมูลนัดหมายไม่สำเร็จ: ${message}`);
     } finally {
       setLoading(false);
     }
@@ -329,8 +330,8 @@ export default function AppointmentsPage() {
 
   // --- Create Appointment ---
   async function createAppointment() {
-    if (!canManage) { toast.error('เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่สร้างนัดหมายได้'); return; }
-    if (!form.date || !form.start_time || !form.end_time) { toast.error('กรุณาระบุวันและเวลา'); return; }
+    if (!canManage) { notifyError('เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่สร้างนัดหมายได้'); return; }
+    if (!form.date || !form.start_time || !form.end_time) { notifyError('กรุณาระบุวันและเวลา'); return; }
     setSaving(true);
     const slotStart = new Date(`${form.date}T${form.start_time}:00+07:00`).toISOString();
     const slotEnd = new Date(`${form.date}T${form.end_time}:00+07:00`).toISOString();
@@ -343,7 +344,7 @@ export default function AppointmentsPage() {
       status: 'proposed',
     });
     setSaving(false);
-    if (error) { toast.error(floorErrorMessage(error)); return; }
+    if (error) { notifyError(error); return; }
     toast.success('สร้างนัดหมายเรียบร้อย');
     setShowCreate(false);
     setForm(emptyForm);
@@ -352,16 +353,16 @@ export default function AppointmentsPage() {
 
   // --- Update Status ---
   async function updateStatus(appt: Appointment, newStatus: string) {
-    if (!canManage) { toast.error('บัญชีนี้ดูข้อมูลได้ แต่ไม่มีสิทธิ์เปลี่ยนสถานะคิว'); return; }
+    if (!canManage) { notifyError('บัญชีนี้ดูข้อมูลได้ แต่ไม่มีสิทธิ์เปลี่ยนสถานะคิว'); return; }
     if (newStatus === 'confirmed' && appt.job_id) {
       const missing = appt.job ? missingJobFields(appt.job) : ['ข้อมูล Ticket'];
       if (missing.length) {
-        toast.error(`ข้อมูลยังไม่ครบ: ${missing.join(', ')}`);
+        notifyError(`ข้อมูลยังไม่ครบ: ${missing.join(', ')}`);
         return;
       }
       const assigned = assignments.some((a) => a.appointment_id === appt.id && a.is_active);
       if (!assigned) {
-        toast.error('กรุณาจ่ายงานให้ช่างรายบุคคลอย่างน้อย 1 คนก่อนยืนยัน');
+        notifyError('กรุณาจ่ายงานให้ช่างรายบุคคลอย่างน้อย 1 คนก่อนยืนยัน');
         return;
       }
     }
@@ -370,13 +371,13 @@ export default function AppointmentsPage() {
     const { error } = appt.job_id && newStatus === 'confirmed'
       ? await update.eq('job_id', appt.job_id).neq('status', 'cancelled')
       : await update.eq('id', appt.id);
-    if (error) { toast.error(floorErrorMessage(error)); return; }
+    if (error) { notifyError(error); return; }
     if (appt.job_id && newStatus === 'confirmed') {
       const { error: jobError } = await supabase.from('install_jobs').update({
         status: 'ยืนยันคิวแล้ว', waiting_on: 'ไม่ได้ค้าง', waiting_since: null,
         flag_note: null, updated_at: new Date().toISOString(),
       }).eq('job_no', appt.job_id);
-      if (jobError) { toast.error(`อัปเดตสถานะคิวแล้ว แต่ปรับข้อมูลใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); void loadData(); return; }
+      if (jobError) { notifyError(`อัปเดตสถานะคิวแล้ว แต่ปรับข้อมูลใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); void loadData(); return; }
       await supabase.from('job_activity').insert({
         job_no: appt.job_id, actor: 'หัวหน้าช่าง', action: 'confirm', field: 'status',
         old_value: appt.job?.status ?? null, new_value: 'ยืนยันคิวแล้ว',
@@ -387,9 +388,9 @@ export default function AppointmentsPage() {
   }
 
   async function cancelAppointment(appt: Appointment) {
-    if (!canManage) { toast.error('บัญชีนี้ดูข้อมูลได้ แต่ไม่มีสิทธิ์ยกเลิกคิว'); return; }
+    if (!canManage) { notifyError('บัญชีนี้ดูข้อมูลได้ แต่ไม่มีสิทธิ์ยกเลิกคิว'); return; }
     const { error } = await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', appt.id);
-    if (error) { toast.error(floorErrorMessage(error)); return; }
+    if (error) { notifyError(error); return; }
     if (appt.job_id) {
       const { count } = await supabase.from('appointments')
         .select('id', { count: 'exact', head: true }).eq('job_id', appt.job_id).neq('status', 'cancelled');
@@ -397,7 +398,7 @@ export default function AppointmentsPage() {
         const { error: jobError } = await supabase.from('install_jobs').update({
           status: 'ยกเลิกคิว', waiting_on: 'ไม่ได้ค้าง', waiting_since: null, updated_at: new Date().toISOString(),
         }).eq('job_no', appt.job_id);
-        if (jobError) { toast.error(`ยกเลิกคิวแล้ว แต่ปรับสถานะใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); void loadData(); return; }
+        if (jobError) { notifyError(`ยกเลิกคิวแล้ว แต่ปรับสถานะใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); void loadData(); return; }
         await supabase.from('job_activity').insert({
           job_no: appt.job_id, actor: 'หัวหน้าช่าง', action: 'cancel', field: 'status',
           old_value: appt.job?.status ?? null, new_value: 'ยกเลิกคิว',
@@ -409,28 +410,28 @@ export default function AppointmentsPage() {
   }
 
   async function reassignTeam(appt: Appointment, techId: string) {
-    if (!canManage) { toast.error('เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่ย้ายทีมได้'); return; }
+    if (!canManage) { notifyError('เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่ย้ายทีมได้'); return; }
     if (!techId || techId === appt.tech_id) return;
     const { data: clashes, error: clashError } = await supabase.from('appointments')
       .select('id').eq('tech_id', techId).neq('status', 'cancelled').neq('id', appt.id)
       .lt('slot_start', appt.slot_end).gt('slot_end', appt.slot_start).limit(1);
-    if (clashError) { toast.error(clashError.message); return; }
-    if (clashes?.length) { toast.error('ทีมที่เลือกมีคิวชนในช่วงเวลานี้'); return; }
+    if (clashError) { notifyError(clashError); return; }
+    if (clashes?.length) { notifyError('ทีมที่เลือกมีคิวชนในช่วงเวลานี้'); return; }
 
     const { error } = await supabase.from('appointments').update({
       tech_id: techId, status: 'proposed', confirmed_at: null,
     }).eq('id', appt.id);
-    if (error) { toast.error(floorErrorMessage(error)); return; }
+    if (error) { notifyError(error); return; }
     const { error: revokeError } = await supabase.from('appointment_technicians').update({
       is_active: false, is_lead: false, revoked_at: new Date().toISOString(),
     }).eq('appointment_id', appt.id).eq('is_active', true);
-    if (revokeError) { toast.error(`ย้ายทีมแล้ว แต่ปิดการมอบหมายช่างเดิมไม่สำเร็จ: ${floorErrorMessage(revokeError)}`); void loadData(); return; }
+    if (revokeError) { notifyError(`ย้ายทีมแล้ว แต่ปิดการมอบหมายช่างเดิมไม่สำเร็จ: ${floorErrorMessage(revokeError)}`); void loadData(); return; }
     if (appt.job_id) {
       const { error: jobError } = await supabase.from('install_jobs').update({
         status: 'รอหัวหน้าช่างยืนยัน', waiting_on: 'หัวหน้าช่าง',
         waiting_since: new Date().toISOString(), assignees: [], updated_at: new Date().toISOString(),
       }).eq('job_no', appt.job_id);
-      if (jobError) { toast.error(`ย้ายทีมแล้ว แต่ปรับข้อมูลใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); void loadData(); return; }
+      if (jobError) { notifyError(`ย้ายทีมแล้ว แต่ปรับข้อมูลใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); void loadData(); return; }
       await supabase.from('job_activity').insert({
         job_no: appt.job_id, actor: 'หัวหน้าช่าง', action: 'reassign', field: 'tech_id',
         old_value: appt.tech_id, new_value: techId,
@@ -442,7 +443,7 @@ export default function AppointmentsPage() {
 
   // --- Tech CRUD ---
   async function saveTech() {
-    if (!techForm.name.trim()) { toast.error('กรุณาระบุชื่อ'); return; }
+    if (!techForm.name.trim()) { notifyError('กรุณาระบุชื่อ'); return; }
     setSaving(true);
     if (editTech) {
       const { error } = await supabase.from('tech_teams').update({
@@ -450,7 +451,7 @@ export default function AppointmentsPage() {
         phone: techForm.phone.trim() || null,
         notes: techForm.notes.trim() || null,
       }).eq('id', editTech.id);
-      if (error) { setSaving(false); toast.error(floorErrorMessage(error)); return; }
+      if (error) { setSaving(false); notifyError(error); return; }
       toast.success('แก้ไขทีมช่างเรียบร้อย');
     } else {
       const { error } = await supabase.from('tech_teams').insert({
@@ -458,7 +459,7 @@ export default function AppointmentsPage() {
         phone: techForm.phone.trim() || null,
         notes: techForm.notes.trim() || null,
       });
-      if (error) { setSaving(false); toast.error(floorErrorMessage(error)); return; }
+      if (error) { setSaving(false); notifyError(error); return; }
       toast.success('เพิ่มทีมช่างเรียบร้อย');
     }
     setSaving(false);
@@ -469,7 +470,7 @@ export default function AppointmentsPage() {
 
   async function toggleTechActive(tech: TechTeam) {
     const { error } = await supabase.from('tech_teams').update({ is_active: !tech.is_active }).eq('id', tech.id);
-    if (error) { toast.error(floorErrorMessage(error)); return; }
+    if (error) { notifyError(error); return; }
     loadData();
   }
 

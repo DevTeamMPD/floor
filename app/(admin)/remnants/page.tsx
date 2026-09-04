@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
-import { floorErrorMessage } from "@/lib/floor-error-message";
+import { notifyError } from "@/lib/notify-error";
 
 interface Remnant {
   id: string;
@@ -62,9 +62,9 @@ export default function RemnantsPage() {
       supabase.rpc("list_remnant_reports_staff"),
       supabase.rpc("get_remnant_cost_dashboard"),
     ]);
-    if (stockResult.error) toast.error(stockResult.error.message); else setItems(stockResult.data ?? []);
-    if (reportResult.error) toast.error(`โหลดคิวตรวจรับเศษไม่สำเร็จ: ${reportResult.error.message}`); else setReports((reportResult.data ?? []) as RemnantReport[]);
-    if (costResult.error) toast.error(`โหลดต้นทุนเศษไม่สำเร็จ: ${costResult.error.message}`); else {
+    if (stockResult.error) notifyError(stockResult.error.message); else setItems(stockResult.data ?? []);
+    if (reportResult.error) notifyError(`โหลดคิวตรวจรับเศษไม่สำเร็จ: ${reportResult.error.message}`); else setReports((reportResult.data ?? []) as RemnantReport[]);
+    if (costResult.error) notifyError(`โหลดต้นทุนเศษไม่สำเร็จ: ${costResult.error.message}`); else {
       const value = costResult.data as { rates?: CostRate[]; summary?: CostSummary };
       const rates = value?.rates ?? []; setRateDrafts(Object.fromEntries(rates.map((rate) => [rate.matType, String(rate.costPerSqm ?? 0)]))); setCostSummary(value?.summary ?? { availableValue: 0, reservedValue: 0, reusedValue: 0, disposedValue: 0 });
     }
@@ -100,14 +100,14 @@ export default function RemnantsPage() {
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     if (!form.length_cm || Number(form.length_cm) <= 0) {
-      toast.error("กรุณากรอกความยาว"); return;
+      notifyError("กรุณากรอกความยาว"); return;
     }
     setSaving(true);
     const { error } = await supabase.rpc("create_manual_remnant_with_cost", {
       p_width_bin: Number(form.width_bin), p_length_cm: Number(form.length_cm), p_mat_type: form.mat_type,
       p_source_job: form.source_job.trim() || null, p_note: form.note.trim() || null,
     });
-    if (error) toast.error(floorErrorMessage(error));
+    if (error) notifyError(error);
     else {
       toast.success("บันทึกเศษแล้ว");
       setForm({ ...EMPTY_FORM });
@@ -121,7 +121,7 @@ export default function RemnantsPage() {
     const jobNo = window.prompt("ระบุเลขงานที่นำเศษไปใช้ (เว้นว่างได้ หากยังไม่ทราบ)");
     if (jobNo === null) return;
     const { error } = await supabase.rpc("mark_remnant_used_with_cost", { p_remnant_id: id, p_job_no: jobNo.trim() || null });
-    if (error) toast.error(floorErrorMessage(error));
+    if (error) notifyError(error);
     else { toast.success("บันทึกการนำเศษกลับใช้และต้นทุนแล้ว"); fetch(); }
   }
 
@@ -129,14 +129,14 @@ export default function RemnantsPage() {
     const reason = window.prompt("ระบุเหตุผลการตัดจำหน่าย เช่น เสียหาย / เล็กเกินใช้");
     if (!reason?.trim()) return;
     const { error } = await supabase.rpc("dispose_remnant_with_cost", { p_remnant_id: id, p_reason: reason.trim() });
-    if (error) toast.error(floorErrorMessage(error)); else { toast.success("ตัดจำหน่ายและบันทึกต้นทุนแล้ว"); fetch(); }
+    if (error) notifyError(error); else { toast.success("ตัดจำหน่ายและบันทึกต้นทุนแล้ว"); fetch(); }
   }
 
   async function saveRate(matType: string) {
     const value = Number(rateDrafts[matType]);
-    if (!Number.isFinite(value) || value < 0) { toast.error("กรุณาระบุต้นทุนต่อตารางเมตรเป็นศูนย์หรือจำนวนบวก"); return; }
+    if (!Number.isFinite(value) || value < 0) { notifyError("กรุณาระบุต้นทุนต่อตารางเมตรเป็นศูนย์หรือจำนวนบวก"); return; }
     setSaving(true); const { error } = await supabase.rpc("set_remnant_cost_rate", { p_mat_type: matType, p_cost_per_sqm: value }); setSaving(false);
-    if (error) toast.error(floorErrorMessage(error)); else { toast.success(`บันทึกต้นทุน ${matType} แล้ว`); fetch(); }
+    if (error) notifyError(error); else { toast.success(`บันทึกต้นทุน ${matType} แล้ว`); fetch(); }
   }
 
   async function reviewReport(id: string, decision: "accept" | "reject") {
@@ -147,7 +147,7 @@ export default function RemnantsPage() {
     } else if (!window.confirm("ยืนยันตรวจรับเศษรายการนี้เข้าสต็อกพร้อมใช้?")) return;
     setReviewingId(id);
     const { error } = await supabase.rpc("review_remnant_report_staff", { p_report_id: id, p_decision: decision, p_note: note });
-    if (error) toast.error(floorErrorMessage(error));
+    if (error) notifyError(error);
     else { toast.success(decision === "accept" ? "ตรวจรับและเพิ่มเศษเข้าสต็อกแล้ว" : "ส่งกลับให้ช่างแก้ไขแล้ว"); await fetch(); }
     setReviewingId(null);
   }

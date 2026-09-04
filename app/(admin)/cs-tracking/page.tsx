@@ -3,7 +3,7 @@ import { useState, useEffect, Suspense } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { IP_STAGES } from "@/lib/types";
 import { toast } from "sonner";
-import { floorActionError } from "@/lib/floor-error-message";
+import { notifyError } from "@/lib/notify-error";
 
 interface Job {
   job_no: string;
@@ -95,11 +95,11 @@ function EvalModal({ row, questions, readOnly = false, onClose, onSaved }: {
   const [saving, setSaving]     = useState(false);
 
   async function save() {
-    if (!score) { toast.error("กรุณาให้คะแนนความพึงพอใจ"); return; }
+    if (!score) { notifyError("กรุณาให้คะแนนความพึงพอใจ"); return; }
     const missingQuestion = questions.find((question) => !answers[question.id]);
-    if (missingQuestion) { toast.error("กรุณาตอบแบบประเมินให้ครบทั้ง 5 ข้อ"); return; }
-    if (!csName.trim()) { toast.error("กรุณาระบุชื่อ CS ที่โทร"); return; }
-    if (!callDate) { toast.error("กรุณาระบุวันที่โทร"); return; }
+    if (missingQuestion) { notifyError("กรุณาตอบแบบประเมินให้ครบทั้ง 5 ข้อ"); return; }
+    if (!csName.trim()) { notifyError("กรุณาระบุชื่อ CS ที่โทร"); return; }
+    if (!callDate) { notifyError("กรุณาระบุวันที่โทร"); return; }
     if (readOnly) {
       toast.success("ทดสอบแบบประเมินครบแล้ว — โหมด Local ไม่บันทึกข้อมูลจริง");
       onClose();
@@ -135,7 +135,7 @@ function EvalModal({ row, questions, readOnly = false, onClose, onSaved }: {
       }
       onSaved(); onClose();
     } catch (e: unknown) {
-      toast.error(floorActionError("บันทึกผลประเมินลูกค้า", e));
+      notifyError(e, "บันทึกผลประเมินลูกค้า");
     } finally { setSaving(false); }
   }
 
@@ -335,7 +335,7 @@ function CsTrackingInner() {
         ? supabase.from("floor_work_order_items").select("work_order_id, item_name, specification, actual_qty, planned_qty, unit").eq("category", "floor_material").in("work_order_id", workOrders.map((row) => row.id)).order("sort_order")
         : Promise.resolve({ data: [], error: null }),
     ]);
-    const jobErr = stageJobsResult.error ?? flowJobsResult.error ?? orderError; if (jobErr) toast.error(jobErr.message);
+    const jobErr = stageJobsResult.error ?? flowJobsResult.error ?? orderError; if (jobErr) notifyError(jobErr);
     const jobs = Array.from(new Map([...(stageJobsResult.data ?? []), ...(flowJobsResult.data ?? [])].map((row) => [row.job_no, row])).values()) as Job[];
     const evals = evalResult.data; const qs = questionResult.data;
     if (jobs.length) {
@@ -515,7 +515,7 @@ function CsTrackingInner() {
       )}
 
       {selected && (
-        <EvalModal row={selected} questions={questions} readOnly={localPreview} onClose={() => setSelected(null)} onSaved={() => { void (async () => { if (selected.work_order_id && selected.work_order_status === "waiting_cs") { const { error } = await supabase.rpc("close_floor_work_order_cs_v4", { p_work_order_id: selected.work_order_id }); if (error) toast.error(`บันทึกผลแล้ว แต่ปิดงานไม่สำเร็จ: ${error.message}`); else toast.success("ประเมินและปิดงานเรียบร้อย"); } await load(); })(); }} />
+        <EvalModal row={selected} questions={questions} readOnly={localPreview} onClose={() => setSelected(null)} onSaved={() => { void (async () => { if (selected.work_order_id && selected.work_order_status === "waiting_cs") { const { error } = await supabase.rpc("close_floor_work_order_cs_v4", { p_work_order_id: selected.work_order_id }); if (error) notifyError(`บันทึกผลแล้ว แต่ปิดงานไม่สำเร็จ: ${error.message}`); else toast.success("ประเมินและปิดงานเรียบร้อย"); } await load(); })(); }} />
       )}
     </div>
   );

@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import Link from "next/link";
 import WarehousePinManager from "@/components/staff/warehouse-pin-manager";
+import { notifyError } from "@/lib/notify-error";
 
 interface Technician {
   id: string;
@@ -37,7 +38,7 @@ export default function TechniciansPage() {
     setLoading(true);
     const { data, error } = await supabase.rpc("list_floor_technicians_admin");
     setLoading(false);
-    if (error) { toast.error("โหลดรายชื่อช่างไม่สำเร็จ: " + error.message); return; }
+    if (error) { notifyError("โหลดรายชื่อช่างไม่สำเร็จ: " + error.message); return; }
     setTechs((data ?? []) as Technician[]);
   }
 
@@ -52,7 +53,7 @@ export default function TechniciansPage() {
     if (!resetTarget) return;
     const pin = newPin.replace(/\D/g, "");
     if (!/^\d{4,6}$/.test(pin)) {
-      toast.error("PIN ต้องเป็นตัวเลข 4–6 หลัก");
+      notifyError("PIN ต้องเป็นตัวเลข 4–6 หลัก");
       return;
     }
 
@@ -64,7 +65,7 @@ export default function TechniciansPage() {
     setResetting(null);
     const nextToken = (data as { personalToken?: string } | null)?.personalToken;
     if (error || !nextToken) {
-      toast.error("ตั้ง PIN และออกลิงก์ไม่สำเร็จ: " + (error?.message ?? "ระบบไม่ส่งลิงก์ใหม่กลับมา"));
+      notifyError("ตั้ง PIN และออกลิงก์ไม่สำเร็จ: " + (error?.message ?? "ระบบไม่ส่งลิงก์ใหม่กลับมา"));
       return;
     }
 
@@ -80,7 +81,7 @@ export default function TechniciansPage() {
       await navigator.clipboard.writeText(value);
       toast.success(`คัดลอก${label}แล้ว`);
     } catch {
-      toast.error("คัดลอกไม่สำเร็จ กรุณาคัดลอกด้วยตนเอง");
+      notifyError("คัดลอกไม่สำเร็จ กรุณาคัดลอกด้วยตนเอง");
     }
   }
 

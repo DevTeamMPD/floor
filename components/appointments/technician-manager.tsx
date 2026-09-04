@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { floorErrorMessage } from "@/lib/floor-error-message";
 import { createClient } from "@/lib/supabase/client";
 import type { FloorTechnician } from "@/lib/technicians";
 import { personalWorkUrl } from "@/lib/technicians";
+import { notifyError } from "@/lib/notify-error";
 
 interface Team { id: string; name: string; is_active?: boolean }
 
@@ -46,7 +46,7 @@ export default function TechnicianManager({ open, teams, technicians, onClose, o
 
   async function save() {
     if (!form.name.trim() || !form.team_id) {
-      toast.error("กรุณาระบุชื่อช่างและทีม");
+      notifyError("กรุณาระบุชื่อช่างและทีม");
       return;
     }
     setSaving(true);
@@ -59,7 +59,7 @@ export default function TechnicianManager({ open, teams, technicians, onClose, o
       const resetToken = pin ? crypto.randomUUID() : "";
       const updateValues = resetToken ? { ...values, personal_token: resetToken } : values;
       const { error } = await supabase.from("floor_technicians").update(updateValues).eq("id", editingId);
-      if (error) toast.error(floorErrorMessage(error));
+      if (error) notifyError(error);
       else {
         if (pin) {
           const { error: pinError } = await supabase.rpc("set_floor_technician_pin", {
@@ -67,7 +67,7 @@ export default function TechnicianManager({ open, teams, technicians, onClose, o
             p_pin: pin,
           });
           if (pinError) {
-            toast.error(pinError.message);
+            notifyError(pinError);
             setSaving(false);
             return;
           }
@@ -81,10 +81,10 @@ export default function TechnicianManager({ open, teams, technicians, onClose, o
       const id = crypto.randomUUID();
       const token = crypto.randomUUID();
       const { error } = await supabase.from("floor_technicians").insert({ id, personal_token: token, ...values });
-      if (error) toast.error(floorErrorMessage(error));
+      if (error) notifyError(error);
       else {
         if (!pin) {
-          toast.error("ไม่สามารถตั้ง PIN อัตโนมัติได้");
+          notifyError("ไม่สามารถตั้ง PIN อัตโนมัติได้");
           setSaving(false);
           return;
         }
@@ -93,7 +93,7 @@ export default function TechnicianManager({ open, teams, technicians, onClose, o
           p_pin: pin,
         });
         if (pinError) {
-          toast.error(pinError.message);
+          notifyError(pinError);
           setSaving(false);
           return;
         }
@@ -109,7 +109,7 @@ export default function TechnicianManager({ open, teams, technicians, onClose, o
   async function toggle(t: FloorTechnician) {
     const { error } = await supabase.from("floor_technicians")
       .update({ is_active: !t.is_active, updated_at: new Date().toISOString() }).eq("id", t.id);
-    if (error) toast.error(floorErrorMessage(error)); else onChanged();
+    if (error) notifyError(error); else onChanged();
   }
 
   async function rotateLink(t: FloorTechnician) {
@@ -117,7 +117,7 @@ export default function TechnicianManager({ open, teams, technicians, onClose, o
     const token = crypto.randomUUID();
     const { error } = await supabase.from("floor_technicians")
       .update({ personal_token: token, updated_at: new Date().toISOString() }).eq("id", t.id);
-    if (error) toast.error(floorErrorMessage(error));
+    if (error) notifyError(error);
     else setNewLink({ name: t.name, url: personalWorkUrl(token), pin: "" });
   }
 
