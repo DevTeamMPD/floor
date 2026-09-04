@@ -35,6 +35,9 @@ export interface WorkOrder {
   waiting_cs_at: string | null; closed_at: string | null; note: string | null; created_at: string; updated_at: string;
   external_share_token: string; external_share_enabled: boolean;
   returned_reason: string | null; returned_by: string | null; returned_at: string | null; resubmitted_at: string | null;
+  // งานที่ไม่ใช้วัสดุปูพื้น (แก้ไข/ตรวจ/บริการ) — หัวหน้าช่างต้องกดยืนยันเจตนา + ระบุเหตุผล
+  // ประตูฝั่ง DB ใช้สองคอลัมน์นี้ตัดสินว่าจะปล่อยใบที่ไม่มีรายการวัสดุผ่านไปคลัง/ให้ช่างเริ่มงานได้ไหม
+  no_material_required?: boolean | null; no_material_reason?: string | null;
 }
 
 export interface WorkOrderItem {
