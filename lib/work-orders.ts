@@ -56,6 +56,7 @@ export const WORK_ORDER_EVENT_LABELS: Record<string, string> = {
   warehouse_accepted: "คลังรับงานเตรียมสินค้า",
   warehouse_completed: "คลังเตรียมสินค้าเสร็จแล้ว",
   warehouse_evidence_updated: "คลังแก้ไขรูปหลักฐาน",
+  admin_items_updated: "ผู้ดูแลระบบแก้ไขรายการวัสดุ/อุปกรณ์",
   installation_accepted: "หัวหน้าทีมรับงานติดตั้งและเริ่มเดินทาง",
   field_travelling: "ทีมช่างกำลังเดินทาง",
   field_arrived: "ทีมช่างถึงหน้างานแล้ว",
