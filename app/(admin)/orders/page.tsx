@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { notifyError } from "@/lib/notify-error";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 import {
   WORK_ORDER_STATUSES,
   WORK_ORDER_STATUS_LABELS,
@@ -67,7 +68,7 @@ export default function WorkOrdersPage() {
       .order("updated_at", { ascending: false });
 
     if (error) {
-      notifyError(`โหลดใบสั่งงานไม่สำเร็จ: ${error.message}`);
+      notifyError(`โหลดใบสั่งงานไม่สำเร็จ: ${floorErrorMessage(error)}`);
       setLoading(false);
       return;
     }
@@ -91,7 +92,7 @@ export default function WorkOrdersPage() {
     ]);
 
     const relatedError = jobResult.error ?? appointmentResult.error ?? teamResult.error ?? staffResult.error ?? itemResult.error;
-    if (relatedError) notifyError(`โหลดรายละเอียดบางส่วนไม่ครบ: ${relatedError.message}`);
+    if (relatedError) notifyError(`โหลดรายละเอียดบางส่วนไม่ครบ: ${floorErrorMessage(relatedError)}`);
     setJobs(Object.fromEntries(((jobResult.data ?? []) as Job[]).map((row) => [row.job_no, row])));
     setAppointments(Object.fromEntries(((appointmentResult.data ?? []) as Appointment[]).map((row) => [row.id, row])));
     setTeams(Object.fromEntries(((teamResult.data ?? []) as Team[]).map((row) => [row.id, row])));

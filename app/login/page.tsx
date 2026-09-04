@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { pinLoginEmail } from "@/lib/pin-auth";
 import { notifyError } from "@/lib/notify-error";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 
 export default function LoginPage() {
   const supabase = useMemo(() => createClient(), []);
@@ -80,12 +81,12 @@ export default function LoginPage() {
         password,
         options: { data: { full_name: fullName.trim() }, emailRedirectTo: callback },
       });
-      if (signUpError) reportError(signUpError.message.includes("invited") ? "อีเมลนี้ยังไม่ได้รับเชิญจากผู้ดูแลระบบ" : signUpError.message);
+      if (signUpError) reportError(signUpError.message.includes("invited") ? "อีเมลนี้ยังไม่ได้รับเชิญจากผู้ดูแลระบบ" : floorErrorMessage(signUpError));
       else if (data.session) {
         const { error: activationError } = await supabase.rpc("activate_floor_staff_account");
         if (activationError) {
           await supabase.auth.signOut();
-          reportError(activationError.message.includes("active HR employee") ? "ไม่พบบัญชีพนักงาน Active/Probation ที่เชื่อมกับอีเมลนี้ กรุณาติดต่อผู้ดูแลระบบ" : activationError.message);
+          reportError(activationError.message.includes("active HR employee") ? "ไม่พบบัญชีพนักงาน Active/Probation ที่เชื่อมกับอีเมลนี้ กรุณาติดต่อผู้ดูแลระบบ" : floorErrorMessage(activationError));
           setBusy(false);
           return;
         }

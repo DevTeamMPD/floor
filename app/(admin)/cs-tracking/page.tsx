@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { IP_STAGES } from "@/lib/types";
 import { toast } from "sonner";
 import { notifyError } from "@/lib/notify-error";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 
 interface Job {
   job_no: string;
@@ -515,7 +516,7 @@ function CsTrackingInner() {
       )}
 
       {selected && (
-        <EvalModal row={selected} questions={questions} readOnly={localPreview} onClose={() => setSelected(null)} onSaved={() => { void (async () => { if (selected.work_order_id && selected.work_order_status === "waiting_cs") { const { error } = await supabase.rpc("close_floor_work_order_cs_v4", { p_work_order_id: selected.work_order_id }); if (error) notifyError(`บันทึกผลแล้ว แต่ปิดงานไม่สำเร็จ: ${error.message}`); else toast.success("ประเมินและปิดงานเรียบร้อย"); } await load(); })(); }} />
+        <EvalModal row={selected} questions={questions} readOnly={localPreview} onClose={() => setSelected(null)} onSaved={() => { void (async () => { if (selected.work_order_id && selected.work_order_status === "waiting_cs") { const { error } = await supabase.rpc("close_floor_work_order_cs_v4", { p_work_order_id: selected.work_order_id }); if (error) notifyError(`บันทึกผลแล้ว แต่ปิดงานไม่สำเร็จ: ${floorErrorMessage(error)}`); else toast.success("ประเมินและปิดงานเรียบร้อย"); } await load(); })(); }} />
       )}
     </div>
   );

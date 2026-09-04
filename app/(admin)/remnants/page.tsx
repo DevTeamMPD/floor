@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { notifyError } from "@/lib/notify-error";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 
 interface Remnant {
   id: string;
@@ -62,9 +63,9 @@ export default function RemnantsPage() {
       supabase.rpc("list_remnant_reports_staff"),
       supabase.rpc("get_remnant_cost_dashboard"),
     ]);
-    if (stockResult.error) notifyError(stockResult.error.message); else setItems(stockResult.data ?? []);
-    if (reportResult.error) notifyError(`โหลดคิวตรวจรับเศษไม่สำเร็จ: ${reportResult.error.message}`); else setReports((reportResult.data ?? []) as RemnantReport[]);
-    if (costResult.error) notifyError(`โหลดต้นทุนเศษไม่สำเร็จ: ${costResult.error.message}`); else {
+    if (stockResult.error) notifyError(`โหลดคลังเศษไม่สำเร็จ: ${floorErrorMessage(stockResult.error)}`); else setItems(stockResult.data ?? []);
+    if (reportResult.error) notifyError(`โหลดคิวตรวจรับเศษไม่สำเร็จ: ${floorErrorMessage(reportResult.error)}`); else setReports((reportResult.data ?? []) as RemnantReport[]);
+    if (costResult.error) notifyError(`โหลดต้นทุนเศษไม่สำเร็จ: ${floorErrorMessage(costResult.error)}`); else {
       const value = costResult.data as { rates?: CostRate[]; summary?: CostSummary };
       const rates = value?.rates ?? []; setRateDrafts(Object.fromEntries(rates.map((rate) => [rate.matType, String(rate.costPerSqm ?? 0)]))); setCostSummary(value?.summary ?? { availableValue: 0, reservedValue: 0, reusedValue: 0, disposedValue: 0 });
     }
