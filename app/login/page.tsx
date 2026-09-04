@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { pinLoginEmail } from "@/lib/pin-auth";
 
 export default function LoginPage() {
   const supabase = useMemo(() => createClient(), []);
@@ -41,7 +42,7 @@ export default function LoginPage() {
         setBusy(false);
         return;
       }
-      const signInEmail = mode === "pin" ? `${pinUsername.trim().toLowerCase()}@pin.floor.local` : email.trim();
+      const signInEmail = mode === "pin" ? pinLoginEmail(pinUsername) : email.trim();
       const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email: signInEmail, password });
       if (signInError) setError(mode === "pin" ? "ชื่อผู้ใช้หรือ PIN ไม่ถูกต้อง" : "อีเมลหรือรหัสผ่านไม่ถูกต้อง");
       else {

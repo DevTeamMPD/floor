@@ -1,8 +1,7 @@
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-
-const PIN_DOMAIN = "pin.floor.local";
+import { PIN_EMAIL_DOMAIN } from "@/lib/pin-auth";
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({})) as { fullName?: string; username?: string; pin?: string };
@@ -28,7 +27,7 @@ export async function POST(request: Request) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: "server_configuration_missing" }, { status: 500 });
   const service = createServiceClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
-  const email = `${username}@${PIN_DOMAIN}`;
+  const email = `${username}@${PIN_EMAIL_DOMAIN}`;
   const { data: created, error: createError } = await service.auth.admin.createUser({ email, password: pin, email_confirm: true, user_metadata: { full_name: fullName, login_type: "warehouse_pin" } });
   if (createError || !created.user) {
     // Surface the real reason (this endpoint is admin-only) instead of a generic
