@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { getCurrentStaff } from "@/lib/staff-server";
+import ErrorPopupHost from "@/components/ui/error-popup";
 
 export const metadata: Metadata = {
   title: "LENDI Engineering",
@@ -8,7 +10,15 @@ export const metadata: Metadata = {
   appleWebApp: { capable: true, title: "LENDI Engineering", statusBarStyle: "default" },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Mounted once for the whole site (staff app and the public token pages
+  // alike -- work/[token], eval, share/queue, login, ...) so every
+  // notifyError(...) call anywhere shows the same popup. getCurrentStaff()
+  // is React-cache()'d, so on staff routes that already call it (see
+  // app/(admin)/layout.tsx) this is free -- on public pages with no staff
+  // session it just resolves to null, i.e. isAdmin=false, same as an
+  // anonymous/technician-PIN visitor should see.
+  const staff = await getCurrentStaff();
   return (
     <html lang="th">
       <head>
@@ -17,7 +27,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <ErrorPopupHost isAdmin={staff?.role === "admin"} />
+      </body>
     </html>
   );
 }

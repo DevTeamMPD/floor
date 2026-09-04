@@ -4,7 +4,6 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { getCurrentStaff } from "@/lib/staff-server";
 import NotificationCenter from "@/components/notifications/notification-center";
-import ErrorPopupHost from "@/components/ui/error-popup";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const isLocalDemo = (await cookies()).get("floor_local_demo")?.value === "1";
@@ -27,7 +26,6 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         {children}
       </main>
       <Toaster richColors position="top-center" />
-      <ErrorPopupHost isAdmin={visibleStaff.role === "admin"} />
     </div>
   );
 }
