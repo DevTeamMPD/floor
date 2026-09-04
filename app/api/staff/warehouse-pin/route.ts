@@ -30,7 +30,17 @@ export async function POST(request: Request) {
   const service = createServiceClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
   const email = `${username}@${PIN_DOMAIN}`;
   const { data: created, error: createError } = await service.auth.admin.createUser({ email, password: pin, email_confirm: true, user_metadata: { full_name: fullName, login_type: "warehouse_pin" } });
-  if (createError || !created.user) return NextResponse.json({ error: createError?.message?.includes("registered") ? "ชื่อผู้ใช้นี้มีอยู่แล้ว" : "สร้างบัญชี PIN ไม่สำเร็จ" }, { status: 400 });
+  if (createError || !created.user) {
+    // Surface the real reason (this endpoint is admin-only) instead of a generic
+    // message -- previously every failure here showed the same unhelpful text,
+    // which made a real cause (e.g. Supabase's password-strength policy
+    // rejecting a 6-digit-only PIN) impossible to diagnose from the UI.
+    console.error("[warehouse-pin] createUser failed", { username, status: createError?.status, code: createError?.code, message: createError?.message });
+    const message = createError?.message ?? "";
+    if (message.includes("registered")) return NextResponse.json({ error: "ชื่อผู้ใช้นี้มีอยู่แล้ว" }, { status: 400 });
+    if (/password/i.test(message)) return NextResponse.json({ error: `PIN ไม่ผ่านเกณฑ์ของระบบ: ${message}` }, { status: 400 });
+    return NextResponse.json({ error: message ? `สร้างบัญชี PIN ไม่สำเร็จ: ${message}` : "สร้างบัญชี PIN ไม่สำเร็จ" }, { status: 400 });
+  }
   const { error: profileError } = await service.from("floor_staff_profiles").insert({ id: created.user.id, email, full_name: fullName, role: "warehouse", is_active: true, role_source: "manual", access_scope: "warehouse_prep_only", pin_username: username });
   if (profileError) {
     await service.auth.admin.deleteUser(created.user.id);
