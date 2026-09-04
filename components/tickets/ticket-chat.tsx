@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { floorErrorMessage } from "@/lib/floor-error-message";
+import { notifyError } from "@/lib/notify-error";
 
 type ChatSender = "technician" | "sales" | "warehouse" | "staff";
 type ReadBy = { name: string; kind: string; read_at?: string; readAt?: string };
@@ -61,14 +63,14 @@ export default function TicketChat({ jobNo, viewer, viewerName, technicianToken,
       if (!technicianToken || !technicianPin) return;
       await supabase.rpc("mark_technician_ticket_messages_read", { p_token: technicianToken, p_pin: technicianPin, p_job_no: jobNo });
       const { data, error: rpcError } = await supabase.rpc("get_technician_ticket_messages", { p_token: technicianToken, p_pin: technicianPin, p_job_no: jobNo });
-      if (rpcError) { setError("โหลดแชทไม่สำเร็จ: " + rpcError.message); return; }
+      if (rpcError) { const msg = `โหลดแชทไม่สำเร็จ: ${floorErrorMessage(rpcError)}`; setError(msg); notifyError(msg); return; }
       const rows = normalizeMessages(data);
       hasPendingRef.current = rows.some((message) => message.sync_status === "pending");
       setMessages(rows);
       return;
     }
     const { data, error: queryError } = await supabase.from("floor_ticket_messages").select("id,sender_kind,sender_name,sender_user_id,body,attachment_paths,external_attachments,external_source,external_sender_role,sync_status,sync_error,created_at").eq("job_no", jobNo).order("created_at", { ascending: true });
-    if (queryError) { setError("โหลดแชทไม่สำเร็จ: " + queryError.message); return; }
+    if (queryError) { const msg = `โหลดแชทไม่สำเร็จ: ${floorErrorMessage(queryError)}`; setError(msg); notifyError(msg); return; }
     const next = normalizeMessages(data); hasPendingRef.current = next.some((message) => message.sync_status === "pending"); setMessages(next);
     const { data: auth } = await supabase.auth.getUser();
     if (auth.user) {
@@ -143,7 +145,7 @@ export default function TicketChat({ jobNo, viewer, viewerName, technicianToken,
     for (let index = 0; index < attachments.length; index++) {
       const file = attachments[index]; const target = uploads[index];
       const { error } = await supabase.storage.from("ticket-chat-files").uploadToSignedUrl(target.path, target.token, file, { contentType: file.type || "application/octet-stream" });
-      if (error) throw new Error(`แนบไฟล์ ${file.name} ไม่สำเร็จ: ${error.message}`);
+      if (error) throw new Error(`แนบไฟล์ ${file.name} ไม่สำเร็จ: ${floorErrorMessage(error)}`);
       paths.push(target.path);
     }
     return paths;
@@ -163,7 +165,11 @@ export default function TicketChat({ jobNo, viewer, viewerName, technicianToken,
         if (insertError) throw insertError;
       }
       setDraft(""); setAttachments([]); await load(); void flushSync(); if (asDataRequest && onRequestData) await onRequestData(body);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "ส่งข้อความไม่สำเร็จ"); } finally { setSending(false); }
+    } catch (cause) {
+      const msg = cause instanceof Error ? cause.message : `ส่งข้อความไม่สำเร็จ: ${floorErrorMessage(cause)}`;
+      setError(msg);
+      notifyError(msg);
+    } finally { setSending(false); }
   }
 
   return <section className="rounded-3xl border-2 border-cyan-300 bg-gradient-to-br from-cyan-50 via-white to-blue-50 p-4 shadow-lg shadow-cyan-100/70 sm:p-5">
