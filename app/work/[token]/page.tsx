@@ -103,7 +103,7 @@ function workErrorMessage(error: unknown) {
   if (message.includes("assignment not found")) return "ไม่พบงานที่มอบหมายให้บัญชีนี้ กรุณาปิดหน้าแล้วเปิดลิงก์งานใหม่ หรือติดต่อหัวหน้าช่าง";
   if (message.includes("acknowledge assignment first")) return "กรุณากด “รับทราบงาน” ก่อนเริ่มอัปเดตสถานะ";
   if (message.includes("invalid work status transition")) return "ลำดับสถานะไม่ถูกต้อง กรุณารีเฟรชหน้าแล้วทำขั้นตอนล่าสุดอีกครั้ง";
-  if (message.includes("head technician material plan is required")) return "ยังเริ่มงานไม่ได้: หัวหน้าช่างต้องระบุรายการวัสดุและจำนวนแผ่นก่อน";
+  if (message.includes("head technician material plan is required")) return "ยังเริ่มงานไม่ได้: ไม่มีแผนวัสดุของงานนี้ในระบบ — ให้แอดมินเปิดใบสั่งงานนี้แล้วกดบันทึกรายการวัสดุอีกครั้ง (หัวหน้าช่างแก้จากหน้านี้ไม่ได้)";
   if (message.includes("status photo is required")) return "กรุณาถ่ายหรือเลือกรูปหลักฐานอย่างน้อย 1 รูป";
   if (message.includes("remnant report is required")) return "กรุณาบันทึกเศษที่เหลือ หรือยืนยันว่าไม่มีเศษเหลือ ก่อนให้ลูกค้าเซ็นรับงาน";
   return message ? `บันทึกสถานะไม่สำเร็จ: ${floorErrorMessage(error)}` : "บันทึกสถานะไม่สำเร็จ กรุณารีเฟรชหน้าแล้วลองอีกครั้ง หากยังไม่ได้ให้แจ้งหัวหน้าช่าง";
@@ -779,7 +779,11 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
                 const remnantReady = remnantReport?.status === "pending_review" || remnantReport?.status === "accepted";
                 const workReady = !centralWorkOrder || centralWorkOrder.status === "ready_to_install" || centralWorkOrder.status === "installing";
                 const canStart = currentStatus || !centralWorkOrder || (centralWorkOrder.status === "ready_to_install" && centralWorkOrder.isLead);
-                const headPlannedSheetCount = workProgress?.plannedSheetCount ?? totalSheetQuantity(centralWorkOrder, "plannedQty");
+                // แผนวัสดุต้องอ่านจาก floor_job_materials เท่านั้น — ห้าม fallback ไปนับจากรายการในใบสั่งงาน
+                // เพราะ record_technician_work_status() ใช้ตารางนั้นเป็นเงื่อนไขเริ่มงาน (เคย fallback แล้วช่างเห็นเลขครบแต่กดไม่ผ่าน)
+                const headPlannedSheetCount = workProgress?.plannedSheetCount ?? null;
+                const orderPlannedSheetCount = totalSheetQuantity(centralWorkOrder, "plannedQty");
+                const materialPlanMissing = !demoMode && Boolean(centralWorkOrder) && headPlannedSheetCount == null;
                 const warehousePreparedSheetCount = totalSheetQuantity(centralWorkOrder, "actualQty");
                 const technicianPickedSheetCount = pickedSheetCount.trim() ? Number(pickedSheetCount) : null;
                 return <div className="space-y-4">
@@ -812,6 +816,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
                     <textarea value={statusNote} onChange={(event) => setStatusNote(event.target.value)} rows={2} placeholder="หมายเหตุเพิ่มเติม (ถ้ามี)" className="mt-3 w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm" />
                     <label className="mt-3 block cursor-pointer rounded-xl border border-dashed border-blue-300 bg-white px-3 py-3 text-center text-sm font-medium text-blue-700">📷 ถ่ายรูป / เพิ่มรูป<input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(event) => { addStatusFiles(event.target.files); event.currentTarget.value = ""; }} /></label>
                     {statusFiles.length ? <div className="mt-3"><div className="mb-2 flex items-center justify-between"><div className="text-xs font-semibold text-blue-800">ภาพที่เลือก ({statusFiles.length})</div><button type="button" onClick={clearStatusFiles} className="text-xs font-medium text-red-500">ล้างทั้งหมด</button></div><div className="grid grid-cols-3 gap-2">{statusFiles.map((item, index) => <div key={item.id} className="relative aspect-square overflow-hidden rounded-xl border border-blue-200 bg-white"><img src={item.url} alt={`ภาพสถานะ ${index + 1}`} className="h-full w-full object-cover" /><button type="button" onClick={() => removeStatusFile(item.id)} aria-label={`ลบภาพ ${index + 1}`} className="absolute right-1.5 top-1.5 rounded-full bg-black/70 px-2 py-1 text-[10px] font-semibold text-white">ลบ</button><span className="absolute bottom-1.5 left-1.5 rounded-full bg-black/65 px-2 py-1 text-[10px] text-white">{index + 1}</span></div>)}</div></div> : <div className="mt-2 text-xs text-blue-600">ยังไม่ได้เลือกรูป</div>}
+                    {materialPlanMissing && next.status === "travelling" ? <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">ยังไม่มีแผนวัสดุของงานนี้ในระบบ (รายการในใบสั่งงานรวม {orderPlannedSheetCount ?? "—"} แผ่น) — กดเริ่มงานจะไม่ผ่าน ให้แอดมินเปิดใบสั่งงานนี้แล้วกดบันทึกรายการวัสดุอีกครั้ง</div> : null}
                     <button onClick={() => void updateWorkStatus()} disabled={saving} className="mt-3 w-full rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving ? "กำลังบันทึก…" : next.status === "travelling" && centralWorkOrder ? "รับงานติดตั้ง" : next.button}</button>
                   </div> : null}
                   {next && selected.acknowledgedAt && !workReady ? <div className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-700">ยังเริ่มงานไม่ได้: ใบสั่งงานอยู่สถานะ {{ head_review: "รอหัวหน้าช่างตรวจ", warehouse_waiting: "รอคลังรับงาน", warehouse_preparing: "กำลังเตรียมสินค้า" }[centralWorkOrder?.status ?? ""] ?? centralWorkOrder?.status}</div> : null}
