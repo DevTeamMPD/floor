@@ -34,7 +34,7 @@ function safeSegment(value: string) { return value.replace(/[^a-zA-Z0-9._-]/g, "
 export async function POST(request: Request) {
   try {
     const form = await request.formData();
-    const action = String(form.get("action") || "upload");
+    const action = String(form.get("action") || "prepare-upload");
     const jobNo = String(form.get("jobNo") || "").trim();
     const token = String(form.get("token") || "").trim();
     const pin = String(form.get("pin") || "").trim();
@@ -49,17 +49,35 @@ export async function POST(request: Request) {
       return NextResponse.json({ files: (data ?? []).map((item) => ({ path: item.path, url: item.signedUrl })) });
     }
 
-    const files = form.getAll("file").filter((value): value is File => value instanceof File);
-    if (!files.length) return NextResponse.json({ error: "ไม่พบไฟล์แนบ" }, { status: 400 });
-    if (files.some((file) => file.size > 10 * 1024 * 1024)) return NextResponse.json({ error: "ไฟล์ต้องมีขนาดไม่เกิน 10 MB" }, { status: 400 });
-    const paths: string[] = [];
-    for (const [index, file] of files.entries()) {
-      const path = `ticket-chat/${safeSegment(jobNo)}/${crypto.randomUUID()}-${index}-${safeSegment(file.name)}`;
-      const { error } = await admin.storage.from(bucket).upload(path, file, { upsert: false, contentType: file.type || "application/octet-stream" });
-      if (error) { if (paths.length) await admin.storage.from(bucket).remove(paths); throw error; }
-      paths.push(path);
+    // "prepare-upload" only hands out signed upload URLs -- the actual file
+    // bytes never pass through this route. Vercel serverless functions have a
+    // hard ~4.5 MB request body limit that can't be raised from application
+    // code; routing full files through here meant any attachment bigger than
+    // that failed with a bare network-level "Failed to fetch" before this
+    // handler even ran (nothing to log server-side). The browser now uploads
+    // directly to Supabase Storage using the signed URL, so the only thing
+    // that ever needs to reach us is small JSON metadata, and the real 10 MB
+    // ceiling (enforced by the bucket's own file_size_limit) is reachable.
+    if (action === "prepare-upload") {
+      let requested: unknown;
+      try { requested = JSON.parse(String(form.get("files") || "[]")); } catch { requested = null; }
+      if (!Array.isArray(requested) || !requested.length) return NextResponse.json({ error: "ไม่พบไฟล์แนบ" }, { status: 400 });
+      const files = requested as { name?: unknown; size?: unknown }[];
+      if (files.some((file) => typeof file.name !== "string" || !file.name.trim() || typeof file.size !== "number" || !Number.isFinite(file.size) || file.size <= 0)) {
+        return NextResponse.json({ error: "ข้อมูลไฟล์ไม่ถูกต้อง" }, { status: 400 });
+      }
+      if (files.some((file) => (file.size as number) > 10 * 1024 * 1024)) return NextResponse.json({ error: "ไฟล์ต้องมีขนาดไม่เกิน 10 MB" }, { status: 400 });
+      const uploads: { path: string; signedUrl: string; token: string }[] = [];
+      for (const [index, file] of files.entries()) {
+        const path = `ticket-chat/${safeSegment(jobNo)}/${crypto.randomUUID()}-${index}-${safeSegment(String(file.name))}`;
+        const { data, error } = await admin.storage.from(bucket).createSignedUploadUrl(path);
+        if (error) throw error;
+        uploads.push({ path, signedUrl: data.signedUrl, token: data.token });
+      }
+      return NextResponse.json({ uploads });
     }
-    return NextResponse.json({ paths });
+
+    return NextResponse.json({ error: "ไม่รู้จักการดำเนินการนี้" }, { status: 400 });
   } catch (cause) {
     return NextResponse.json({ error: cause instanceof Error ? cause.message : "จัดการไฟล์ไม่สำเร็จ" }, { status: 403 });
   }

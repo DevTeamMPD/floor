@@ -125,13 +125,28 @@ export default function TicketChat({ jobNo, viewer, viewerName, technicianToken,
 
   async function uploadAttachments() {
     if (!attachments.length) return [];
-    const form = new FormData(); form.set("action", "upload"); form.set("jobNo", jobNo);
+    // Ask the server for a signed upload URL per file (small JSON only --
+    // see app/api/ticket-files/route.ts for why: routing full file bytes
+    // through that route hit Vercel's ~4.5 MB function body limit and failed
+    // as a bare "Failed to fetch" for anything bigger, well under the 10 MB
+    // this UI advertises). The actual bytes go straight from this browser to
+    // Supabase Storage using that signed URL, so the server never sees them.
+    const form = new FormData(); form.set("action", "prepare-upload"); form.set("jobNo", jobNo);
     if (technicianToken && technicianPin) { form.set("token", technicianToken); form.set("pin", technicianPin); }
-    attachments.forEach((file) => form.append("file", file));
+    form.set("files", JSON.stringify(attachments.map((file) => ({ name: file.name, size: file.size }))));
     const response = await fetch("/api/ticket-files", { method: "POST", body: form });
-    const payload = await response.json() as { paths?: string[]; error?: string };
-    if (!response.ok) throw new Error(payload.error || "อัปโหลดไฟล์ไม่สำเร็จ");
-    return payload.paths ?? [];
+    const payload = await response.json() as { uploads?: { path: string; signedUrl: string; token: string }[]; error?: string };
+    if (!response.ok) throw new Error(payload.error || "เตรียมอัปโหลดไฟล์ไม่สำเร็จ");
+    const uploads = payload.uploads ?? [];
+    if (uploads.length !== attachments.length) throw new Error("เตรียมอัปโหลดไฟล์ไม่สำเร็จ");
+    const paths: string[] = [];
+    for (let index = 0; index < attachments.length; index++) {
+      const file = attachments[index]; const target = uploads[index];
+      const { error } = await supabase.storage.from("ticket-chat-files").uploadToSignedUrl(target.path, target.token, file, { contentType: file.type || "application/octet-stream" });
+      if (error) throw new Error(`แนบไฟล์ ${file.name} ไม่สำเร็จ: ${error.message}`);
+      paths.push(target.path);
+    }
+    return paths;
   }
 
   async function send(asDataRequest = false) {
