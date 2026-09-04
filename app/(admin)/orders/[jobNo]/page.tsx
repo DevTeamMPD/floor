@@ -85,7 +85,7 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
   const [order, setOrder] = useState<WorkOrder | null>(null); const [items, setItems] = useState<DraftItem[]>([]); const [events, setEvents] = useState<WorkOrderEvent[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]); const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [teams, setTeams] = useState<Team[]>([]); const [materials, setMaterials] = useState<Material[]>([]);
-  const [role, setRole] = useState<StaffRole | null>(null); const [note, setNote] = useState(""); const [warehouseFiles, setWarehouseFiles] = useState<WarehouseFilePreview[]>([]);
+  const [role, setRole] = useState<StaffRole | null>(null); const [note, setNote] = useState(""); const [noMaterial, setNoMaterial] = useState(false); const [noMaterialReason, setNoMaterialReason] = useState(""); const [warehouseFiles, setWarehouseFiles] = useState<WarehouseFilePreview[]>([]);
   const [adminEditingItems, setAdminEditingItems] = useState(false);
   const warehouseFilesRef = useRef<WarehouseFilePreview[]>([]);
   const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false);
@@ -125,7 +125,7 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
     const inventoryMaterials = (materialResult.data ?? []) as Material[];
     const loadedMaterials = Array.from(new Map([...inventoryMaterials, ...FLOOR_SERVICE_SKUS].map((material) => [material.sku, material])).values());
     setJob(loadedJob); setAppointment(appt); setRole((profileResult.data?.role as StaffRole | undefined) ?? null); setTechnicians((techResult.data ?? []) as Technician[]); setTeams((teamResult.data ?? []) as Team[]); setMaterials(loadedMaterials);
-    setOrder(wo); setNote(wo?.note ?? "");
+    setOrder(wo); setNote(wo?.note ?? ""); setNoMaterial(Boolean(wo?.no_material_required)); setNoMaterialReason(wo?.no_material_reason ?? "");
     if (appt && wo) {
       const [assignmentResult, itemResult, eventResult] = await Promise.all([
         supabase.from("appointment_technicians").select("*").eq("appointment_id", appt.id).eq("is_active", true),
@@ -182,7 +182,17 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
     const unknownSkus = new Set(items.filter((item) => item.category === "floor_material" && item.sku.trim() && !materials.some((material) => material.sku === item.sku.trim())).map((item) => item.sku.trim()));
     if (unknownSkus.size && !window.confirm(`พบ SKU ที่ไม่มีในคลัง:\n• ${Array.from(unknownSkus).join("\n• ")}\n\nยืนยันใช้เป็นข้อยกเว้นหรือไม่? ระบบจะบันทึกว่าเป็น SKU นอกคลัง`)) return;
     const exceptionNote = unknownSkus.size ? `อนุมัติข้อยกเว้น SKU นอกคลัง: ${Array.from(unknownSkus).join(", ")}` : null;
-    setSaving(true); const { error } = await supabase.rpc("confirm_floor_work_order_v2", { p_work_order_id: order.id, p_items: rpcItems(unknownSkus), p_note: [note.trim(), exceptionNote].filter(Boolean).join("\n") || null }); setSaving(false);
+    if (noMaterial && !noMaterialReason.trim()) { toast.error("ระบุเหตุผลที่งานนี้ไม่ใช้วัสดุปูพื้นก่อน"); return; }
+    setSaving(true);
+    // บันทึกเจตนา "งานนี้ไม่ใช้วัสดุปูพื้น" ก่อนยืนยัน — ประตูฝั่ง DB ใช้ค่านี้ตัดสินว่าจะปล่อยใบที่ไม่มีวัสดุผ่านไหม
+    const flagResult = await supabase.rpc("set_floor_work_order_no_material_required", {
+      p_work_order_id: order.id,
+      p_no_material_required: noMaterial,
+      p_reason: noMaterial ? noMaterialReason.trim() : null,
+    });
+    if (flagResult.error) { toast.error(floorErrorMessage(flagResult.error)); setSaving(false); return; }
+    // v3 (ไม่ใช่ v2): บังคับ role admin/head_technician, แก้บรรทัดเดิมทับที่เดิมจึงไม่ล้าง picked_qty/actual_qty ของคลัง
+    const { error } = await supabase.rpc("confirm_floor_work_order_v3", { p_work_order_id: order.id, p_items: rpcItems(unknownSkus), p_note: [note.trim(), exceptionNote].filter(Boolean).join("\n") || null }); setSaving(false);
     if (error) toast.error(floorErrorMessage(error)); else { toast.success("ยืนยันใบสั่งงานและส่งให้คลังแล้ว"); void refreshAfterChange(); }
   }
   async function returnOrder() {
@@ -265,6 +275,13 @@ function CentralWorkOrderWorkspace({ jobNo, embedded = false, onChanged }: { job
         </Card>
         <Card title="6. การดำเนินงาน">
           <textarea value={note} onChange={(e) => setNote(e.target.value)} disabled={!canEdit && order.status !== "warehouse_preparing"} rows={3} placeholder="หมายเหตุถึงผู้รับช่วงงานถัดไป" className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+          {canEdit ? <label className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <input type="checkbox" checked={noMaterial} onChange={(event) => setNoMaterial(event.target.checked)} className="mt-0.5" />
+            <span>
+              <b>งานนี้ไม่ใช้วัสดุปูพื้น</b> (งานแก้ไข/ตรวจ/บริการ) — งานปูพื้นปกติต้องมีรายการวัสดุอย่างน้อย 1 บรรทัด
+              {noMaterial ? <input value={noMaterialReason} onChange={(event) => setNoMaterialReason(event.target.value)} placeholder="ระบุเหตุผล (บังคับ) เช่น เข้าไปแก้ไขงานเดิม" className="mt-2 w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs text-slate-700" /> : null}
+            </span>
+          </label> : null}
           {canEdit ? <button onClick={() => void confirmOrder()} disabled={saving || missing.length > 0} className="mt-3 w-full rounded-xl bg-blue-600 py-3 font-semibold text-white disabled:bg-slate-200 disabled:text-slate-500">{saving ? "กำลังบันทึก…" : missing.length ? `ยังอนุมัติไม่ได้ · ขาด ${missing.length} รายการ` : "ยืนยันใบสั่งงาน → ส่งให้คลัง"}</button> : null}
           {canWarehouse && order.status === "warehouse_waiting" ? <button onClick={() => void acceptWarehouse()} disabled={saving} className="mt-3 w-full rounded-xl bg-amber-500 py-3 font-semibold text-white disabled:opacity-50">รับงานเตรียมสินค้า</button> : null}
           {canWarehouse && order.status === "warehouse_preparing" ? <div className="mt-3 space-y-3"><label className="block cursor-pointer rounded-xl border border-dashed border-slate-300 p-4 text-sm transition hover:border-blue-400 hover:bg-blue-50/40"><div className="font-medium">รูปสินค้าที่จัดเตรียมเสร็จ *</div><div className="mt-1 text-xs text-slate-500">เลือกได้หลายภาพ และกดเพิ่มภาพภายหลังได้โดยภาพเดิมจะไม่หาย</div><input type="file" accept="image/*" multiple onChange={(e) => { addWarehouseFiles(e.target.files); e.currentTarget.value = ""; }} className="mt-3 w-full text-xs" /></label>{warehouseFiles.length ? <div><div className="mb-2 flex items-center justify-between"><div className="text-sm font-semibold text-slate-800">ภาพที่เลือก ({warehouseFiles.length} ภาพ)</div><button type="button" onClick={clearWarehouseFiles} className="text-xs font-medium text-red-500">ล้างทั้งหมด</button></div><div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{warehouseFiles.map((item, index) => <div key={item.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="relative aspect-square bg-slate-100"><img src={item.url} alt={`ภาพตัวอย่าง ${index + 1}`} className="h-full w-full object-cover" /><button type="button" onClick={() => removeWarehouseFile(item.id)} aria-label={`ลบภาพ ${index + 1}`} className="absolute right-2 top-2 rounded-full bg-black/70 px-2 py-1 text-xs font-semibold text-white">ลบ</button><span className="absolute bottom-2 left-2 rounded-full bg-black/65 px-2 py-1 text-[11px] text-white">ภาพที่ {index + 1}</span></div><div className="p-2"><div className="truncate text-xs font-medium text-slate-700" title={item.file.name}>{item.file.name}</div><div className="mt-0.5 text-[11px] text-slate-400">{(item.file.size / 1024 / 1024).toFixed(2)} MB</div></div></div>)}</div></div> : <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">ยังไม่ได้เลือกรูป</div>}<button onClick={() => void completeWarehouse()} disabled={saving} className="w-full rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-50">{saving ? "กำลังอัปโหลด…" : `เตรียมเสร็จ → ย้ายไปรอติดตั้ง${warehouseFiles.length ? ` (${warehouseFiles.length} ภาพ)` : ""}`}</button></div> : null}
