@@ -3,6 +3,7 @@
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { floorActionError, floorErrorMessage } from "@/lib/floor-error-message";
+import { notifyError } from "@/lib/notify-error";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import RemnantReportForm, { MaterialMovement, RemnantReportData } from "@/components/technician/remnant-report-form";
 import TechnicianPushButton from "@/components/notifications/technician-push-button";
@@ -262,6 +263,10 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
   const [pickedSheetCount, setPickedSheetCount] = useState("");
   const [actualSite, setActualSite] = useState({ areaSqm: "", floorCondition: "", differences: "", confirmed: false });
   const [progressError, setProgressError] = useState<string | null>(null);
+  // Keeps the existing persistent inline banner (technicians work heads-down
+  // in the field and may not catch a transient popup) while also surfacing
+  // the same shared popup used everywhere else in the app.
+  function reportProgressError(message: string) { setProgressError(message); notifyError(message); }
   const [saving, setSaving] = useState(false);
   const [requestedJob, setRequestedJob] = useState<string | null>(null);
   const pinStorageKey = `floor-work-pin:${token}`;
@@ -457,7 +462,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
 
   function addStatusFiles(files: FileList | null) {
     const added = Array.from(files ?? []).filter((file) => file.type.startsWith("image/")).map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) }));
-    if (!added.length) { setProgressError("เลือกได้เฉพาะไฟล์รูปภาพ"); return; }
+    if (!added.length) { reportProgressError("เลือกได้เฉพาะไฟล์รูปภาพ"); return; }
     setStatusFiles((current) => [...current, ...added]);
   }
 
@@ -482,10 +487,10 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     const currentIndex = WORK_STEPS.findIndex((step) => step.status === current);
     const next = WORK_STEPS[currentIndex + 1];
     if (!next) return;
-    if (!statusFiles.length) { setProgressError("กรุณาถ่ายหรือเลือกรูปสถานะอย่างน้อย 1 รูป"); return; }
-    if (next.status === "travelling" && (!pickedSheetCount.trim() || Number(pickedSheetCount) < 0)) { setProgressError("กรุณาระบุจำนวนแผ่นที่หยิบจริง"); return; }
+    if (!statusFiles.length) { reportProgressError("กรุณาถ่ายหรือเลือกรูปสถานะอย่างน้อย 1 รูป"); return; }
+    if (next.status === "travelling" && (!pickedSheetCount.trim() || Number(pickedSheetCount) < 0)) { reportProgressError("กรุณาระบุจำนวนแผ่นที่หยิบจริง"); return; }
     if (next.status === "installing" && (!actualSite.areaSqm.trim() || !actualSite.floorCondition.trim() || !actualSite.confirmed)) {
-      setProgressError("กรุณาตรวจและยืนยันข้อมูลหน้างานจริงก่อนเริ่มติดตั้ง"); return;
+      reportProgressError("กรุณาตรวจและยืนยันข้อมูลหน้างานจริงก่อนเริ่มติดตั้ง"); return;
     }
     const actualSiteNote = next.status === "installing"
       ? ["ข้อมูลหน้างานจริง", `พื้นที่จริง: ${actualSite.areaSqm.trim()} ตร.ม.`, `สภาพพื้นจริง: ${actualSite.floorCondition.trim()}`, actualSite.differences.trim() ? `ความต่างจากข้อมูลเดิม: ${actualSite.differences.trim()}` : "ข้อมูลตรงกับการสำรวจเดิม", statusNote.trim()].filter(Boolean).join("\n")
@@ -515,7 +520,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     const failedCount = uploadResults.length - paths.length;
     if (failedCount > 0) {
       setSaving(false);
-      setProgressError(`อัปโหลดรูปไม่สำเร็จ ${failedCount} จาก ${uploadResults.length} รูป (รูปที่อัปโหลดสำเร็จแล้ว ${paths.length} รูปถูกเก็บไว้ ไม่ต้องถ่ายซ้ำ กดบันทึกอีกครั้งเพื่อลองใหม่)`);
+      reportProgressError(`อัปโหลดรูปไม่สำเร็จ ${failedCount} จาก ${uploadResults.length} รูป (รูปที่อัปโหลดสำเร็จแล้ว ${paths.length} รูปถูกเก็บไว้ ไม่ต้องถ่ายซ้ำ กดบันทึกอีกครั้งเพื่อลองใหม่)`);
       return;
     }
     try {
@@ -531,7 +536,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
     } catch (error) {
       // รูปที่อัปโหลดสำเร็จแล้วถูกเก็บไว้โดยตั้งใจ ไม่ลบทิ้ง เพราะการบังคับให้ช่างถ่ายรูปซ้ำกลางหน้างาน
       // เมื่อ RPC ล้มเหลวชั่วคราว เป็นการลงโทษช่างสำหรับความผิดพลาดที่ไม่ใช่ของช่าง
-      setProgressError(workErrorMessage(error));
+      reportProgressError(workErrorMessage(error));
     }
     setSaving(false);
   }
@@ -555,14 +560,14 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       if (error) throw error;
       await reloadProgress(selected.assignmentId);
     } catch (error) {
-      setProgressError(floorActionError("บันทึกลายเซ็นลูกค้า", error));
+      reportProgressError(floorActionError("บันทึกลายเซ็นลูกค้า", error));
     }
     setSaving(false);
   }
 
   async function saveWarehouseReturn() {
     if (!selected?.assignmentId) return;
-    if (!statusFiles.length) { setProgressError("กรุณาแนบภาพยืนยันการนำสินค้า/เศษกลับคลังอย่างน้อย 1 รูป"); return; }
+    if (!statusFiles.length) { reportProgressError("กรุณาแนบภาพยืนยันการนำสินค้า/เศษกลับคลังอย่างน้อย 1 รูป"); return; }
     if (demoMode) {
       const photoPaths = statusFiles.map((item) => item.url);
       setWorkProgress((current) => ({
@@ -590,7 +595,7 @@ export default function TechnicianWorkspacePage({ params }: { params: Promise<{ 
       await reloadProgress(selected.assignmentId);
     } catch (error) {
       if (paths.length) await supabase.storage.from("job-photos").remove(paths);
-      setProgressError(floorActionError("บันทึกการนำสินค้ากลับคลัง", error));
+      reportProgressError(floorActionError("บันทึกการนำสินค้ากลับคลัง", error));
     }
     setSaving(false);
   }

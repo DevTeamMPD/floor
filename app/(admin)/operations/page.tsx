@@ -13,6 +13,7 @@ import { chatButtonLabel, chatDialogTitle, requestActionLabel, requestTarget } f
 import LendiSkeleton from "@/components/brand/lendi-skeleton";
 import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
 import { WORK_ITEM_CATEGORY_LABELS, WORK_ORDER_STATUS_LABELS, type WorkOrder, type WorkOrderItem, workOrderStatusClass } from "@/lib/work-orders";
+import { notifyError } from "@/lib/notify-error";
 
 interface Team { id: string; name: string }
 interface Job { job_no: string; source: string | null; bill_no: string | null; customer_name: string | null; customer_phone: string | null; address: string | null; location_url: string | null; product_name: string | null; status: string | null; flag_note: string | null; survey_data: string | null; site_photos: string[] | null }
@@ -48,23 +49,23 @@ export default function OperationsPage() {
     // FloorNow is temporarily shared-operation mode: any active signed-in staff can act.
     setCanAct(Boolean(profileResult.data));
     setCanCloseWork(user?.email?.trim().toLowerCase() === "supakrit.k@mpdgroup.co");
-    const error = appointmentResult.error ?? teamResult.error ?? technicianResult.error ?? assignmentResult.error ?? orderResult.error; if (error) toast.error(`โหลดงานไม่ครบ: ${floorErrorMessage(error)}`);
+    const error = appointmentResult.error ?? teamResult.error ?? technicianResult.error ?? assignmentResult.error ?? orderResult.error; if (error) notifyError(`โหลดงานไม่ครบ: ${floorErrorMessage(error)}`);
     const orderRows = (orderResult.data ?? []) as WorkOrder[]; setAppointments((appointmentResult.data ?? []) as unknown as Appointment[]); setTeams((teamResult.data ?? []) as Team[]); setTechnicians((technicianResult.data ?? []) as TechWithToken[]); setAssignments((assignmentResult.data ?? []) as TechnicianAssignment[]); setOrders(orderRows);
     if (orderRows.length) { const { data } = await supabase.from("floor_work_order_items").select("*").in("work_order_id", orderRows.map((row) => row.id)).order("sort_order"); setItems((data ?? []) as WorkOrderItem[]); } else setItems([]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "ไม่สามารถโหลดข้อมูลได้";
       setLoadError(message);
-      toast.error(`โหลดข้อมูลไม่สำเร็จ: ${message}`);
+      notifyError(`โหลดข้อมูลไม่สำเร็จ: ${message}`);
     } finally { setLoading(false); }
   }, [supabase]);
   useEffect(() => { void load(); }, [load]);
-  async function copyLink(token: string) { if (!canAct) { toast.error("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; } await navigator.clipboard.writeText(`${window.location.origin}/work/${token}`); toast.success("คัดลอกลิงก์ช่างแล้ว"); }
+  async function copyLink(token: string) { if (!canAct) { notifyError("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; } await navigator.clipboard.writeText(`${window.location.origin}/work/${token}`); toast.success("คัดลอกลิงก์ช่างแล้ว"); }
   async function returnToSales(workOrderId: string, source: string | null | undefined, suppliedReason?: string) {
-    if (!canAct) { toast.error("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; }
+    if (!canAct) { notifyError("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; }
     const reason = suppliedReason?.trim() || window.prompt(source === "bbps" ? "ระบุข้อมูลที่ต้องการให้ BBPS แก้ไข" : "ระบุข้อมูลที่ต้องการให้ฝ่ายขายแก้ไข");
     if (!reason?.trim()) return;
     const { error } = await supabase.rpc("return_floor_work_order_v3", { p_work_order_id: workOrderId, p_reason: reason.trim() });
-    if (error) toast.error(floorErrorMessage(error)); else {
+    if (error) notifyError(error); else {
       // The work order deliberately remains in returned_sales until its source
       // supplies corrected data.  Switch tabs immediately so the same card and
       // its reason remain visible instead of appearing to disappear.
@@ -92,7 +93,7 @@ export default function OperationsPage() {
         if (confirmed) await closeWork(workOrder, reason, true);
         return;
       }
-      toast.error(`สิ้นสุดงานไม่สำเร็จ: ${message}`);
+      notifyError(`สิ้นสุดงานไม่สำเร็จ: ${message}`);
       setClosingWork(false);
       return;
     }

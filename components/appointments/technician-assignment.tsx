@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { FloorTechnician, TechnicianAssignment } from "@/lib/technicians";
 import { assignmentEvidenceLabel } from "@/lib/technicians";
 import { floorErrorMessage } from "@/lib/floor-error-message";
+import { notifyError } from "@/lib/notify-error";
 
 interface Team { id: string; name: string }
 interface Props {
@@ -48,8 +49,8 @@ export default function TechnicianAssignmentButton({ appointmentId, appointmentT
   }
 
   async function save() {
-    if (!canManage) { toast.error("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; }
-    if (!selected.length) { toast.error("กรุณาเลือกช่างอย่างน้อย 1 คน"); return; }
+    if (!canManage) { notifyError("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; }
+    if (!selected.length) { notifyError("กรุณาเลือกช่างอย่างน้อย 1 คน"); return; }
     const actualLead = selected.includes(leadId) ? leadId : selected[0];
     setSaving(true);
     const now = new Date().toISOString();
@@ -61,17 +62,17 @@ export default function TechnicianAssignmentButton({ appointmentId, appointmentT
     const removed = active.filter((a) => !selected.includes(a.technician_id)).map((a) => a.id);
     const { error: upsertError } = await supabase.from("appointment_technicians")
       .upsert(rows, { onConflict: "appointment_id,technician_id" });
-    if (upsertError) { toast.error(upsertError.message); setSaving(false); return; }
+    if (upsertError) { notifyError(upsertError); setSaving(false); return; }
     if (removed.length) {
       const { error } = await supabase.from("appointment_technicians")
         .update({ is_active: false, revoked_at: now, is_lead: false }).in("id", removed);
-      if (error) { toast.error(floorErrorMessage(error)); setSaving(false); return; }
+      if (error) { notifyError(error); setSaving(false); return; }
     }
     if (jobNo) {
       const names = selected.map((id) => technicians.find((t) => t.id === id)?.name).filter((x): x is string => Boolean(x));
       const { error: summaryError } = await supabase.from("install_jobs").update({ assignees: names, updated_at: now }).eq("job_no", jobNo);
       if (summaryError) {
-        toast.error(`จ่ายงานให้ช่างแล้ว แต่บันทึกรายชื่อสรุปในใบงานไม่สำเร็จ: ${floorErrorMessage(summaryError)}`);
+        notifyError(`จ่ายงานให้ช่างแล้ว แต่บันทึกรายชื่อสรุปในใบงานไม่สำเร็จ: ${floorErrorMessage(summaryError)}`);
         setOpen(false); setSaving(false); onChanged();
         return;
       }

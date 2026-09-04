@@ -4,6 +4,8 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { pinLoginEmail } from "@/lib/pin-auth";
+import { notifyError } from "@/lib/notify-error";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 
 export default function LoginPage() {
   const supabase = useMemo(() => createClient(), []);
@@ -18,6 +20,7 @@ export default function LoginPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLocalPreview, setIsLocalPreview] = useState(false);
+  function reportError(text: string) { setError(text); notifyError(text); }
 
   useEffect(() => {
     setIsLocalPreview(["localhost", "127.0.0.1"].includes(window.location.hostname));
@@ -44,13 +47,13 @@ export default function LoginPage() {
       }
       const signInEmail = mode === "pin" ? pinLoginEmail(pinUsername) : email.trim();
       const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email: signInEmail, password });
-      if (signInError) setError(mode === "pin" ? "ชื่อผู้ใช้หรือ PIN ไม่ถูกต้อง" : "อีเมลหรือรหัสผ่านไม่ถูกต้อง");
+      if (signInError) reportError(mode === "pin" ? "ชื่อผู้ใช้หรือ PIN ไม่ถูกต้อง" : "อีเมลหรือรหัสผ่านไม่ถูกต้อง");
       else {
         if (mode === "login") {
           const { error: activationError } = await supabase.rpc("activate_floor_staff_account");
           if (activationError) {
             await supabase.auth.signOut();
-            setError(activationError.message.includes("active HR employee") ? "ไม่พบบัญชีพนักงาน Active/Probation ที่เชื่อมกับอีเมลนี้ กรุณาติดต่อผู้ดูแลระบบ" : "บัญชีนี้ยังไม่พร้อมใช้งาน LENDI Engineering");
+            reportError(activationError.message.includes("active HR employee") ? "ไม่พบบัญชีพนักงาน Active/Probation ที่เชื่อมกับอีเมลนี้ กรุณาติดต่อผู้ดูแลระบบ" : "บัญชีนี้ยังไม่พร้อมใช้งาน LENDI Engineering");
             setBusy(false);
             return;
           }
@@ -58,7 +61,7 @@ export default function LoginPage() {
         const { data: profile } = await supabase.from("floor_staff_profiles").select("is_active,access_scope").eq("id", signInData.user.id).maybeSingle();
         if (!profile?.is_active) {
           await supabase.auth.signOut();
-          setError("บัญชีนี้ถูกปิดใช้งาน กรุณาติดต่อผู้ดูแลระบบ");
+          reportError("บัญชีนี้ถูกปิดใช้งาน กรุณาติดต่อผู้ดูแลระบบ");
           setBusy(false);
           return;
         }
@@ -68,7 +71,7 @@ export default function LoginPage() {
       }
     } else {
       if (password.length < 8) {
-        setError("รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร");
+        reportError("รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร");
         setBusy(false);
         return;
       }
@@ -78,12 +81,12 @@ export default function LoginPage() {
         password,
         options: { data: { full_name: fullName.trim() }, emailRedirectTo: callback },
       });
-      if (signUpError) setError(signUpError.message.includes("invited") ? "อีเมลนี้ยังไม่ได้รับเชิญจากผู้ดูแลระบบ" : signUpError.message);
+      if (signUpError) reportError(signUpError.message.includes("invited") ? "อีเมลนี้ยังไม่ได้รับเชิญจากผู้ดูแลระบบ" : floorErrorMessage(signUpError));
       else if (data.session) {
         const { error: activationError } = await supabase.rpc("activate_floor_staff_account");
         if (activationError) {
           await supabase.auth.signOut();
-          setError(activationError.message.includes("active HR employee") ? "ไม่พบบัญชีพนักงาน Active/Probation ที่เชื่อมกับอีเมลนี้ กรุณาติดต่อผู้ดูแลระบบ" : activationError.message);
+          reportError(activationError.message.includes("active HR employee") ? "ไม่พบบัญชีพนักงาน Active/Probation ที่เชื่อมกับอีเมลนี้ กรุณาติดต่อผู้ดูแลระบบ" : floorErrorMessage(activationError));
           setBusy(false);
           return;
         }

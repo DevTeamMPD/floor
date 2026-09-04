@@ -6,7 +6,7 @@ import { Bell, BellRing, CheckCheck, Smartphone } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { canUseWebPush, getPushAvailability, subscribeBrowserToPush, type PushAvailability } from "@/lib/push-client";
 import { toast } from "sonner";
-import { floorActionError } from "@/lib/floor-error-message";
+import { notifyError } from "@/lib/notify-error";
 
 interface NotificationRow {
   id: number;
@@ -75,8 +75,8 @@ export default function NotificationCenter() {
     const availability = getPushAvailability();
     setPushAvailability(availability);
     if (availability === "ios-install-required") { setShowInstallHelp(true); return; }
-    if (availability === "permission-denied") { toast.error("สิทธิ์แจ้งเตือนถูกปิด กรุณาเปิดที่ Settings > Notifications > FloorNow"); return; }
-    if (availability === "unsupported") { toast.error("เบราว์เซอร์เครื่องนี้ไม่รองรับ Web Push"); return; }
+    if (availability === "permission-denied") { notifyError("สิทธิ์แจ้งเตือนถูกปิด กรุณาเปิดที่ Settings > Notifications > FloorNow"); return; }
+    if (availability === "unsupported") { notifyError("เบราว์เซอร์เครื่องนี้ไม่รองรับ Web Push"); return; }
     setPushBusy(true);
     try {
       const subscription = await subscribeBrowserToPush();
@@ -97,7 +97,7 @@ export default function NotificationCenter() {
       setPushReady(true);
       toast.success("มือถือเครื่องนี้พร้อมรับการแจ้งเตือนแล้ว");
     } catch (error) {
-      toast.error(floorActionError("เปิดการแจ้งเตือน", error));
+      notifyError(error, "เปิดการแจ้งเตือน");
     } finally { setPushBusy(false); }
   }
 

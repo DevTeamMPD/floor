@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
-import { floorErrorMessage } from "@/lib/floor-error-message";
+import { notifyError } from "@/lib/notify-error";
 
 interface Supplier {
   id: string;
@@ -124,7 +124,7 @@ export default function PurchaseOrdersPage() {
   }
 
   async function savePo() {
-    if (poItems.length === 0) { toast.error('กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ'); return; }
+    if (poItems.length === 0) { notifyError('กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ'); return; }
     setSaving(true);
     const total = poItems.reduce((s, it) => s + it.qty_ordered * it.unit_price, 0);
     const { data: poData, error: poErr } = await supabase.from('purchase_orders').insert({
@@ -135,20 +135,20 @@ export default function PurchaseOrdersPage() {
       total_amount: total,
       notes: poForm.notes || null,
     }).select().single();
-    if (poErr || !poData) { setSaving(false); toast.error(poErr?.message ?? 'Error'); return; }
+    if (poErr || !poData) { setSaving(false); notifyError(poErr?.message ?? 'Error'); return; }
 
     const { error: itemErr } = await supabase.from('po_items').insert(
       poItems.map((it) => ({ po_id: poData.id, material_id: it.material_id, qty_ordered: it.qty_ordered, qty_received: 0, unit_price: it.unit_price, note: it.note || null }))
     );
     setSaving(false);
-    if (itemErr) { toast.error(itemErr.message); return; }
+    if (itemErr) { notifyError(itemErr); return; }
     toast.success(`สร้าง ${poData.po_number} เรียบร้อย`);
     setShowCreate(false);
     load();
   }
 
   async function saveSupplier() {
-    if (!supForm.name.trim()) { toast.error('กรุณาระบุชื่อ Supplier'); return; }
+    if (!supForm.name.trim()) { notifyError('กรุณาระบุชื่อ Supplier'); return; }
     setSaving(true);
     const { error } = await supabase.from('suppliers').insert({
       name: supForm.name.trim(),
@@ -158,7 +158,7 @@ export default function PurchaseOrdersPage() {
       payment_terms: supForm.payment_terms.trim() || null,
     });
     setSaving(false);
-    if (error) { toast.error(floorErrorMessage(error)); return; }
+    if (error) { notifyError(error); return; }
     toast.success('เพิ่ม Supplier เรียบร้อย');
     setShowAddSupplier(false);
     setSupForm({ name: '', contact_name: '', phone: '', lead_time_days: '', payment_terms: '' });

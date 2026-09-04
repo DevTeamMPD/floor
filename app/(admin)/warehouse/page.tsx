@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { floorErrorMessage } from "@/lib/floor-error-message";
 import { createClient } from "@/lib/supabase/client";
 import { WORK_ORDER_STATUS_LABELS, type WorkOrder, type WorkOrderEvent, type WorkOrderItem, workOrderStatusClass } from "@/lib/work-orders";
 import TicketChatMock from "@/components/tickets/ticket-chat-mock";
 import { ImageLightbox } from "@/components/ui/image-lightbox";
+import { notifyError } from "@/lib/notify-error";
 
 interface Job { job_no: string; customer_name: string | null; product_name: string | null; address: string | null; bill_no: string | null }
 interface Appointment { id: string; slot_start: string; slot_end: string; tech_id: string | null }
@@ -40,7 +40,7 @@ export default function WarehouseWorkspacePage() {
       setEvents([]); setCanAct(true); setLoading(false); return;
     }
     setLoading(true); const { data: orderRows, error } = await supabase.from("floor_work_orders").select("*").in("status", ["warehouse_waiting", "warehouse_preparing", "ready_to_install"]).order("updated_at");
-    if (error) { toast.error(floorErrorMessage(error)); setLoading(false); return; }
+    if (error) { notifyError(error); setLoading(false); return; }
     const rows = (orderRows ?? []) as WorkOrder[]; setOrders(rows);
     const { data: { user } } = await supabase.auth.getUser();
     const [jobResult, apptResult, staffResult, itemResult, eventResult, profileResult] = await Promise.all([
@@ -59,7 +59,7 @@ export default function WarehouseWorkspacePage() {
   useEffect(() => () => { warehouseFilesRef.current.forEach((item) => URL.revokeObjectURL(item.url)); }, []);
   useEffect(() => { evidenceFilesRef.current = evidenceNewFiles; }, [evidenceNewFiles]);
   useEffect(() => () => { evidenceFilesRef.current.forEach((item) => URL.revokeObjectURL(item.url)); }, []);
-  async function accept(id: string) { if (!canAct) { toast.error("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; } if (isLocalDemo) { setOrders((rows) => rows.map((order) => order.id === id ? { ...order, status: "warehouse_preparing", warehouse_assignee_id: "demo-warehouse", warehouse_accepted_at: new Date().toISOString() } : order)); toast.success("รับงานแล้ว (ข้อมูลจำลอง)"); return; } setSaving(id); const { error } = await supabase.rpc("accept_floor_warehouse_order_v2", { p_work_order_id: id }); setSaving(null); if (error) toast.error(floorErrorMessage(error)); else { toast.success("รับงานแล้ว"); void load(); } }
+  async function accept(id: string) { if (!canAct) { notifyError("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; } if (isLocalDemo) { setOrders((rows) => rows.map((order) => order.id === id ? { ...order, status: "warehouse_preparing", warehouse_assignee_id: "demo-warehouse", warehouse_accepted_at: new Date().toISOString() } : order)); toast.success("รับงานแล้ว (ข้อมูลจำลอง)"); return; } setSaving(id); const { error } = await supabase.rpc("accept_floor_warehouse_order_v2", { p_work_order_id: id }); setSaving(null); if (error) notifyError(error); else { toast.success("รับงานแล้ว"); void load(); } }
   function openPlan(id: string) {
     const orderItems = items.filter((item) => item.work_order_id === id);
     setActualQty(Object.fromEntries(orderItems.map((item) => [item.id, String(item.actual_qty ?? item.planned_qty)])));
@@ -67,7 +67,7 @@ export default function WarehouseWorkspacePage() {
   }
   function addWarehouseFiles(files: FileList | null) {
     const added = Array.from(files ?? []).filter((file) => file.type.startsWith("image/")).map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) }));
-    if (!added.length) { toast.error("เลือกได้เฉพาะไฟล์รูปภาพ"); return; }
+    if (!added.length) { notifyError("เลือกได้เฉพาะไฟล์รูปภาพ"); return; }
     setWarehouseFiles((current) => [...current, ...added]);
   }
   function removeWarehouseFile(id: string) { setWarehouseFiles((current) => { const target = current.find((item) => item.id === id); if (target) URL.revokeObjectURL(target.url); return current.filter((item) => item.id !== id); }); }
@@ -76,15 +76,15 @@ export default function WarehouseWorkspacePage() {
   function cancelEvidenceEdit() { evidenceFilesRef.current.forEach((item) => URL.revokeObjectURL(item.url)); setEvidenceNewFiles([]); setEvidenceEditing(false); }
   function addEvidenceFiles(files: FileList | null) {
     const added = Array.from(files ?? []).filter((file) => file.type.startsWith("image/")).map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) }));
-    if (!added.length) { toast.error("เลือกได้เฉพาะไฟล์รูปภาพ"); return; }
+    if (!added.length) { notifyError("เลือกได้เฉพาะไฟล์รูปภาพ"); return; }
     setEvidenceNewFiles((current) => [...current, ...added]);
   }
   function removeEvidenceNewFile(id: string) { setEvidenceNewFiles((current) => { const target = current.find((item) => item.id === id); if (target) URL.revokeObjectURL(target.url); return current.filter((item) => item.id !== id); }); }
   function removeEvidenceKeptPath(path: string) { setEvidenceKeptPaths((current) => current.filter((item) => item !== path)); }
   async function saveEvidenceEdit() {
     if (!planOrder) return;
-    if (!canAct) { toast.error("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; }
-    if (!evidenceKeptPaths.length && !evidenceNewFiles.length) { toast.error("ต้องมีรูปหลักฐานอย่างน้อย 1 รูป"); return; }
+    if (!canAct) { notifyError("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; }
+    if (!evidenceKeptPaths.length && !evidenceNewFiles.length) { notifyError("ต้องมีรูปหลักฐานอย่างน้อย 1 รูป"); return; }
     if (isLocalDemo) {
       const newPaths = evidenceNewFiles.map((item) => item.url);
       setEvents((rows) => [...rows, { id: Date.now(), work_order_id: planOrder.id, event_type: "warehouse_evidence_updated", from_status: planOrder.status, to_status: planOrder.status, actor_name: "คลังสินค้า (จำลอง)", note: evidenceNote.trim() || null, photo_paths: [...evidenceKeptPaths, ...newPaths], metadata: {}, occurred_at: new Date().toISOString() }]);
@@ -95,29 +95,29 @@ export default function WarehouseWorkspacePage() {
       const file = evidenceNewFiles[index].file; const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
       const path = `work-orders/${planOrder.id}/warehouse/${Date.now()}-${index}-${safe}`;
       const { error } = await supabase.storage.from("job-photos").upload(path, file);
-      if (error) { toast.error(floorErrorMessage(error)); setEvidenceSaving(false); return; }
+      if (error) { notifyError(error); setEvidenceSaving(false); return; }
       uploaded.push(path);
     }
     const { error } = await supabase.rpc("update_floor_warehouse_evidence_photos", { p_work_order_id: planOrder.id, p_photo_paths: [...evidenceKeptPaths, ...uploaded], p_note: evidenceNote.trim() || null });
     setEvidenceSaving(false);
-    if (error) { toast.error(floorErrorMessage(error)); return; }
+    if (error) { notifyError(error); return; }
     toast.success("แก้ไขรูปหลักฐานแล้ว"); evidenceFilesRef.current.forEach((item) => URL.revokeObjectURL(item.url)); setEvidenceNewFiles([]); setEvidenceEditing(false); void load();
   }
   async function completeWarehouse() {
     if (!planOrder) return;
-    if (!canAct) { toast.error("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; }
-    if (planItems.some((item) => actualQty[item.id] === "" || !Number.isFinite(Number(actualQty[item.id])) || Number(actualQty[item.id]) < 0)) { toast.error("กรอกจำนวนที่คลังจัดจริงให้ครบทุกรายการ"); return; }
-    if (!warehouseFiles.length) { toast.error("ต้องแนบภาพสินค้าที่คลังเตรียมอย่างน้อย 1 รูป"); return; }
+    if (!canAct) { notifyError("กรุณาเข้าสู่ระบบด้วยบัญชีพนักงานที่ Active"); return; }
+    if (planItems.some((item) => actualQty[item.id] === "" || !Number.isFinite(Number(actualQty[item.id])) || Number(actualQty[item.id]) < 0)) { notifyError("กรอกจำนวนที่คลังจัดจริงให้ครบทุกรายการ"); return; }
+    if (!warehouseFiles.length) { notifyError("ต้องแนบภาพสินค้าที่คลังเตรียมอย่างน้อย 1 รูป"); return; }
     if (isLocalDemo) {
       setItems((rows) => rows.map((item) => item.work_order_id === planOrder.id ? { ...item, actual_qty: Number(actualQty[item.id]) } : item));
       setOrders((rows) => rows.map((order) => order.id === planOrder.id ? { ...order, status: "ready_to_install", warehouse_completed_at: new Date().toISOString(), note: [order.note, warehouseNote.trim() ? `คลัง: ${warehouseNote.trim()}` : ""].filter(Boolean).join("\n") } : order));
       clearWarehouseFiles(); setPlanOrderId(null); toast.success("บันทึกจำนวนและรูปแล้ว · ย้ายงานไปรอติดตั้ง (ข้อมูลจำลอง)"); return;
     }
     setSaving(planOrder.id); const paths: string[] = [];
-    for (let index = 0; index < warehouseFiles.length; index++) { const file = warehouseFiles[index].file; const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-"); const path = `work-orders/${planOrder.id}/warehouse/${Date.now()}-${index}-${safe}`; const { error } = await supabase.storage.from("job-photos").upload(path, file); if (error) { toast.error(floorErrorMessage(error)); setSaving(null); return; } paths.push(path); }
+    for (let index = 0; index < warehouseFiles.length; index++) { const file = warehouseFiles[index].file; const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-"); const path = `work-orders/${planOrder.id}/warehouse/${Date.now()}-${index}-${safe}`; const { error } = await supabase.storage.from("job-photos").upload(path, file); if (error) { notifyError(error); setSaving(null); return; } paths.push(path); }
     const { error } = await supabase.rpc("complete_floor_warehouse_order_v2", { p_work_order_id: planOrder.id, p_actual_items: planItems.map((item) => ({ id: item.id, actualQty: Number(actualQty[item.id]) })), p_photo_paths: paths, p_note: warehouseNote.trim() || null });
     setSaving(null);
-    if (error) { toast.error(floorErrorMessage(error)); return; }
+    if (error) { notifyError(error); return; }
     toast.success("บันทึกจำนวนและรูปแล้ว · ย้ายงานไปรอติดตั้ง"); clearWarehouseFiles(); setPlanOrderId(null); void load();
   }
   const columns = ["warehouse_waiting", "warehouse_preparing", "ready_to_install"] as const;

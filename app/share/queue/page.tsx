@@ -4,13 +4,14 @@ import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { ipGenOrderNo } from "@/lib/utils";
-import { floorActionError, floorErrorMessage } from "@/lib/floor-error-message";
+import { floorErrorMessage } from "@/lib/floor-error-message";
 import { CUT_TYPES, WELD_TYPES, FINISH_TYPES, FLOOR_CONDITIONS, EMPTY_SURVEY, surveyHasData, type SurveyData } from "@/lib/survey";
 import { WORK_ORDER_STATUS_LABELS, workOrderEventLabel, workOrderStatusClass, type WorkOrderStatus } from "@/lib/work-orders";
 import BbpsWorkOrderDetails from "@/components/tech-queue/bbps-work-order-details";
 import TicketChat from "@/components/tickets/ticket-chat";
 import LendiSkeleton from "@/components/brand/lendi-skeleton";
 import { canBypassBookingPolicy, enableHolidayBooking, hasUnrestrictedHolidayBookingPrivilege, isHolidayBooking } from "@/lib/booking-policy";
+import { notifyError } from "@/lib/notify-error";
 
 interface Team { id: string; name: string }
 interface Appt {
@@ -809,7 +810,7 @@ export default function ShareQueuePage() {
       }
       setForm((f) => f ? { ...f, survey: { ...f.survey, photos: [...(f.survey.photos ?? []), ...added] } } : f);
     } catch (e: unknown) {
-      alert(floorActionError("อัปโหลดรูป", e));
+      notifyError(e, "อัปโหลดรูป");
     }
     setUploading(false);
   }
@@ -827,13 +828,13 @@ export default function ShareQueuePage() {
   function setSurvey(patch: Partial<SurveyData>) { setForm((f) => f ? { ...f, survey: { ...f.survey, ...patch } } : f); }
 
   async function save() {
-    if (!canSell) { alert("บัญชีนี้ดูข้อมูลได้ แต่ไม่มีสิทธิ์ลงคิวหรือแก้ไขข้อมูลฝ่ายขาย"); return; }
+    if (!canSell) { notifyError("บัญชีนี้ดูข้อมูลได้ แต่ไม่มีสิทธิ์ลงคิวหรือแก้ไขข้อมูลฝ่ายขาย"); return; }
     if (!form) return;
-    if (!form.tech_id) { alert("กรุณาเลือกทีมช่าง"); return; }
-    if (!form.date) { alert("กรุณาเลือกวันที่"); return; }
+    if (!form.tech_id) { notifyError("กรุณาเลือกทีมช่าง"); return; }
+    if (!form.date) { notifyError("กรุณาเลือกวันที่"); return; }
     const dateRuleError = bookingRuleError(form, teams.find((team) => team.id === form.tech_id), canBypassBookingRules);
     if (dateRuleError) { setBookingNotice({ title: "ยังบันทึกคิวไม่ได้", message: dateRuleError }); return; }
-    if ((form.end || "12:00") <= (form.start || "09:00")) { alert("เวลาสิ้นสุดต้องหลังเวลาเริ่ม"); return; }
+    if ((form.end || "12:00") <= (form.start || "09:00")) { notifyError("เวลาสิ้นสุดต้องหลังเวลาเริ่ม"); return; }
     const holidayMode = isHolidayBooking(form);
     if (!holidayMode) {
       const missing: string[] = [];
@@ -843,10 +844,10 @@ export default function ShareQueuePage() {
       if (!form.address.trim() && !form.location_url.trim()) missing.push("ที่อยู่หรือ Google Maps");
       if (!form.requirement.trim()) missing.push("Requirement/สเปก");
       if (!form.survey.areaSqm.trim()) missing.push("พื้นที่ติดตั้ง");
-      if (missing.length) { if (missing.includes("พื้นที่ติดตั้ง")) setShowSurvey(true); alert(`กรุณากรอกข้อมูลสำคัญให้ครบ:\n• ${missing.join("\n• ")}`); return; }
+      if (missing.length) { if (missing.includes("พื้นที่ติดตั้ง")) setShowSurvey(true); notifyError(`กรุณากรอกข้อมูลสำคัญให้ครบ:\n• ${missing.join("\n• ")}`); return; }
       if (!/^\d+(?:\.\d+)?$/.test(form.survey.areaSqm.trim())) {
         setShowSurvey(true);
-        alert("พื้นที่ติดตั้งต้องเป็นตัวเลข เช่น 22 หรือ 22.5 ตร.ม.\nกรณีเป็นงานแก้ไข ให้ใส่รายละเอียดไว้ใน ‘หมายเหตุสำรวจ’");
+        notifyError("พื้นที่ติดตั้งต้องเป็นตัวเลข เช่น 22 หรือ 22.5 ตร.ม.\nกรณีเป็นงานแก้ไข ให้ใส่รายละเอียดไว้ใน ‘หมายเหตุสำรวจ’");
         return;
       }
     }
@@ -874,7 +875,7 @@ export default function ShareQueuePage() {
           clashes.push(`${new Date(d).toLocaleDateString("th-TH", { day: "numeric", month: "short" })} — ชนกับ ${fmtTime(c.slot_start)}–${fmtTime(c.slot_end)} น. · ${who}`);
         }
       }
-      if (clashes.length) { setSaving(false); alert(`⚠️ ทีมนี้มีคิวชนกัน:\n${clashes.join("\n")}\n\nกรุณาเลือกทีม/เวลาอื่น`); return; }
+      if (clashes.length) { setSaving(false); notifyError(`⚠️ ทีมนี้มีคิวชนกัน:\n${clashes.join("\n")}\n\nกรุณาเลือกทีม/เวลาอื่น`); return; }
 
       // เปิดบิล = สร้าง ticket (install_jobs) เมื่อมีเลขบิลหรือชื่อลูกค้า และไม่ใช่วันหยุด
       const isCustomerJob = !!(form.bill_no.trim() || form.customer_name.trim());
@@ -959,13 +960,13 @@ export default function ShareQueuePage() {
         alert("บันทึกข้อมูลและส่งกลับให้หัวหน้าช่างตรวจใหม่แล้ว");
       }
     } catch (e: unknown) {
-      alert(floorActionError("บันทึกคิว / เปิดบิล", e));
+      notifyError(e, "บันทึกคิว / เปิดบิล");
     }
     setSaving(false);
   }
 
   async function setStatus(a: Appt, status: "proposed" | "confirmed") {
-    if (!canDecide) { alert("เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่เปลี่ยนสถานะคิวได้"); return; }
+    if (!canDecide) { notifyError("เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่เปลี่ยนสถานะคิวได้"); return; }
     if (a.status === status) return;
     setUpdatingStatus(true);
     const confirmedAt = status === "confirmed" ? new Date().toISOString() : null;
@@ -973,7 +974,7 @@ export default function ShareQueuePage() {
     const { error } = a.job_id
       ? await query.eq("job_id", a.job_id).neq("status", "cancelled")
       : await query.eq("id", a.id);
-    if (error) { alert(floorActionError("อัปเดตสถานะคิว", error)); setUpdatingStatus(false); return; }
+    if (error) { notifyError(error, "อัปเดตสถานะคิว"); setUpdatingStatus(false); return; }
     if (a.job_id) {
       const nextJobStatus = status === "confirmed" ? "ยืนยันคิวแล้ว" : "รอหัวหน้าช่างยืนยัน";
       const { error: jobError } = await supabase.from("install_jobs").update({
@@ -983,7 +984,7 @@ export default function ShareQueuePage() {
         flag_note: null,
         updated_at: new Date().toISOString(),
       }).eq("job_no", a.job_id);
-      if (jobError) { alert(`อัปเดตสถานะคิวแล้ว แต่ปรับข้อมูลใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); setUpdatingStatus(false); await load(); return; }
+      if (jobError) { notifyError(`อัปเดตสถานะคิวแล้ว แต่ปรับข้อมูลใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); setUpdatingStatus(false); await load(); return; }
       await supabase.from("job_activity").insert({
         job_no: a.job_id, actor: "หัวหน้าช่าง", action: status === "confirmed" ? "confirm" : "reopen",
         field: "status", old_value: detailJob?.status ?? null, new_value: nextJobStatus,
@@ -1009,7 +1010,7 @@ export default function ShareQueuePage() {
       }
       setCustomerSummary((current) => ({ ...current, photos: [...current.photos, ...added] }));
     } catch (error: unknown) {
-      alert(floorActionError("อัปโหลดภาพสรุปสำหรับลูกค้า", error));
+      notifyError(error, "อัปโหลดภาพสรุปสำหรับลูกค้า");
     } finally {
       setCustomerSummaryUploading(false);
     }
@@ -1028,7 +1029,7 @@ export default function ShareQueuePage() {
       setDetailJob({ ...detailJob, survey_data: JSON.stringify({ ...survey, customerSummary: nextSummary }) });
       setShowCustomerSummary(false);
     } catch (error: unknown) {
-      alert(floorActionError("บันทึกภาพสรุปสำหรับลูกค้า", error));
+      notifyError(error, "บันทึกภาพสรุปสำหรับลูกค้า");
     } finally {
       setCustomerSummarySaving(false);
     }
@@ -1036,19 +1037,19 @@ export default function ShareQueuePage() {
 
   async function copyCustomerStatusLink() {
     if (!detailWorkOrder?.external_share_token || !detailWorkOrder.external_share_enabled) {
-      alert("งานนี้ยังไม่มีลิงก์ลูกค้าที่เปิดใช้งาน\nกรุณายืนยันใบสั่งงานก่อน แล้วกลับมาคัดลอกลิงก์ได้จากหน้านี้");
+      notifyError("งานนี้ยังไม่มีลิงก์ลูกค้าที่เปิดใช้งาน\nกรุณายืนยันใบสั่งงานก่อน แล้วกลับมาคัดลอกลิงก์ได้จากหน้านี้");
       return;
     }
     try {
       await navigator.clipboard.writeText(`${window.location.origin}/status/${detailWorkOrder.external_share_token}`);
       alert("คัดลอกลิงก์ติดตามงานสำหรับลูกค้าแล้ว");
     } catch {
-      alert("คัดลอกลิงก์ไม่สำเร็จ กรุณาอนุญาต Clipboard ในเบราว์เซอร์แล้วลองอีกครั้ง");
+      notifyError("คัดลอกลิงก์ไม่สำเร็จ กรุณาอนุญาต Clipboard ในเบราว์เซอร์แล้วลองอีกครั้ง");
     }
   }
 
   async function sendBack(a: Appt) {
-    if (!canDecide) { alert("เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่ส่งงานกลับได้"); return; }
+    if (!canDecide) { notifyError("เฉพาะหัวหน้าช่างหรือผู้ดูแลระบบเท่านั้นที่ส่งงานกลับได้"); return; }
     if (!a.job_id) return;
     const reason = window.prompt("ระบุข้อมูลที่ต้องให้ฝ่ายขายแก้ไข");
     if (!reason?.trim()) return;
@@ -1062,7 +1063,7 @@ export default function ShareQueuePage() {
     ]);
     if (apptError || jobError) {
       const failed = [apptError ? `ปรับสถานะคิว: ${floorErrorMessage(apptError)}` : null, jobError ? `ปรับสถานะใบงาน: ${floorErrorMessage(jobError)}` : null].filter(Boolean).join("\n");
-      alert(`ส่งงานกลับฝ่ายขายไม่ครบ\n${failed}\nกรุณารีเฟรชเพื่อตรวจสอบสถานะก่อนทำซ้ำ`);
+      notifyError(`ส่งงานกลับฝ่ายขายไม่ครบ\n${failed}\nกรุณารีเฟรชเพื่อตรวจสอบสถานะก่อนทำซ้ำ`);
       await load();
       return;
     }
@@ -1075,10 +1076,10 @@ export default function ShareQueuePage() {
   }
 
   async function remove(a: Appt) {
-    if (!canSell) { alert("เฉพาะฝ่ายขายหรือผู้ดูแลระบบเท่านั้นที่ยกเลิกคิวได้"); return; }
+    if (!canSell) { notifyError("เฉพาะฝ่ายขายหรือผู้ดูแลระบบเท่านั้นที่ยกเลิกคิวได้"); return; }
     if (!window.confirm("ยกเลิกคิวนี้? ประวัติรายการจะยังถูกเก็บไว้")) return;
     const { error } = await supabase.from("appointments").update({ status: "cancelled" }).eq("id", a.id);
-    if (error) { alert(floorActionError("ยกเลิกคิว", error)); return; }
+    if (error) { notifyError(error, "ยกเลิกคิว"); return; }
     if (a.job_id) {
       const { count } = await supabase.from("appointments")
         .select("id", { count: "exact", head: true }).eq("job_id", a.job_id).neq("status", "cancelled");
@@ -1087,7 +1088,7 @@ export default function ShareQueuePage() {
           status: "ยกเลิกคิว", waiting_on: "ไม่ได้ค้าง", waiting_since: null, updated_at: new Date().toISOString(),
         }).eq("job_no", a.job_id);
         if (jobError) {
-          alert(`ยกเลิกคิวแล้ว แต่ปรับสถานะใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`);
+          notifyError(`ยกเลิกคิวแล้ว แต่ปรับสถานะใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`);
           setDetail(null);
           await load();
           return;

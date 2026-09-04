@@ -3,6 +3,7 @@ import { Fragment, useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { floorErrorMessage } from "@/lib/floor-error-message";
+import { notifyError } from "@/lib/notify-error";
 import {
   normalizeBillReference,
   parseWasteSalesSummary,
@@ -478,7 +479,7 @@ export default function WasteCostPage() {
       .select("job_no,bill_no,order_no,customer_name,customer_phone,address,product_name,appt_date,stage,handover_data")
       .order("created_at", { ascending: false });
     if (jobsError) {
-      toast.error("โหลดใบงานไม่ได้: " + floorErrorMessage(jobsError));
+      notifyError("โหลดใบงานไม่ได้: " + floorErrorMessage(jobsError));
       setLoadingJobs(false);
       return;
     }
@@ -501,7 +502,7 @@ export default function WasteCostPage() {
     ]);
 
     if (exclusionsError) {
-      toast.error("โหลดรายการที่ซ่อนไม่ได้: " + floorErrorMessage(exclusionsError));
+      notifyError("โหลดรายการที่ซ่อนไม่ได้: " + floorErrorMessage(exclusionsError));
     } else {
       const nextExclusions: Record<string, WasteAnalysisExclusion> = {};
       ((exclusionRows ?? []) as WasteAnalysisExclusion[]).forEach((row) => {
@@ -511,7 +512,7 @@ export default function WasteCostPage() {
     }
 
     if (salesResult.error) {
-      toast.error("โหลดยอดขายไม่ได้: " + floorErrorMessage(salesResult.error));
+      notifyError("โหลดยอดขายไม่ได้: " + floorErrorMessage(salesResult.error));
     } else {
       const nextSales: Record<string, WasteSalesSummary> = {};
       ((salesResult.data ?? []) as Record<string, unknown>[]).forEach((row) => {
@@ -552,7 +553,7 @@ export default function WasteCostPage() {
       return;
     }
     const { data, error } = await supabase.from("install_job_zones").select("*").eq("job_no", jobNo).order("created_at");
-    if (error) toast.error("โหลด zone ไม่ได้: " + error.message);
+    if (error) notifyError("โหลด zone ไม่ได้: " + error.message);
     setZones((data ?? []).map(z => ({ ...z, obstacles: (z.obstacles as Obstacle[]) ?? [] })));
   }, [supabase]);
 
@@ -627,7 +628,7 @@ export default function WasteCostPage() {
     const { data, error } = await supabase.from("install_job_zones")
       .insert({ job_no: selectedJobNo, zone_name: `โซน ${idx}`, width_cm: 0, length_cm: 0 }).select().single();
     setAddingZone(false);
-    if (error) { toast.error("เพิ่ม zone ไม่ได้: " + error.message); return; }
+    if (error) { notifyError("เพิ่ม zone ไม่ได้: " + error.message); return; }
     if (data) setZones((prev) => [...prev, data]);
   };
 
@@ -641,12 +642,12 @@ export default function WasteCostPage() {
       .update({ zone_name: zone.zone_name, width_cm: zone.width_cm, length_cm: zone.length_cm })
       .eq("id", zone.id);
     setSavingZone(null);
-    if (error) toast.error("บันทึกไม่ได้: " + error.message);
+    if (error) notifyError("บันทึกไม่ได้: " + error.message);
   };
 
   const deleteZone = async (id: string) => {
     const { error } = await supabase.from("install_job_zones").delete().eq("id", id);
-    if (error) { toast.error("ลบไม่ได้: " + error.message); return; }
+    if (error) { notifyError("ลบไม่ได้: " + error.message); return; }
     setZones((prev) => prev.filter((z) => z.id !== id));
   };
 
@@ -671,7 +672,7 @@ export default function WasteCostPage() {
     const { error } = await supabase.from("install_job_zones")
       .update({ obstacles: zone.obstacles }).eq("id", zone.id);
     setSavingObstacles(null);
-    if (error) toast.error("บันทึกไม่ได้: " + error.message);
+    if (error) notifyError("บันทึกไม่ได้: " + error.message);
     else toast.success("บันทึกตารางแล้ว");
   };
 
@@ -765,7 +766,7 @@ export default function WasteCostPage() {
     const invalidWidth = [...editMats, ...editRets].some((row) =>
       row.widthCm !== "" && (!Number.isFinite(Number(row.widthCm)) || Number(row.widthCm) <= 0));
     if (invalidWidth) {
-      toast.error("ความกว้างต้องเป็นตัวเลขมากกว่า 0 ซม.");
+      notifyError("ความกว้างต้องเป็นตัวเลขมากกว่า 0 ซม.");
       return;
     }
     setSavingHandover(true);
@@ -787,7 +788,7 @@ export default function WasteCostPage() {
     const { error } = await supabase.from("install_jobs")
       .update({ handover_data: jsonStr }).eq("job_no", selectedJobNo);
     setSavingHandover(false);
-    if (error) { toast.error("บันทึกไม่ได้: " + error.message); return; }
+    if (error) { notifyError("บันทึกไม่ได้: " + error.message); return; }
     setJobs((prev) => prev.map((j) => j.job_no === selectedJobNo ? { ...j, handover_data: jsonStr } : j));
     const summary = parseHandoverSummary(jsonStr);
     setStockSummary(summary);
@@ -799,17 +800,17 @@ export default function WasteCostPage() {
   // ── Manual stock movement ─────────────────────────────────────────────────
   const saveMovement = async () => {
     if (!selectedJobNo || !movQty || Number(movQty) <= 0) {
-      toast.error("กรอกจำนวนให้ถูกต้อง (> 0)"); return;
+      notifyError("กรอกจำนวนให้ถูกต้อง (> 0)"); return;
     }
     const matId = movMat === "140" ? mat140?.id : mat110?.id;
-    if (!matId) { toast.error("ไม่พบข้อมูลวัสดุ"); return; }
+    if (!matId) { notifyError("ไม่พบข้อมูลวัสดุ"); return; }
     setSavingMov(true);
     const { error } = await supabase.from("stock_movements").insert({
       material_id: matId, type: movType, qty: Number(movQty),
       ref_job_no: selectedJobNo, note: movNote.trim() || null,
     });
     setSavingMov(false);
-    if (error) { toast.error("บันทึกไม่ได้: " + error.message); return; }
+    if (error) { notifyError("บันทึกไม่ได้: " + error.message); return; }
     toast.success(`บันทึก${movType === "out" ? "เบิก" : "คืน"} RS-${movMat} ${movQty} cm แล้ว`);
     setMovQty(""); setMovNote("");
     const job = jobs.find((j) => j.job_no === selectedJobNo);
@@ -818,7 +819,7 @@ export default function WasteCostPage() {
 
   const deleteMovement = async (id: string) => {
     const { error } = await supabase.from("stock_movements").delete().eq("id", id);
-    if (error) { toast.error("ลบไม่ได้: " + error.message); return; }
+    if (error) { notifyError("ลบไม่ได้: " + error.message); return; }
     const job = jobs.find((j) => j.job_no === selectedJobNo);
     if (job && selectedJobNo) fetchStock(selectedJobNo, job);
     toast.success("ลบรายการแล้ว");
@@ -840,7 +841,7 @@ export default function WasteCostPage() {
   const saveAppointmentDate = async () => {
     if (!selectedJobNo || savingAppointment) return;
     if (!appointmentDateDraft) {
-      toast.error("กรุณาเลือกวันนัด");
+      notifyError("กรุณาเลือกวันนัด");
       return;
     }
 
@@ -861,7 +862,7 @@ export default function WasteCostPage() {
       .eq("job_no", selectedJobNo);
     setSavingAppointment(false);
     if (error) {
-      toast.error("แก้ไขวันนัดไม่ได้: " + floorErrorMessage(error));
+      notifyError("แก้ไขวันนัดไม่ได้: " + floorErrorMessage(error));
       return;
     }
     setJobs((previous) => previous.map((job) =>
@@ -891,7 +892,7 @@ export default function WasteCostPage() {
       .single();
     setSavingExclusion(false);
     if (error) {
-      toast.error("ซ่อนจากการวิเคราะห์ไม่ได้: " + floorErrorMessage(error));
+      notifyError("ซ่อนจากการวิเคราะห์ไม่ได้: " + floorErrorMessage(error));
       return;
     }
     const row = data as WasteAnalysisExclusion;
@@ -920,7 +921,7 @@ export default function WasteCostPage() {
       .eq("job_no", selectedJobNo);
     setSavingExclusion(false);
     if (error) {
-      toast.error("นำกลับมาวิเคราะห์ไม่ได้: " + floorErrorMessage(error));
+      notifyError("นำกลับมาวิเคราะห์ไม่ได้: " + floorErrorMessage(error));
       return;
     }
     setExclusionsByJobNo((previous) => {
@@ -1912,7 +1913,7 @@ export default function WasteCostPage() {
                                     const { error } = await supabase.from("remnant_stock")
                                       .update({ status: "reserved", reserved_for: selectedJobNo })
                                       .eq("id", r.id);
-                                    if (error) toast.error(floorErrorMessage(error));
+                                    if (error) notifyError(error);
                                     else { toast.success("จองเศษสำหรับงานนี้แล้ว — ไปหยิบได้ที่หน้า เศษวัสดุ"); fetchRemnants(); }
                                     setReservingRemnant(null);
                                   }}

@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { ipGenOrderNo, today } from "@/lib/utils";
+import { floorErrorMessage } from "@/lib/floor-error-message";
+import { notifyError } from "@/lib/notify-error";
 
 interface Props {
   onClose: () => void;
@@ -94,12 +96,12 @@ export default function CreateOrderModal({ onClose, onCreated }: Props) {
           .from("install_jobs")
           .update(payload)
           .eq("order_no", form.order_no);
-        if (err) { setError(err.message); return; }
+        if (err) { const msg = floorErrorMessage(err); setError(msg); notifyError(msg); return; }
       } else {
         const { error: err } = await supabase
           .from("install_jobs")
           .insert(payload);
-        if (err) { setError(err.message); return; }
+        if (err) { const msg = floorErrorMessage(err); setError(msg); notifyError(msg); return; }
       }
       onCreated();
     } finally {

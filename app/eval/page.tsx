@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { floorErrorMessage } from "@/lib/floor-error-message";
+import { notifyError } from "@/lib/notify-error";
 
 const SECTIONS = [
   { key: "overall", label: "ความพึงพอใจโดยรวม" },
@@ -102,7 +103,9 @@ function EvalForm() {
       .is("submitted_at", null);
     if (evalError) {
       setSubmitting(false);
-      setSubmitError(`บันทึกคะแนนไม่สำเร็จ: ${floorErrorMessage(evalError)}`);
+      const message = `บันทึกคะแนนไม่สำเร็จ: ${floorErrorMessage(evalError)}`;
+      setSubmitError(message);
+      notifyError(message);
       return;
     }
     const { error: jobError } = await supabase

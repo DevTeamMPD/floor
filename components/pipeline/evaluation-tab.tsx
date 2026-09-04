@@ -2,8 +2,8 @@
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
-import { floorActionError } from "@/lib/floor-error-message";
 import type { InstallJob } from "@/lib/types";
+import { notifyError } from "@/lib/notify-error";
 
 interface EvaluationQuestion {
   id: string;
@@ -97,7 +97,7 @@ export default function EvaluationTab({ job }: { job: InstallJob }) {
       }
       toast.success("บันทึกการประเมินแล้ว");
     } catch (e: unknown) {
-      toast.error(floorActionError("บันทึกการประเมิน", e));
+      notifyError(e, "บันทึกการประเมิน");
     } finally {
       setSaving(false);
     }

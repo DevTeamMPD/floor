@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
-import { floorErrorMessage } from "@/lib/floor-error-message";
+import { notifyError } from "@/lib/notify-error";
 
 interface Material {
   id: string;
@@ -103,7 +103,7 @@ export default function InventoryPage() {
 
   async function saveMaterial() {
     if (!form.sku.trim() || !form.name.trim()) {
-      toast.error('กรุณากรอก SKU และชื่อวัสดุ');
+      notifyError('กรุณากรอก SKU และชื่อวัสดุ');
       return;
     }
     setSaving(true);
@@ -116,7 +116,7 @@ export default function InventoryPage() {
       reorder_point: Number(form.reorder_point) || 0,
     });
     setSaving(false);
-    if (error) { toast.error(floorErrorMessage(error)); return; }
+    if (error) { notifyError(error); return; }
     toast.success('เพิ่มวัสดุเรียบร้อย');
     setModalMode(null);
     load();
@@ -125,7 +125,7 @@ export default function InventoryPage() {
   async function saveMovement(type: 'in' | 'out' | 'adjust') {
     if (!selectedMat) return;
     const qty = Number(mvForm.qty);
-    if (!qty || qty <= 0) { toast.error('กรุณาระบุจำนวน'); return; }
+    if (!qty || qty <= 0) { notifyError('กรุณาระบุจำนวน'); return; }
     setSaving(true);
 
     const { error: mvErr } = await supabase.from('stock_movements').insert({
@@ -135,7 +135,7 @@ export default function InventoryPage() {
       ref_job_no: mvForm.ref_job_no.trim() || null,
       note: mvForm.note.trim() || null,
     });
-    if (mvErr) { setSaving(false); toast.error(mvErr.message); return; }
+    if (mvErr) { setSaving(false); notifyError(mvErr); return; }
 
     const delta = type === 'in' ? qty : type === 'out' ? -qty : 0;
     const newQty = type === 'adjust' ? qty : selectedMat.qty_on_hand + delta;

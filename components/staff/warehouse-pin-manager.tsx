@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { toast } from "sonner";
+import { notifyError } from "@/lib/notify-error";
 
 export default function WarehousePinManager({ onCreated }: { onCreated?: () => void }) {
   const [fullName, setFullName] = useState("");
@@ -15,7 +16,7 @@ export default function WarehousePinManager({ onCreated }: { onCreated?: () => v
     const response = await fetch("/api/staff/warehouse-pin", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fullName, username, pin }) });
     const result = await response.json() as { error?: string; localPreview?: boolean; fullName?: string; username?: string };
     setSaving(false);
-    if (!response.ok) { toast.error(result.error || "สร้างบัญชี PIN ไม่สำเร็จ"); return; }
+    if (!response.ok) { notifyError(result.error || "สร้างบัญชี PIN ไม่สำเร็จ"); return; }
     if (result.localPreview && result.fullName && result.username) {
       setPreviewUsers((current) => [...current, { fullName: result.fullName!, username: result.username! }]);
       toast.success("ทดลองเพิ่มบัญชีแล้ว (Local Preview · ยังไม่บันทึกข้อมูลจริง)");
