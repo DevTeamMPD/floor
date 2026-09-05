@@ -26,8 +26,18 @@ function existingFunctions() {
   if (flag !== -1) {
     return new Set(readFileSync(process.argv[flag + 1], "utf8").split("\n").map((s) => s.trim()).filter(Boolean));
   }
-  const url = process.env.SUPABASE_DB_URL;
-  if (!url) return null;
+  const raw = process.env.SUPABASE_DB_URL;
+  if (!raw || !raw.trim()) return null;
+  // GitHub secret มักติดช่องว่าง/ขึ้นบรรทัดใหม่/เครื่องหมายคำพูดมาด้วย -> psql จะมองว่าเป็นชื่อ db
+  // แล้วไปต่อ unix socket ในเครื่อง runner ซึ่งไม่มี Postgres (error ชวนงง) จึงตัดทิ้งและเช็คก่อน
+  const url = raw.trim().replace(/^["']|["']$/g, "").trim();
+  if (!/^postgres(ql)?:\/\//.test(url)) {
+    console.error("SUPABASE_DB_URL ไม่ใช่ connection URI");
+    console.error(`  ค่าที่ได้ขึ้นต้นด้วย: ${JSON.stringify(url.slice(0, 12))} (ยาว ${url.length} ตัวอักษร)`);
+    console.error("  ต้องเป็น: postgresql://floor_ci_reader.<project-ref>:<password>@<host>:5432/postgres?sslmode=require");
+    console.error("  ห้ามใส่เครื่องหมายคำพูดครอบ และห้ามใส่แค่ host");
+    process.exit(1);
+  }
   const sql = "select proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public'";
   const out = execFileSync("psql", [url, "-Atc", sql], { encoding: "utf8" });
   return new Set(out.split("\n").map((s) => s.trim()).filter(Boolean));
