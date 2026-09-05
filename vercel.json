@@ -1,7 +1,17 @@
 {
   "framework": "nextjs",
   "crons": [
-    { "path": "/api/sync-evaluations", "schedule": "0 1 * * *" },
-    { "path": "/api/documents/process", "schedule": "15 18 * * *" }
+    {
+      "path": "/api/sync-evaluations",
+      "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/documents/process",
+      "schedule": "15 18 * * *"
+    },
+    {
+      "path": "/api/cron/flush-pending-chat",
+      "schedule": "*/15 * * * *"
+    }
   ]
 }
