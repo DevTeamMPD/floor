@@ -12,6 +12,18 @@ export interface BbpsWorkOrder {
   start?: string | null;
   end?: string | null;
   contact_phone?: string | null;
+  // payload รุ่นใหม่ (งานที่ไม่ใช่แค่ปูพื้น เช่น สนามเด็กเล่น/บ่อบอล) ไม่ส่ง
+  // address/productName/areaSqm ไว้ระดับบนของ job แล้ว แต่ฝังไว้ในนี้แทน
+  // ต่องาน (งานหลายวันอาจมีหลาย work order — ใช้ตัวแรกตาม seq)
+  location_address?: string | null;
+  location_map_link?: string | null;
+  task_floor?: string | null;
+  task_ball_pit?: string | null;
+  task_gym?: string | null;
+  task_workshop_set?: string | null;
+  task_other?: string | null;
+  task_details?: string | null;
+  site_photos?: string[] | null;
 }
 export interface BbpsJob {
   id: string;
@@ -46,6 +58,46 @@ export function contactPhoneFor(j: BbpsJob): string | null {
     .sort((a, b) => (a.seq ?? Number.MAX_SAFE_INTEGER) - (b.seq ?? Number.MAX_SAFE_INTEGER))
     .map((workOrder) => nonBlank(workOrder.contact_phone))
     .find((phone): phone is string => phone !== null) ?? null;
+}
+
+/** work order แรกตาม seq -- ใช้เป็น fallback เมื่อ payload ระดับบนไม่มีที่อยู่/ชื่องาน/รูป */
+function firstWorkOrder(j: BbpsJob): BbpsWorkOrder | null {
+  const sorted = [...(j.workOrders ?? [])].sort(
+    (a, b) => (a.seq ?? Number.MAX_SAFE_INTEGER) - (b.seq ?? Number.MAX_SAFE_INTEGER),
+  );
+  return sorted[0] ?? null;
+}
+
+export function addressFor(j: BbpsJob): string | null {
+  return nonBlank(j.address) ?? nonBlank(firstWorkOrder(j)?.location_address);
+}
+
+export function locationUrlFor(j: BbpsJob): string | null {
+  return nonBlank(j.locationUrl) ?? nonBlank(firstWorkOrder(j)?.location_map_link);
+}
+
+/**
+ * งานที่ไม่ใช่ปูพื้น (สนามเด็กเล่น, ยิม, ชุดเวิร์คช็อป ฯลฯ) ส่งชื่อ/รายละเอียดงานมาคนละ
+ * field กันตามประเภท (task_floor / task_ball_pit / task_gym / ...) แทนที่จะเป็น
+ * productName ตรงๆ อย่างงานปูพื้นทั่วไป -- ใช้ field แรกที่มีข้อมูลจริง
+ */
+export function productNameFor(j: BbpsJob): string | null {
+  const direct = nonBlank(j.productName);
+  if (direct) return direct;
+  const workOrder = firstWorkOrder(j);
+  if (!workOrder) return null;
+  return (
+    nonBlank(workOrder.task_floor) ??
+    nonBlank(workOrder.task_ball_pit) ??
+    nonBlank(workOrder.task_gym) ??
+    nonBlank(workOrder.task_workshop_set) ??
+    nonBlank(workOrder.task_other) ??
+    nonBlank(workOrder.task_details)
+  );
+}
+
+export function sitePhotosFor(j: BbpsJob): string[] {
+  return (firstWorkOrder(j)?.site_photos ?? []).filter((url): url is string => typeof url === "string" && url.length > 0);
 }
 
 function yearOf(s: string | null | undefined): number | null {
@@ -288,11 +340,17 @@ async function upsertTicket(supabase: SupabaseClient, j: BbpsJob, dates: string[
   const jobNo = (existing?.job_no as string | undefined) ?? fallbackJobNo;
   const firstDate = dates[0] ?? null;
   const customerPhone = contactPhoneFor(j);
+  // payload รุ่นใหม่ (งานที่ไม่ใช่ปูพื้นอย่างเดียว) ไม่ส่ง address/productName/areaSqm
+  // ไว้ระดับบนของ job -- ข้อมูลจริงฝังอยู่ใน workOrders[0] แทน (ดู *For() ด้านบน)
+  const address = addressFor(j);
+  const locationUrl = locationUrlFor(j);
+  const productName = productNameFor(j);
+  const sitePhotos = sitePhotosFor(j);
   const missing = [
     !j.quoteNumber ? "เลขอ้างอิง BBPS" : null,
     !j.customerName ? "ชื่อลูกค้า" : null,
     !customerPhone ? "เบอร์โทร" : null,
-    !j.address && !j.locationUrl ? "ที่อยู่หรือแผนที่" : null,
+    !address && !locationUrl ? "ที่อยู่หรือแผนที่" : null,
   ].filter((x): x is string => Boolean(x));
   const needsInfo = missing.length > 0;
   const shared = {
@@ -300,10 +358,11 @@ async function upsertTicket(supabase: SupabaseClient, j: BbpsJob, dates: string[
     bill_no: j.quoteNumber || null,
     customer_name: j.customerName || null,
     customer_phone: customerPhone,
-    address: j.address || null,
-    ...(j.locationUrl ? { location_url: j.locationUrl } : {}),
-    ...(j.productName ? { product_name: j.productName } : {}),
+    address: address,
+    ...(locationUrl ? { location_url: locationUrl } : {}),
+    ...(productName ? { product_name: productName } : {}),
     ...(j.areaSqm ? { survey_data: JSON.stringify({ areaSqm: String(j.areaSqm), savedAt: new Date().toISOString() }) } : {}),
+    ...(sitePhotos.length ? { site_photos: sitePhotos } : {}),
     appt_date: firstDate,
     due_date: firstDate,
     created_via: "bbps",

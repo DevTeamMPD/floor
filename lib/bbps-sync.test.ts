@@ -7,6 +7,10 @@ import {
   mergeClashFlag,
   buildClashNotice,
   contactPhoneFor,
+  addressFor,
+  locationUrlFor,
+  productNameFor,
+  sitePhotosFor,
   CLASH_FLAG_PREFIX,
   isHolidayBlock,
   planBbpsClashHandling,
@@ -264,5 +268,66 @@ describe("buildClashNotice", () => {
 
   it("id ขึ้นต้นด้วย lendi- ตามรูปแบบที่ฝั่ง BBPS ใช้ตัดซ้ำ", () => {
     expect(buildClashNotice(jobNo, one)!.externalMessageId.startsWith("lendi-")).toBe(true);
+  });
+});
+
+// payload รุ่นใหม่ (งานที่ไม่ใช่ปูพื้นอย่างเดียว เช่น สนามเด็กเล่น/บ่อบอล) ไม่ส่ง
+// address/productName/areaSqm ไว้ระดับบนของ job อีกต่อไป -- ข้อมูลจริงฝังอยู่ใน
+// workOrders[0] แทน (location_address, location_map_link, task_*, site_photos)
+// เทสชุดนี้ล็อกไว้ไม่ให้ใครแก้ mapping แล้วกลับไปอ่านแต่ field ระดับบนเหมือนเดิม
+// (บั๊กที่ทำให้งาน BBPS ที่ active อยู่ทั้งหมดไม่มีที่อยู่/ชื่อสินค้าในระบบ)
+describe("addressFor / locationUrlFor / productNameFor / sitePhotosFor", () => {
+  const nestedJob: BbpsJob = {
+    id: "job-nested",
+    workOrders: [{
+      seq: 1,
+      location_address: "Splash pool villa Cha-am",
+      location_map_link: "https://maps.app.goo.gl/xyz",
+      task_ball_pit: "Playspace 3 Platfrom สีฟ้าขาว",
+      site_photos: ["https://example.com/1.jpg", "https://example.com/2.jpg"],
+    }],
+  };
+
+  it("ไม่มี field ระดับบนเลย -> ดึงจาก workOrders[0] แทน", () => {
+    expect(addressFor(nestedJob)).toBe("Splash pool villa Cha-am");
+    expect(locationUrlFor(nestedJob)).toBe("https://maps.app.goo.gl/xyz");
+    expect(productNameFor(nestedJob)).toBe("Playspace 3 Platfrom สีฟ้าขาว");
+    expect(sitePhotosFor(nestedJob)).toEqual(["https://example.com/1.jpg", "https://example.com/2.jpg"]);
+  });
+
+  it("มี field ระดับบน -> field ระดับบนชนะเสมอ ไม่ทับด้วยของ workOrders", () => {
+    const flatJob: BbpsJob = {
+      ...nestedJob,
+      address: "ที่อยู่จาก field บนสุด",
+      locationUrl: "https://maps.app.goo.gl/flat",
+      productName: "ชื่อสินค้าจาก field บนสุด",
+    };
+    expect(addressFor(flatJob)).toBe("ที่อยู่จาก field บนสุด");
+    expect(locationUrlFor(flatJob)).toBe("https://maps.app.goo.gl/flat");
+    expect(productNameFor(flatJob)).toBe("ชื่อสินค้าจาก field บนสุด");
+  });
+
+  it("ไม่มีทั้งสองระดับ -> null / ว่างเปล่า ไม่ throw", () => {
+    const emptyJob: BbpsJob = { id: "job-empty" };
+    expect(addressFor(emptyJob)).toBeNull();
+    expect(locationUrlFor(emptyJob)).toBeNull();
+    expect(productNameFor(emptyJob)).toBeNull();
+    expect(sitePhotosFor(emptyJob)).toEqual([]);
+  });
+
+  it("งานปูพื้นทั่วไปยังอ่าน task_floor ได้เหมือน task อื่นๆ", () => {
+    const floorJob: BbpsJob = { id: "job-floor", workOrders: [{ seq: 1, task_floor: "ปูกระเบื้องห้องนั่งเล่น" }] };
+    expect(productNameFor(floorJob)).toBe("ปูกระเบื้องห้องนั่งเล่น");
+  });
+
+  it("หลาย work order -> ใช้ตัวแรกตาม seq เสมอ", () => {
+    const multi: BbpsJob = {
+      id: "job-multi",
+      workOrders: [
+        { seq: 2, location_address: "งานวันที่สอง" },
+        { seq: 1, location_address: "งานวันแรก" },
+      ],
+    };
+    expect(addressFor(multi)).toBe("งานวันแรก");
   });
 });

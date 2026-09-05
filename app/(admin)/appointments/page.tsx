@@ -373,15 +373,24 @@ export default function AppointmentsPage() {
       : await update.eq('id', appt.id);
     if (error) { notifyError(error); return; }
     if (appt.job_id && newStatus === 'confirmed') {
-      const { error: jobError } = await supabase.from('install_jobs').update({
-        status: 'ยืนยันคิวแล้ว', waiting_on: 'ไม่ได้ค้าง', waiting_since: null,
-        flag_note: null, updated_at: new Date().toISOString(),
-      }).eq('job_no', appt.job_id);
-      if (jobError) { notifyError(`อัปเดตสถานะคิวแล้ว แต่ปรับข้อมูลใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); void loadData(); return; }
-      await supabase.from('job_activity').insert({
-        job_no: appt.job_id, actor: 'หัวหน้าช่าง', action: 'confirm', field: 'status',
-        old_value: appt.job?.status ?? null, new_value: 'ยืนยันคิวแล้ว',
-      });
+      // ใบสั่งงาน (floor_work_orders) ถ้าถูกสร้างแล้วคือเจ้าของสถานะ/flag_note ตัวจริงของงานนี้
+      // (head_review / returned_sales / ...) ปุ่มนี้เคยเขียนทับ status + ล้าง flag_note ตรงๆ
+      // โดยไม่เช็คก่อน ทำให้งานที่เพิ่งถูกส่งกลับ BBPS/ฝ่ายขายเพื่อขอข้อมูลเพิ่มหลุดสถานะไปเงียบๆ
+      // ทั้งที่ floor_work_orders ยังค้างอยู่ที่ returned_sales เหมือนเดิม จึงเช็คก่อนว่ามีใบสั่งงานหรือยัง
+      const { data: existingWorkOrder, error: workOrderCheckError } = await supabase
+        .from('floor_work_orders').select('id').eq('job_no', appt.job_id).limit(1).maybeSingle();
+      if (workOrderCheckError) { notifyError(`อัปเดตสถานะคิวแล้ว แต่ตรวจใบสั่งงานไม่สำเร็จ: ${floorErrorMessage(workOrderCheckError)}`); void loadData(); return; }
+      if (!existingWorkOrder) {
+        const { error: jobError } = await supabase.from('install_jobs').update({
+          status: 'ยืนยันคิวแล้ว', waiting_on: 'ไม่ได้ค้าง', waiting_since: null,
+          flag_note: null, updated_at: new Date().toISOString(),
+        }).eq('job_no', appt.job_id);
+        if (jobError) { notifyError(`อัปเดตสถานะคิวแล้ว แต่ปรับข้อมูลใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); void loadData(); return; }
+        await supabase.from('job_activity').insert({
+          job_no: appt.job_id, actor: 'หัวหน้าช่าง', action: 'confirm', field: 'status',
+          old_value: appt.job?.status ?? null, new_value: 'ยืนยันคิวแล้ว',
+        });
+      }
     }
     toast.success(`อัปเดตสถานะเป็น ${STATUS_CONFIG[newStatus]?.label ?? newStatus}`);
     loadData();

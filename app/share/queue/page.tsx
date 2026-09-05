@@ -976,19 +976,29 @@ export default function ShareQueuePage() {
       : await query.eq("id", a.id);
     if (error) { notifyError(error, "อัปเดตสถานะคิว"); setUpdatingStatus(false); return; }
     if (a.job_id) {
-      const nextJobStatus = status === "confirmed" ? "ยืนยันคิวแล้ว" : "รอหัวหน้าช่างยืนยัน";
-      const { error: jobError } = await supabase.from("install_jobs").update({
-        status: nextJobStatus,
-        waiting_on: status === "confirmed" ? "ไม่ได้ค้าง" : "หัวหน้าช่าง",
-        waiting_since: status === "confirmed" ? null : new Date().toISOString(),
-        flag_note: null,
-        updated_at: new Date().toISOString(),
-      }).eq("job_no", a.job_id);
-      if (jobError) { notifyError(`อัปเดตสถานะคิวแล้ว แต่ปรับข้อมูลใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); setUpdatingStatus(false); await load(); return; }
-      await supabase.from("job_activity").insert({
-        job_no: a.job_id, actor: "หัวหน้าช่าง", action: status === "confirmed" ? "confirm" : "reopen",
-        field: "status", old_value: detailJob?.status ?? null, new_value: nextJobStatus,
-      });
+      // เมื่อใบสั่งงาน (floor_work_orders) ถูกสร้างแล้ว สถานะและ flag_note ของ install_jobs
+      // เป็นของ pipeline หัวหน้าช่าง (head_review / returned_sales / ...) ไม่ใช่ของปุ่มนี้อีกต่อไป
+      // ปุ่มนี้เคยเขียนทับ status="ยืนยันคิวแล้ว" + flag_note=null ตรงๆ โดยไม่เช็คก่อน ทำให้งานที่
+      // เพิ่งถูกส่งกลับ BBPS/ฝ่ายขายเพื่อขอข้อมูลเพิ่ม (returned_sales) หลุดสถานะ "รอแก้ไข" ไปเงียบๆ
+      // ทั้งที่ floor_work_orders ยังค้างอยู่ที่ returned_sales เหมือนเดิม
+      const { data: existingWorkOrder, error: workOrderCheckError } = await supabase
+        .from("floor_work_orders").select("id").eq("job_no", a.job_id).limit(1).maybeSingle();
+      if (workOrderCheckError) { notifyError(`อัปเดตสถานะคิวแล้ว แต่ตรวจใบสั่งงานไม่สำเร็จ: ${floorErrorMessage(workOrderCheckError)}`); setUpdatingStatus(false); await load(); return; }
+      if (!existingWorkOrder) {
+        const nextJobStatus = status === "confirmed" ? "ยืนยันคิวแล้ว" : "รอหัวหน้าช่างยืนยัน";
+        const { error: jobError } = await supabase.from("install_jobs").update({
+          status: nextJobStatus,
+          waiting_on: status === "confirmed" ? "ไม่ได้ค้าง" : "หัวหน้าช่าง",
+          waiting_since: status === "confirmed" ? null : new Date().toISOString(),
+          flag_note: null,
+          updated_at: new Date().toISOString(),
+        }).eq("job_no", a.job_id);
+        if (jobError) { notifyError(`อัปเดตสถานะคิวแล้ว แต่ปรับข้อมูลใบงานไม่สำเร็จ: ${floorErrorMessage(jobError)}`); setUpdatingStatus(false); await load(); return; }
+        await supabase.from("job_activity").insert({
+          job_no: a.job_id, actor: "หัวหน้าช่าง", action: status === "confirmed" ? "confirm" : "reopen",
+          field: "status", old_value: detailJob?.status ?? null, new_value: nextJobStatus,
+        });
+      }
     }
     setDetail((d) => (d && d.id === a.id ? { ...d, status } : d));
     await load();
