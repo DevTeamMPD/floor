@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:rpc": "node --experimental-strip-types scripts/check-rpc-contract.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.1",
